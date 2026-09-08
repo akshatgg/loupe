@@ -2601,21 +2601,25 @@ function createHudWindow() {
 
 let startedAt = 0;
 
-ipcMain.handle('record:stop', async () => {
+// Both the HUD button and the global shortcut go through this one function.
+// ipcMain.emit() does NOT trigger an ipcMain.handle() handler, so the
+// shortcut must call the function directly rather than re-emitting.
+async function stopRecording() {
+  if (!hudWindow) return null;
   clearInterval(hudTimer);
   const result = await recorder.stop();
-  hudWindow?.close();
+  hudWindow.close();
   hudWindow = null;
   pickerWindow?.show();
   openEditorWindow(result.dir);
   return result.dir;
-});
+}
+
+ipcMain.handle('record:stop', stopRecording);
 
 app.whenReady().then(() => {
   const { globalShortcut } = require('electron');
-  globalShortcut.register('Control+Shift+S', () => {
-    if (hudWindow) ipcMain.emit('record:stop');
-  });
+  globalShortcut.register('Control+Shift+S', () => { stopRecording(); });
 });
 ```
 
@@ -3024,7 +3028,7 @@ struct RenderTool {
             // Crop rect in top-left pixel space.
             let vw = project.source.width / cam.zoom * scale
             let vh = project.source.height / cam.zoom * scale
-            let x0 = (cam.cx / cam.zoom == 0 ? 0 : (cam.cx * scale - vw / 2))
+            let x0 = cam.cx * scale - vw / 2
             let y0Top = cam.cy * scale - vh / 2
 
             // Core Image is bottom-left origin, so flip once here.
