@@ -6,12 +6,21 @@ function smoothstep(t) {
   return t * t * (3 - 2 * t);
 }
 
+// Validate that a segment rate is finite and strictly positive.
+// Used by both buildMap and rateAt to ensure consistent behavior.
+function validateRate(rate) {
+  if (!Number.isFinite(rate) || rate <= 0) {
+    throw new Error(`Segment rate must be finite and > 0, got ${rate}`);
+  }
+}
+
 // Playback rate at a source time. Ramps live INSIDE the segment, so
 // non-overlapping segments never influence each other.
 function rateAt(tSrc, segments, rampMs = 200) {
   const rampSeconds = rampMs / 1000;
   for (const seg of segments) {
     if (tSrc < seg.srcStart || tSrc > seg.srcEnd) continue;
+    validateRate(seg.rate);
     const ramp = Math.min(rampSeconds, (seg.srcEnd - seg.srcStart) / 2);
     let k = 1;
     if (ramp > 0) {
@@ -28,9 +37,7 @@ function rateAt(tSrc, segments, rampMs = 200) {
 function buildMap(segments, duration, rampMs = 200) {
   // Validate that all segment rates are finite and strictly positive
   for (const seg of segments) {
-    if (!Number.isFinite(seg.rate) || seg.rate <= 0) {
-      throw new Error(`Segment rate must be finite and > 0, got ${seg.rate}`);
-    }
+    validateRate(seg.rate);
   }
   const count = Math.ceil(duration / STEP_SECONDS) + 1;
   const table = new Float64Array(count);
