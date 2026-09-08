@@ -1,0 +1,6 @@
+bin/
+node_modules/
+dist/
+.DS_Store
+*.mov
+*.m4a
