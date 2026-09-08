@@ -26,6 +26,12 @@ function rateAt(tSrc, segments, rampMs = 200) {
 }
 
 function buildMap(segments, duration, rampMs = 200) {
+  // Validate that all segment rates are finite and strictly positive
+  for (const seg of segments) {
+    if (!Number.isFinite(seg.rate) || seg.rate <= 0) {
+      throw new Error(`Segment rate must be finite and > 0, got ${seg.rate}`);
+    }
+  }
   const count = Math.ceil(duration / STEP_SECONDS) + 1;
   const table = new Float64Array(count);
   let acc = 0;
