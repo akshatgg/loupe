@@ -60,3 +60,43 @@ test('emits a keyframe when clamped but the cursor moved', () => {
   applyScroll(s, { t: 2, dy: -10, x: 400, y: 400 });
   assert.strictEqual(s.keyframes.length, 1);
 });
+
+test('cumulative sub-epsilon cursor drift eventually emits a keyframe', () => {
+  const s = createZoomState();
+  // Seed the baseline.
+  applyScroll(s, { t: 0, dy: -10, x: 0, y: 0 });
+  // Each step moves 0.9px, below CURSOR_EPSILON, but accumulates against the
+  // fixed baseline rather than the previous raw sample.
+  for (let i = 1; i <= 200; i++) {
+    applyScroll(s, { t: i, dy: -10, x: i * 0.9, y: 0 });
+  }
+  assert.ok(s.keyframes.length > 0, 'drift should eventually produce a keyframe');
+});
+
+test('a non-emitting call does not move the cursor baseline', () => {
+  const s = createZoomState();
+  applyScroll(s, { t: 0, dy: -10, x: 0, y: 0 });
+  // Below epsilon, does not emit, must not move the baseline.
+  applyScroll(s, { t: 1, dy: -10, x: 0.5, y: 0 });
+  assert.strictEqual(s.keyframes.length, 0);
+  // Another small step; cumulative from the ORIGINAL baseline (0) is now
+  // 0.9, still below epsilon, so still no emit.
+  applyScroll(s, { t: 2, dy: -10, x: 0.9, y: 0 });
+  assert.strictEqual(s.keyframes.length, 0);
+  // Crossing epsilon from the original baseline emits.
+  applyScroll(s, { t: 3, dy: -10, x: 1.1, y: 0 });
+  assert.strictEqual(s.keyframes.length, 1);
+});
+
+test('a non-finite dy is ignored and leaves target usable', () => {
+  const s = createZoomState();
+  const before = s.target;
+  const result = applyScroll(s, { t: 1, dy: NaN, x: 100, y: 100 });
+  assert.strictEqual(result, false);
+  assert.strictEqual(s.target, before);
+  assert.strictEqual(s.keyframes.length, 0);
+
+  // A normal event afterwards must still work.
+  applyScroll(s, { t: 2, dy: 10, x: 100, y: 100 });
+  assert.ok(s.target > before);
+});
