@@ -57,3 +57,38 @@ test('ramps are clamped so they never exceed half the segment', () => {
   near(rateAt(1, segs, 200), 1);
   near(rateAt(1.1, segs, 200), 1);
 });
+
+test('zero-duration map returns 0 for all conversions', () => {
+  const map = buildMap([], 0);
+  near(toOutput(map, 0), 0);
+  near(toSource(map, 0), 0);
+  near(map.outputDuration, 0);
+});
+
+test('buildMap throws on segment with zero rate', () => {
+  assert.throws(
+    () => buildMap([{ srcStart: 0, srcEnd: 1, rate: 0 }], 10),
+    /rate must be.*> 0/
+  );
+});
+
+test('buildMap throws on segment with negative rate', () => {
+  assert.throws(
+    () => buildMap([{ srcStart: 0, srcEnd: 1, rate: -1 }], 10),
+    /rate must be.*> 0/
+  );
+});
+
+test('buildMap throws on segment with infinite rate', () => {
+  assert.throws(
+    () => buildMap([{ srcStart: 0, srcEnd: 1, rate: Infinity }], 10),
+    /rate must be.*finite/
+  );
+});
+
+test('buildMap throws on segment with NaN rate', () => {
+  assert.throws(
+    () => buildMap([{ srcStart: 0, srcEnd: 1, rate: NaN }], 10),
+    /rate must be.*finite/
+  );
+});
