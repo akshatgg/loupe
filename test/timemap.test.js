@@ -92,3 +92,31 @@ test('buildMap throws on segment with NaN rate', () => {
     /rate must be.*finite/
   );
 });
+
+test('rateAt throws on segment with zero rate', () => {
+  assert.throws(
+    () => rateAt(4, [{ srcStart: 2, srcEnd: 6, rate: 0 }], 200),
+    /rate must be.*> 0/
+  );
+});
+
+test('rateAt throws on segment with negative rate', () => {
+  assert.throws(
+    () => rateAt(4, [{ srcStart: 2, srcEnd: 6, rate: -1 }], 200),
+    /rate must be.*> 0/
+  );
+});
+
+test('rateAt throws on segment with infinite rate', () => {
+  assert.throws(
+    () => rateAt(4, [{ srcStart: 2, srcEnd: 6, rate: Infinity }], 200),
+    /rate must be.*finite/
+  );
+});
+
+test('rateAt throws on segment with NaN rate', () => {
+  assert.throws(
+    () => rateAt(4, [{ srcStart: 2, srcEnd: 6, rate: NaN }], 200),
+    /rate must be.*finite/
+  );
+});
