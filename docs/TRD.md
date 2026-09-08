@@ -414,3 +414,88 @@ Build: `npm run build:native` compiles all four helpers with `swiftc -O`, matchi
 | Dropped frames in the recorded app | zero visible |
 | Export, 1080p60 | ≥ 2× realtime on Apple Silicon |
 | Idle memory | < 200MB |
+
+---
+
+## 13. Share links (Phase 4)
+
+Implements PRD §6.9. Design constraint: temporary sharing, no accounts, no database.
+
+### 13.1 Why there is no database
+
+Expiry is derived from the asset's own `created_at` and a TTL tag written at upload. A scheduled job deletes by age. Nothing else needs persisting, so nothing else is persisted.
+
+A DB only becomes necessary for view counts, a cross-device list of active links, or team ownership. All three are out of scope. **Firebase is not used in this design** — it would be a dependency carrying no data.
+
+Local state (`public_id`, expiry, revoke token) lives in `project.json`, which already exists.
+
+### 13.2 The credential problem
+
+> **Security requirement, stated without compression because getting it wrong is expensive.**
+>
+> The Cloudinary API secret must never be shipped inside the Electron application. An `.asar` archive is not encrypted and unpacks with a single command, so any secret inside it should be treated as public the moment the app is distributed. A leaked secret allows arbitrary uploads and deletions on the operator's account, billed to the operator, with the operator legally responsible for whatever gets stored there.
+>
+> All uploads are therefore signed by a server the operator controls. The application never holds a long-lived credential.
+
+### 13.3 Architecture
+
+```
+Electron app                Cloudflare Worker              Cloudinary
+     │                      (holds API secret)
+     │  POST /sign  {bytes, ttl, deviceId}
+     ├────────────────────────────►│
+     │                             │ rate-limit check (KV)
+     │  {signature, timestamp,     │
+     │   public_id, apiKey}        │
+     │◄────────────────────────────┤
+     │
+     │  POST upload (signed, direct, multipart)
+     ├──────────────────────────────────────────────►│
+     │                                               │
+     │  {secure_url, public_id}                      │
+     │◄──────────────────────────────────────────────┤
+     │
+     │  stored in project.json ── share URL to user
+                                   │
+                                   │ Cron Trigger, hourly
+                                   ├──────────────────────►│
+                                     Admin API: delete assets
+                                     tagged loupe-share
+                                     older than their TTL
+```
+
+**Why a Cloudflare Worker:** the signing endpoint and the cron job are the same tiny service, both free at this volume, and Cron Triggers are built in. It is the smallest thing that solves both halves.
+
+### 13.4 Upload constraints
+
+| Constraint | Value | Consequence |
+|---|---|---|
+| Cloudinary free-tier video file cap | ~100MB (**verify against current plan before building**) | 1080p60 H.264, 2 min ≈ 30–60MB fits; 4K does not |
+| Share resolution ceiling | 1080p | PRD FR-38; 4K exports remain local-only |
+| Free-tier credits | ~25/month, 1 credit ≈ 1GB storage or bandwidth | Per-device monthly cap enforced in Worker (FR-46) |
+| Video transformations | Billed separately | **Not used.** The app already exports a finished MP4; Cloudinary is dumb storage here |
+
+Every number in this table is a vendor figure that moves. Re-check at implementation time rather than trusting this document.
+
+### 13.5 Worker endpoints
+
+| Route | Behaviour |
+|---|---|
+| `POST /sign` | Validates `bytes` against the size cap, checks the device's rate limit and monthly quota in KV, returns Cloudinary signed upload params with `public_id = loupe/<nanoid>` and tags `loupe-share`, `ttl-<hours>` |
+| `POST /revoke` | Verifies the device token, calls Admin API destroy (PRD FR-44) |
+| `scheduled()` | Hourly. Lists by tag, deletes assets whose age exceeds their `ttl-*` tag (PRD FR-41) |
+
+Rate limiting uses Workers KV keyed by an app-generated device id. The device id is an opaque random value stored locally — not a user identifier, not the machine serial, and not tied to any personal data.
+
+### 13.6 Failure handling
+
+- **Upload fails or is cancelled** — local export untouched (PRD FR-45). Retry offered. No partial asset is left behind; unfinished uploads are cleaned by the same cron sweep.
+- **Cron misses a run** — assets simply live slightly longer. The next run catches them. Deletion is idempotent and driven by age, not by a queue, so a missed run can never orphan an asset permanently.
+- **Worker unreachable** — Share is disabled with an explanatory message. Recording, editing, and export are entirely unaffected; the share path is never on the critical path of the product.
+
+### 13.7 Testing
+
+- `TimeMap`-style unit tests do not apply here; the logic worth testing is the Worker's.
+- **Worker unit tests:** size cap rejection, rate-limit exhaustion, quota exhaustion, signature correctness against a known fixture.
+- **Cron test:** given fixture assets with mixed ages and TTL tags, assert exactly the expired set is selected for deletion — and, critically, that a fresh asset is never selected.
+- **Integration:** upload a small fixture, assert the asset exists, force the scheduled handler, assert it is gone from the Admin API.

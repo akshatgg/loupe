@@ -56,7 +56,7 @@ Deliberately out of scope, so the first version ships:
 - **Webcam overlay** — no face bubble.
 - **Recording multiple displays at once.**
 - **GIF, WebM, or ProRes export** — MP4/H.264 and HEVC only.
-- **Cloud upload, sharing links, or accounts.**
+- **Accounts, teams, or a persistent cloud video library.** Ephemeral share links are Phase 4 (§6.9). Permanent hosting is not planned — Loupe is a local tool that can throw a temporary link, not a video host.
 - **Windows or Linux.**
 - **Native per-tab capture of a browser** — see §6.2 for how this is handled instead.
 - **Transitions, titles, text overlays, background wallpapers, or rounded-corner framing.**
@@ -203,6 +203,36 @@ Deliberately out of scope, so the first version ships:
 
 ---
 
+### 6.9 Share links (Phase 4)
+
+A recording can be thrown to a temporary URL for review — a bug report to a colleague, a demo to a teammate — without accounts, and without Loupe becoming a video host. The link dies on a timer.
+
+**FR-37 — Sharing is explicit, per video, every time.** No automatic upload, no default-on setting, no background sync.
+
+*Rationale, and the reason this is a requirement rather than a preference:* screen recordings routinely contain API keys, customer records, private messages, and internal dashboards. A recorder that uploads by default is a data-leak generator. The user presses Share, or nothing leaves the machine.
+
+**FR-38 — Upload happens after export, on the exported file.** Never the raw capture. Share uploads are capped at 1080p; 4K stays local-only (see TRD §13.4 for the size ceiling that drives this).
+
+**FR-39 — The local file is never deleted, moved, or altered by sharing.** The cloud copy is a convenience, never the storage. Nothing the expiry timer does can cost the user footage.
+
+**FR-40 — Expiry is chosen at share time:** 1 hour, 12 hours, or 24 hours. Default 24 hours.
+
+**FR-41 — Expired assets are actually deleted**, by a scheduled job, not merely hidden behind a dead link.
+
+*Acceptance:* after TTL elapses, the underlying asset is gone from storage — verified via the storage provider's API, not by the URL 404-ing.
+
+**FR-42 — The recipient is told the link is temporary.** The share page shows the remaining time and offers a download button. Wording makes clear the copy is theirs to keep if they want it.
+
+**FR-43 — The uploader sees the countdown too**, in a list of their active links, with the reassurance that their local copy is unaffected.
+
+**FR-44 — Links can be revoked early.** A Delete now control removes the asset immediately, before its TTL.
+
+**FR-45 — Upload is cancellable and failure is harmless.** Progress is shown, cancel is available, and a failed or cancelled upload leaves the local export untouched.
+
+**FR-46 — Quota protection.** Per-device rate limits and monthly caps, enforced server-side.
+
+*Rationale:* the signing endpoint is reachable by anyone who unpacks the app. Without server-side caps, one abuser exhausts the storage quota, and content uploaded to the operator's account is the operator's legal problem.
+
 ## 7. Delivery phases
 
 Each phase is independently usable. Later phases add tracks to the same timeline rather than reworking earlier ones.
@@ -221,6 +251,13 @@ FR-18 to FR-24, plus the speed track on the timeline.
 FR-25 to FR-30, plus the voiceover track and mixer.
 
 **Ships:** the record-silent-narrate-later workflow end to end.
+
+### Phase 4 — Share links
+FR-37 to FR-46, plus the signing/cron backend (TRD §13).
+
+**Ships:** press Share, get a URL that works for a day and then deletes itself. No accounts, no DB, no permanent hosting.
+
+*Prerequisite:* Phase 1, since there is nothing to share until export exists.
 
 ---
 
@@ -247,6 +284,9 @@ FR-25 to FR-30, plus the voiceover track and mixer.
 | Permission friction on first launch | User abandons before the first recording | Explain each permission in plain language at the moment it is needed, never as an upfront wall |
 | Users expect to pick a Chrome tab directly | Confusion at the picker | Inline hint on Chrome windows (FR-7) |
 | Scope creep from the editor | Phase 1 never ships | Phases are hard boundaries; non-goals in §4 are not revisited during Phase 1 |
+| A user shares a recording containing secrets | Real-world data leak | Sharing is opt-in per video (FR-37); the share dialog states the video will be readable by anyone holding the link |
+| Signing endpoint abused to host arbitrary content | Operator's quota drained, operator legally owns the content | Server-side size caps, per-device rate limits, short TTL (FR-46, TRD §13.5) |
+| Storage free-tier exhausted by one popular link | Sharing breaks for everyone | Monthly per-device bandwidth cap; 1080p ceiling (FR-38) |
 
 ---
 
