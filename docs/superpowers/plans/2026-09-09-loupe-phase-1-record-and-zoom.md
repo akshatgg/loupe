@@ -398,7 +398,7 @@ git commit -m "feat: add source-to-output time mapping with speed ramps"
 - Consumes: nothing
 - Produces:
   - `ZOOM_MIN = 1.0`, `ZOOM_MAX = 4.0`, `SENSITIVITY = 0.015`
-  - `createZoomState() → { target: number, keyframes: Array, lastCursor: {x,y} }`
+  - `createZoomState() → { target: number, keyframes: Array, lastCursor: {x,y} | null }`
   - `applyScroll(state, { t, dy, x, y }) → boolean` — mutates state, returns whether a keyframe was appended
   - Keyframe shape: `{ t, zoom, cx, cy }` where `t` is **source time in seconds** and `cx,cy` is the cursor in screen pixels
 
@@ -499,18 +499,29 @@ function clamp(v, lo, hi) {
 }
 
 function createZoomState() {
-  return { target: ZOOM_MIN, keyframes: [], lastCursor: { x: NaN, y: NaN } };
+  return { target: ZOOM_MIN, keyframes: [], lastCursor: null };
 }
 
 // Positive dy means scroll up, which zooms in. Exponential so one notch feels
 // like the same amount of zoom at 1.2x as it does at 3.5x.
 function applyScroll(state, { t, dy, x, y }) {
+  // Events arrive from the OS via a Swift event tap. One non-finite dy would
+  // set target to NaN, and NaN * exp(...) stays NaN, so zoom would be dead
+  // for the rest of the recording with no way to recover.
+  if (!Number.isFinite(dy)) return false;
+
   const next = clamp(state.target * Math.exp(dy * SENSITIVITY), ZOOM_MIN, ZOOM_MAX);
   const zoomChanged = next !== state.target;
+
+  // lastCursor is the position last COMMITTED to, not the one last seen.
+  // Comparing against the previous raw sample would let sub-epsilon movement
+  // accumulate without limit: 200 events of 0.9px each move the cursor 180px
+  // across the screen and emit nothing.
+  if (state.lastCursor === null) state.lastCursor = { x, y };
+
   const cursorMoved =
     Math.abs(x - state.lastCursor.x) >= CURSOR_EPSILON ||
-    Math.abs(y - state.lastCursor.y) >= CURSOR_EPSILON ||
-    Number.isNaN(state.lastCursor.x);
+    Math.abs(y - state.lastCursor.y) >= CURSOR_EPSILON;
 
   state.target = next;
 
