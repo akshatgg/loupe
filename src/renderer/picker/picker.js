@@ -65,6 +65,7 @@ function renderTabs() {
       renderTabs();
       renderList();
       renderPreview();
+      renderHint();
       refreshPermissions();
     };
     nav.appendChild(b);
@@ -111,6 +112,16 @@ function renderList() {
     };
     list.appendChild(li);
   }
+}
+
+// Only windows on the current desktop are listed. SCShareableContent is asked
+// for on-screen windows only, so anything minimised or sitting on another Space
+// is absent -- and silently absent looks like a bug rather than a Spaces rule.
+function renderHint() {
+  const hint = document.getElementById('hint');
+  hint.textContent = activeTab === 'window'
+    ? 'Windows on other desktops, or minimised, are not listed. Bring one to this desktop, then Refresh.'
+    : '';
 }
 
 function renderPreview() {
@@ -170,8 +181,25 @@ async function load() {
     list.appendChild(li);
   }
   renderPreview();
+  renderHint();
   await refreshPermissions();
 }
+
+const refreshButton = document.getElementById('refresh');
+refreshButton.onclick = async () => {
+  refreshButton.disabled = true;
+  refreshButton.textContent = 'Refreshing…';
+  // Keep the current selection across a refresh if that source still exists,
+  // so re-scanning to find one window does not discard the one already chosen.
+  const previousId = selected?.id;
+  await load();
+  selected = allSources.find((s) => s.id === previousId) ?? null;
+  renderList();
+  renderPreview();
+  await refreshPermissions();
+  refreshButton.textContent = 'Refresh';
+  refreshButton.disabled = false;
+};
 
 const recordButton = document.getElementById('record');
 
