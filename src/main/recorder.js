@@ -136,6 +136,17 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
   }
 
   async function start(opts) {
+    // A second start() while a recording is already in progress must not
+    // silently proceed: it would null out captureChild/inputChild below
+    // without ever stopping the still-running processes from the first
+    // session, orphaning a capture helper that still holds raw.mov open (see
+    // finding 3 in the phase-1 review). The caller (main.js) also guards
+    // against this before the HUD window is even created, but that guard
+    // lives outside recorder.js's pure logic, so this one exists in case
+    // recorder.start() is ever reached by some other path.
+    if (recording) {
+      throw new Error('A recording is already in progress.');
+    }
     generation++;
     const gen = generation;
     stopped = false;
@@ -177,7 +188,22 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
       inputChild = spawnHelper(path.join(binDir, 'inputtap'), [], {
         onMessage: (msg) => { if (gen === generation) onInput(msg); },
         onMalformed: (l) => console.error('inputtap malformed:', l),
-        onExit: () => {},
+        // A non-zero exit here (e.g. Accessibility revoked mid-recording,
+        // which sends InputTap.swift through fail()/exit(1)) used to be
+        // completely silent: zoom, clicks and the cursor track all stop and
+        // nothing in the HUD or the project ever recorded that they did.
+        // Route it through the same onInputError() path a reported
+        // {"type":"error"} line already takes -- `!error` skips this when
+        // that more specific message already arrived (fail() always emits
+        // one before exiting), so a bare exit code never clobbers it. A
+        // clean shutdown (SIGTERM from stop()/onCaptureError's cleanup)
+        // reports code === null here, not 0, so it never reaches this
+        // branch.
+        onExit: (code) => {
+          if (gen === generation && typeof code === 'number' && code !== 0 && !error) {
+            onInputError({ message: `inputtap exited unexpectedly (code ${code})` });
+          }
+        },
         onError: (err) => { if (gen === generation) onInputError(err); }
       });
     }

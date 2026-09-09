@@ -16,18 +16,32 @@ const BIN_DIR = app.isPackaged
   : path.join(__dirname, '..', '..', 'bin');
 const permissions = createPermissions({ systemPreferences, shell });
 
-// Surface a helper spawn failure to the user instead of leaving them staring
-// at a picker window that looks like it is recording but never will be.
+// Surface a helper failure to the user -- but only capture's failure means
+// the recording itself is gone. Losing inputtap (the zoom/click/cursor
+// gesture hook) is a degradation, not a fatal error: capture keeps writing
+// raw.mov, so tearing down the HUD and reopening the picker here would
+// actually cause the data loss the dialog falsely claims already happened --
+// stopRecording() bails out once hudWindow is null, so every later Stop
+// press or app quit would become a no-op and the recording would run forever
+// with no way to finalize it. recorder.js already keeps `recording` true and
+// records the error in state() for exactly this case (see recorder.test.js);
+// the HUD's 200ms poll already surfaces it via hud.js's `error`/`warn`
+// spans, so nothing further is needed here.
 function onRecorderError(err) {
+  if (err.source === 'inputtap') return;
+
+  // A dead capture process means nothing is being written to raw.mov any
+  // more -- this really is the end of the recording. Route it through the
+  // exact same finalize-and-reopen-the-picker path a normal Stop press
+  // takes, so whatever was captured up to this point is still saved to
+  // project.json/cursor.bin rather than discarded.
   dialog.showErrorBox(
     'Loupe',
-    `Recording stopped unexpectedly (${err.source}): ${err.message}`
+    `Recording stopped: ${err.message}`
   );
-  // A helper failure ends the recording just like a normal stop, so the HUD
-  // poll timer must be torn down here too -- otherwise it keeps firing
-  // against a window nobody will ever close.
-  teardownHud();
-  pickerWindow?.show();
+  stopRecording().catch((e) => {
+    console.error('Loupe: failed to finalize the recording after a capture error:', e);
+  });
 }
 
 const recorder = createRecorder({
@@ -144,6 +158,11 @@ ipcMain.handle('sources:list', () =>
 ipcMain.handle('permissions:status', () => ({
   screenRecording: permissions.screenRecording(),
   accessibility: permissions.accessibility(),
+  // permissions.js already exposed microphone() for exactly this; it was
+  // just never wired into the one place the picker reads permission state
+  // from, so its mic checkbox had no feedback at all about whether the OS
+  // would actually grant it.
+  microphone: permissions.microphone(),
   canRecord: permissions.canRecord(),
   canZoom: permissions.canZoom()
 }));
@@ -195,32 +214,74 @@ function validateStartOptions(opts) {
   };
 }
 
+// Guards the async gap between a record:start call being accepted and
+// hudWindow actually existing. The picker renderer is hidden, not
+// destroyed, while a recording is in progress (see pickerWindow?.hide()
+// below), so it is still live and can invoke this channel again -- and
+// `await permissions.requestMicrophone()` below means that gap is real, not
+// just a single microtask: a second call could reach here while the first
+// is still sitting at the OS mic-permission prompt, well before hudWindow is
+// assigned. Once a session is actually running, hudWindow itself is the
+// guard; `starting` only needs to cover the window before it exists.
+let starting = false;
+
 ipcMain.handle('record:start', async (_e, rawOpts) => {
-  const { source, width, height, x, y, title, mic } = validateStartOptions(rawOpts);
-  if (!permissions.canRecord()) throw new Error('Screen Recording permission is required');
-  if (mic) await permissions.requestMicrophone();
-
-  const dir = path.join(os.homedir(), 'Movies', 'Loupe', String(Date.now()));
-  fs.mkdirSync(dir, { recursive: true });
-
-  startedAt = Date.now();
-  const hud = createHudWindow();
-  try {
-    await recorder.start({
-      source, width, height, x, y, title, mic, dir,
-      // getMediaSourceId() returns "window:<CGWindowID>:0" on macOS; the
-      // middle segment is the same windowID `bin/sources` reports as
-      // "window:<n>" and that SCContentFilter(excludingWindows:) matches
-      // against -- verified empirically, see task-14-report.md.
-      hudWindowId: hud.getMediaSourceId().split(':')[1],
-      zoomEnabled: permissions.canZoom()
-    });
-  } catch (err) {
-    teardownHud();
-    throw err;
+  // Without this, a second invocation would call createHudWindow() again,
+  // which assigns hudTimer = setInterval(...) over the still-live handle
+  // from the first session -- leaking that interval forever, since nothing
+  // will ever clear it again -- and recorder.start() would null out the
+  // first session's captureChild/inputChild without stopping them,
+  // orphaning a capture helper that still holds raw.mov open.
+  if (starting || hudWindow) {
+    throw new Error('A recording is already in progress.');
   }
-  pickerWindow?.hide();
-  return { dir, zoomEnabled: permissions.canZoom() };
+  starting = true;
+  try {
+    const { source, width, height, x, y, title, mic } = validateStartOptions(rawOpts);
+    if (!permissions.canRecord()) throw new Error('Screen Recording permission is required');
+
+    // A denied mic prompt used to be discarded entirely: bin/capture was
+    // started with --mic 1 regardless, which fails outright with "no
+    // microphone available" and takes the whole recording down with it --
+    // over a permission the user may not even have cared about (the
+    // checkbox may just be left on from a previous session). Falling back to
+    // recording without audio, rather than refusing to start, keeps the
+    // failure proportional to what was actually lost: someone who pressed
+    // Record wants the screen recording above all; losing the mic track is
+    // recoverable/acceptable, losing the whole session to a permission
+    // dialog they may have dismissed by reflex is not. The picker is told
+    // via the resolved `mic` field so it can tell the user why there's no
+    // audio.
+    let recordMic = mic;
+    if (mic) {
+      const granted = await permissions.requestMicrophone();
+      if (!granted) recordMic = false;
+    }
+
+    const dir = path.join(os.homedir(), 'Movies', 'Loupe', String(Date.now()));
+    fs.mkdirSync(dir, { recursive: true });
+
+    startedAt = Date.now();
+    const hud = createHudWindow();
+    try {
+      await recorder.start({
+        source, width, height, x, y, title, mic: recordMic, dir,
+        // getMediaSourceId() returns "window:<CGWindowID>:0" on macOS; the
+        // middle segment is the same windowID `bin/sources` reports as
+        // "window:<n>" and that SCContentFilter(excludingWindows:) matches
+        // against -- verified empirically, see task-14-report.md.
+        hudWindowId: hud.getMediaSourceId().split(':')[1],
+        zoomEnabled: permissions.canZoom()
+      });
+    } catch (err) {
+      teardownHud();
+      throw err;
+    }
+    pickerWindow?.hide();
+    return { dir, zoomEnabled: permissions.canZoom(), mic: recordMic, micRequested: mic };
+  } finally {
+    starting = false;
+  }
 });
 
 ipcMain.handle('record:stop', stopRecording);
