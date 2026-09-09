@@ -245,6 +245,14 @@ app.whenReady().then(() => {
 let editorWindow = null;
 let editorDir = null;
 
+// Tracks the render helper for an in-flight export (if any), and the output
+// path it is writing to. Both are read by the editor window's 'closed'
+// handler (to stop an orphaned render) and by export:start (to refuse a
+// second concurrent export -- see the comment there for why "refuse" was
+// chosen over "coalesce").
+let exportChild = null;
+let exportOutPath = null;
+
 function openEditorWindow(dir) {
   editorDir = dir;
   editorWindow = new BrowserWindow({
@@ -252,7 +260,22 @@ function openEditorWindow(dir) {
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
   });
   editorWindow.loadFile(path.join(__dirname, '..', 'renderer', 'editor', 'index.html'));
-  editorWindow.on('closed', () => { editorWindow = null; });
+  editorWindow.on('closed', () => {
+    editorWindow = null;
+    // Closing the editor mid-export would otherwise orphan bin/render: it
+    // keeps running, holds the output file open, burns CPU on a render
+    // nobody will see, and its progress messages silently no-op against a
+    // destroyed window (editorWindow?.webContents.send above). Stop it the
+    // same way a normal export abort would, and remove the now-meaningless
+    // partial output so it can't be mistaken for a finished export.
+    if (exportChild) {
+      const child = exportChild;
+      const outPath = exportOutPath;
+      stopHelper(child).then(() => {
+        if (outPath) fs.promises.unlink(outPath).catch(() => {});
+      });
+    }
+  });
   return editorWindow;
 }
 
@@ -332,6 +355,22 @@ ipcMain.handle('project:deleteZoom', (_e, segment) => {
 });
 
 ipcMain.handle('export:start', async (_e, { preset, codec }) => {
+  // Nothing else guards against two exports running at once: the output
+  // path is derived purely from the resolved dimensions, so two exports at
+  // the same preset would target the SAME file and both call
+  // writeCameraTrack on the same project directory concurrently. The
+  // renderer disables its export button while an export is running, but
+  // that is a UI nicety, not a guarantee -- a second IPC call can still
+  // reach here (e.g. a stale enabled button, a replayed message, a bug in
+  // the renderer). Rejecting outright (rather than returning the in-flight
+  // promise to the second caller) was chosen because a second call may ask
+  // for a different preset/codec than the one already running; silently
+  // handing back a different export's result would be surprising and could
+  // resolve with the wrong file. Rejecting gives the renderer an explicit,
+  // actionable error it already knows how to surface on its status line.
+  if (exportChild) {
+    throw new Error('An export is already in progress.');
+  }
   const project = loadProject(editorDir);
   const { width, height } = resolveExportSize(preset, project.source);
   // The renderer draws from camera.bin, not from zoomKeyframes directly, so
@@ -340,18 +379,27 @@ ipcMain.handle('export:start', async (_e, { preset, codec }) => {
   // though the preview no longer shows it.
   writeCameraTrack(editorDir, cameraFor(editorDir));
   const out = path.join(editorDir, `export-${width}x${height}.mp4`);
+  exportOutPath = out;
   return new Promise((resolve, reject) => {
-    spawnHelper(path.join(BIN_DIR, 'render'), [
+    const settle = (fn, arg) => {
+      exportChild = null;
+      exportOutPath = null;
+      fn(arg);
+    };
+    exportChild = spawnHelper(path.join(BIN_DIR, 'render'), [
       '--project', editorDir, '--out', out,
       '--width', String(width), '--height', String(height), '--codec', codec || 'h264'
     ], {
       onMessage: (m) => {
         if (m.type === 'progress') editorWindow?.webContents.send('export:progress', m);
-        if (m.type === 'error') reject(new Error(m.message));
+        if (m.type === 'error') settle(reject, new Error(m.message));
       },
       onMalformed: () => {},
-      onExit: (code) => (code === 0 ? resolve(out) : reject(new Error(`render exited ${code}`))),
-      onError: (err) => reject(err)
+      onExit: (code) => settle(
+        code === 0 ? resolve : reject,
+        code === 0 ? out : new Error(`render exited ${code}`)
+      ),
+      onError: (err) => settle(reject, err)
     });
   });
 });
