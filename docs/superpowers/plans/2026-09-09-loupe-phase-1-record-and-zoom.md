@@ -109,7 +109,7 @@ Create `package.json`:
     "dev": "electron . --enable-logging",
     "lint": "eslint .",
     "test": "eslint . && node --test test/",
-    "build:native": "mkdir -p bin && swiftc -O src/native/Sources.swift -o bin/sources && swiftc -O src/native/Capture.swift -o bin/capture && swiftc -O src/native/InputTap.swift -o bin/inputtap && swiftc -O src/native/Render.swift -o bin/render"
+    "build:native": "mkdir -p bin && swiftc -O -parse-as-library src/native/Sources.swift -o bin/sources && swiftc -O -parse-as-library src/native/Capture.swift -o bin/capture && swiftc -O src/native/InputTap.swift -o bin/inputtap && swiftc -O -parse-as-library src/native/Render.swift -o bin/render"
   },
   "devDependencies": {
     "electron": "^44.2.0",
@@ -1654,7 +1654,7 @@ struct SourcesTool {
 
 - [ ] **Step 2: Build it**
 
-Run: `mkdir -p bin && swiftc -O src/native/Sources.swift -o bin/sources`
+Run: `mkdir -p bin && swiftc -O -parse-as-library src/native/Sources.swift -o bin/sources`
 Expected: compiles with no errors
 
 - [ ] **Step 3: Verify it produces valid JSON listing your displays**
@@ -1922,7 +1922,7 @@ struct CaptureTool {
 
 - [ ] **Step 2: Build it**
 
-Run: `swiftc -O src/native/Capture.swift -o bin/capture`
+Run: `swiftc -O -parse-as-library src/native/Capture.swift -o bin/capture`
 Expected: compiles with no errors
 
 - [ ] **Step 3: Record a five-second test clip**
@@ -2106,7 +2106,7 @@ CFRunLoopRun()
 Run: `swiftc -O src/native/InputTap.swift -o bin/inputtap`
 Expected: compiles with no errors
 
-**Note:** this file uses top-level code, so it must **not** be combined with an `@main` type. Keep it as its own binary.
+**Note:** this file uses top-level code, so it must **not** be combined with an `@main` type, and — unlike the other three helpers — it must **not** be built with `-parse-as-library`. A single Swift file that is not named `main.swift` compiles in script mode by default, which conflicts with `@main`; the other three carry `@main` and therefore need the flag, while this one needs its absence. Keep it as its own binary.
 
 - [ ] **Step 3: Verify the tap installs and emits**
 
@@ -3181,7 +3181,7 @@ struct RenderTool {
 
 - [ ] **Step 7: Build it**
 
-Run: `swiftc -O src/native/Render.swift -o bin/render`
+Run: `swiftc -O -parse-as-library src/native/Render.swift -o bin/render`
 Expected: compiles with no errors
 
 - [ ] **Step 8: Render a recording end to end**
