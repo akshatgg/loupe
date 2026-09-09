@@ -566,7 +566,7 @@ git commit -m "feat: add exponential zoom state machine with clamping"
 **Interfaces:**
 - Consumes: `ZOOM_MIN` from `src/main/zoom.js`
 - Produces:
-  - `SAMPLE_RATE = 120`, `TAU = 0.085`, `DEAD_ZONE_FRACTION = 0.5`
+  - `SAMPLE_RATE = 120`, `TAU = 0.082`, `DEAD_ZONE_FRACTION = 0.5`
   - `easeZoom(keyframes, duration, sampleRate) → Float64Array`
   - `resampleCursor(track, duration, sampleRate) → { xs: Float64Array, ys: Float64Array }`
   - `solvePath(zoomSamples, cursor, { width, height }) → { cx: Float64Array, cy: Float64Array }`
@@ -688,9 +688,10 @@ const { ZOOM_MIN } = require('./zoom');
 
 const SAMPLE_RATE = 120;
 
-// Critically damped spring. Response reaches ~95% at about 4.7 * TAU,
-// so 0.085 gives the ~400ms settle specified in TRD 4.2.
-const TAU = 0.085;
+// Critically damped spring: x(t) = 1 - (1 + t/TAU) * exp(-t/TAU).
+// Reaching 95% at 400ms needs TAU = 0.0843, so 0.082 clears it with margin.
+// (0.085 was the original figure here and is wrong -- it lands at 94.84%.)
+const TAU = 0.082;
 
 // The inner 50% of the visible rect. Cursor movement inside it moves nothing.
 const DEAD_ZONE_FRACTION = 0.5;
