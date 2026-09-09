@@ -71,8 +71,40 @@ function readCursorTrack(dir) {
   return out;
 }
 
+const CAMERA_RECORD_BYTES = 16;
+
+function writeCameraTrack(dir, samples) {
+  fs.mkdirSync(dir, { recursive: true });
+  const buf = Buffer.alloc(samples.length * CAMERA_RECORD_BYTES);
+  samples.forEach((s, i) => {
+    const at = i * CAMERA_RECORD_BYTES;
+    buf.writeFloatLE(s.t, at);
+    buf.writeFloatLE(s.zoom, at + 4);
+    buf.writeFloatLE(s.cx, at + 8);
+    buf.writeFloatLE(s.cy, at + 12);
+  });
+  fs.writeFileSync(path.join(dir, 'camera.bin'), buf);
+}
+
+function readCameraTrack(dir) {
+  const file = path.join(dir, 'camera.bin');
+  if (!fs.existsSync(file)) return [];
+  const buf = fs.readFileSync(file);
+  const out = [];
+  for (let at = 0; at + CAMERA_RECORD_BYTES <= buf.length; at += CAMERA_RECORD_BYTES) {
+    out.push({
+      t: buf.readFloatLE(at),
+      zoom: buf.readFloatLE(at + 4),
+      cx: buf.readFloatLE(at + 8),
+      cy: buf.readFloatLE(at + 12)
+    });
+  }
+  return out;
+}
+
 module.exports = {
   createProject, saveProject, loadProject,
   writeCursorTrack, readCursorTrack,
-  SCHEMA_VERSION, CURSOR_RECORD_BYTES, SHAPE_CODES
+  writeCameraTrack, readCameraTrack,
+  SCHEMA_VERSION, CURSOR_RECORD_BYTES, CAMERA_RECORD_BYTES, SHAPE_CODES
 };
