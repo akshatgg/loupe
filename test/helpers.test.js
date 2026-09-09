@@ -64,3 +64,47 @@ test('stopHelper resolves with the exit code', async () => {
   const code = await stopHelper(child, 2000);
   assert.strictEqual(typeof code, 'number');
 });
+
+test('spawnHelper reports a failed spawn through onError without throwing', async () => {
+  const errors = [];
+  await new Promise((resolve) => {
+    spawnHelper('/no/such/binary-loupe-helper', [], {
+      onMessage: () => {},
+      onMalformed: () => {},
+      onExit: resolve,
+      onError: (err) => errors.push(err)
+    });
+  });
+  assert.strictEqual(errors.length, 1);
+  assert.ok(errors[0] instanceof Error);
+});
+
+test('spawnHelper survives a failed spawn with no onError supplied', async () => {
+  await new Promise((resolve) => {
+    spawnHelper('/no/such/binary-loupe-helper', [], {
+      onMessage: () => {},
+      onMalformed: () => {},
+      onExit: resolve
+    });
+  });
+  // reaching here without throwing/crashing is the assertion
+  assert.ok(true);
+});
+
+test('spawnHelper notifies the caller exactly once on a failed spawn', async () => {
+  let exitCalls = 0;
+  await new Promise((resolve) => {
+    spawnHelper('/no/such/binary-loupe-helper', [], {
+      onMessage: () => {},
+      onMalformed: () => {},
+      onExit: (...args) => {
+        exitCalls += 1;
+        resolve(args);
+      },
+      onError: () => {}
+    });
+  });
+  // give any late/duplicate event a chance to fire before asserting
+  await new Promise((r) => setTimeout(r, 50));
+  assert.strictEqual(exitCalls, 1);
+});
