@@ -109,7 +109,7 @@ Create `package.json`:
     "dev": "electron . --enable-logging",
     "lint": "eslint .",
     "test": "eslint . && node --test test/",
-    "build:native": "mkdir -p bin && swiftc -O src/native/Sources.swift -o bin/sources && swiftc -O src/native/Capture.swift -o bin/capture && swiftc -O src/native/InputTap.swift -o bin/inputtap && swiftc -O src/native/Render.swift -o bin/render"
+    "build:native": "mkdir -p bin && swiftc -O -parse-as-library src/native/Sources.swift -o bin/sources && swiftc -O -parse-as-library src/native/Capture.swift -o bin/capture && swiftc -O src/native/InputTap.swift -o bin/inputtap && swiftc -O -parse-as-library src/native/Render.swift -o bin/render"
   },
   "devDependencies": {
     "electron": "^44.2.0",
@@ -398,7 +398,7 @@ git commit -m "feat: add source-to-output time mapping with speed ramps"
 - Consumes: nothing
 - Produces:
   - `ZOOM_MIN = 1.0`, `ZOOM_MAX = 4.0`, `SENSITIVITY = 0.015`
-  - `createZoomState() → { target: number, keyframes: Array, lastCursor: {x,y} }`
+  - `createZoomState() → { target: number, keyframes: Array, lastCursor: {x,y} | null }`
   - `applyScroll(state, { t, dy, x, y }) → boolean` — mutates state, returns whether a keyframe was appended
   - Keyframe shape: `{ t, zoom, cx, cy }` where `t` is **source time in seconds** and `cx,cy` is the cursor in screen pixels
 
@@ -499,20 +499,39 @@ function clamp(v, lo, hi) {
 }
 
 function createZoomState() {
-  return { target: ZOOM_MIN, keyframes: [], lastCursor: { x: NaN, y: NaN } };
+  return { target: ZOOM_MIN, keyframes: [], lastCursor: null };
 }
 
 // Positive dy means scroll up, which zooms in. Exponential so one notch feels
 // like the same amount of zoom at 1.2x as it does at 3.5x.
 function applyScroll(state, { t, dy, x, y }) {
+  // Events arrive from the OS via a Swift event tap. One non-finite dy would
+  // set target to NaN, and NaN * exp(...) stays NaN, so zoom would be dead
+  // for the rest of the recording with no way to recover. Reject it here,
+  // before target is touched.
+  if (!Number.isFinite(dy)) return false;
+
   const next = clamp(state.target * Math.exp(dy * SENSITIVITY), ZOOM_MIN, ZOOM_MAX);
   const zoomChanged = next !== state.target;
+  state.target = next;
+
+  // A non-finite cursor position wouldn't corrupt state.target (it's already
+  // committed above), but it would get written into a keyframe's cx/cy,
+  // handing the downstream renderer a NaN camera position. Unlike dy, a bad
+  // x/y should only cost us the keyframe, not the zoom change: the next
+  // event with usable coordinates will emit a keyframe carrying the current
+  // (accumulated) target, so nothing is lost.
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+
+  // lastCursor is the position last COMMITTED to, not the one last seen.
+  // Comparing against the previous raw sample would let sub-epsilon movement
+  // accumulate without limit: 200 events of 0.9px each move the cursor 180px
+  // across the screen and emit nothing.
+  if (state.lastCursor === null) state.lastCursor = { x, y };
+
   const cursorMoved =
     Math.abs(x - state.lastCursor.x) >= CURSOR_EPSILON ||
-    Math.abs(y - state.lastCursor.y) >= CURSOR_EPSILON ||
-    Number.isNaN(state.lastCursor.x);
-
-  state.target = next;
+    Math.abs(y - state.lastCursor.y) >= CURSOR_EPSILON;
 
   if (!zoomChanged && !cursorMoved) return false;
 
@@ -547,7 +566,7 @@ git commit -m "feat: add exponential zoom state machine with clamping"
 **Interfaces:**
 - Consumes: `ZOOM_MIN` from `src/main/zoom.js`
 - Produces:
-  - `SAMPLE_RATE = 120`, `TAU = 0.085`, `DEAD_ZONE_FRACTION = 0.5`
+  - `SAMPLE_RATE = 120`, `TAU = 0.082`, `DEAD_ZONE_FRACTION = 0.5`
   - `easeZoom(keyframes, duration, sampleRate) → Float64Array`
   - `resampleCursor(track, duration, sampleRate) → { xs: Float64Array, ys: Float64Array }`
   - `solvePath(zoomSamples, cursor, { width, height }) → { cx: Float64Array, cy: Float64Array }`
@@ -669,9 +688,10 @@ const { ZOOM_MIN } = require('./zoom');
 
 const SAMPLE_RATE = 120;
 
-// Critically damped spring. Response reaches ~95% at about 4.7 * TAU,
-// so 0.085 gives the ~400ms settle specified in TRD 4.2.
-const TAU = 0.085;
+// Critically damped spring: x(t) = 1 - (1 + t/TAU) * exp(-t/TAU).
+// Reaching 95% at 400ms needs TAU = 0.0843, so 0.082 clears it with margin.
+// (0.085 was the original figure here and is wrong -- it lands at 94.84%.)
+const TAU = 0.082;
 
 // The inner 50% of the visible rect. Cursor movement inside it moves nothing.
 const DEAD_ZONE_FRACTION = 0.5;
@@ -840,8 +860,35 @@ test('smoothing reduces high-frequency jitter', () => {
   const x = new Float64Array(n);
   for (let i = 0; i < n; i++) x[i] = 100 + (i % 2 === 0 ? 20 : -20);
   const out = smoothPath(x, alphaFor(1.2, SAMPLE_RATE));
+
+  // Measure interior spread, excluding the first and last 40 samples.
+  // The forward pass seeds at arr[0], which is a peak (120) in this synthetic square wave.
+  // Real camera paths start continuous and centered, so their first sample sits at the
+  // local mean with nothing to decay from. This edge transient has nothing to do with
+  // jitter rejection, so we measure the interior where the filter has settled.
+  const interiorStart = 40;
+  const interiorEnd = n - 40;
+  let interiorMin = out[interiorStart];
+  let interiorMax = out[interiorStart];
+  for (let i = interiorStart; i < interiorEnd; i++) {
+    interiorMin = Math.min(interiorMin, out[i]);
+    interiorMax = Math.max(interiorMax, out[i]);
+  }
+  const interiorSpread = interiorMax - interiorMin;
+  assert.ok(interiorSpread < 2, `jitter survived in interior, spread ${interiorSpread}`);
+});
+
+test('filter boundary transient is documented and bounded', () => {
+  const n = 240;
+  const x = new Float64Array(n);
+  for (let i = 0; i < n; i++) x[i] = 100 + (i % 2 === 0 ? 20 : -20);
+  const out = smoothPath(x, alphaFor(1.2, SAMPLE_RATE));
   const spread = Math.max(...out) - Math.min(...out);
-  assert.ok(spread < 5, `jitter survived, spread ${spread}`);
+  // The full-array spread includes the transient artifact of starting the forward pass
+  // at a peak. This decays within roughly two time constants (~40 samples at alpha=0.06).
+  // Real signals don't produce this edge effect, so it's expected and bounded here
+  // without affecting the jitter-reduction test.
+  assert.ok(spread < 12, `full-array spread with boundary transient ${spread}`);
 });
 
 test('smoothing an empty array returns an empty array', () => {
@@ -1184,7 +1231,7 @@ git commit -m "feat: add project.json schema and binary cursor track storage"
 - Consumes: nothing
 - Produces:
   - `createLineSplitter(onLine) → (chunk: string) => void`
-  - `spawnHelper(binPath, args, { onMessage, onMalformed, onExit }) → ChildProcess`
+  - `spawnHelper(binPath, args, { onMessage, onMalformed, onExit, onError }) → ChildProcess`
   - `stopHelper(child, timeoutMs = 3000) → Promise<number>` resolving to the exit code
 
 **The bug this task exists to prevent:** stdout arrives in arbitrary chunks. A JSON object can be split across two `data` events, and a single event can carry three objects. Parsing per-chunk instead of per-line produces intermittent, load-dependent failures that never reproduce in development. `createLineSplitter` is buffered and tested directly.
@@ -1278,6 +1325,10 @@ const { spawn } = require('node:child_process');
 
 // stdout arrives in arbitrary chunks: one JSON object can span two chunks and
 // one chunk can carry several objects. Buffer until a newline.
+// Note: the buffer has no size cap. This is an internal, first-party
+// protocol between us and our own compiled helper, so a helper writing an
+// unterminated multi-megabyte line is not a threat we defend against here;
+// a cap was considered and deliberately left out rather than missed.
 function createLineSplitter(onLine) {
   let buffer = '';
   return function push(chunk) {
@@ -1291,7 +1342,7 @@ function createLineSplitter(onLine) {
   };
 }
 
-function spawnHelper(binPath, args, { onMessage, onMalformed, onExit }) {
+function spawnHelper(binPath, args, { onMessage, onMalformed, onExit, onError }) {
   const child = spawn(binPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
 
   const push = createLineSplitter((line) => {
@@ -1306,7 +1357,30 @@ function spawnHelper(binPath, args, { onMessage, onMalformed, onExit }) {
   child.stdout.on('data', push);
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (d) => console.error(`[${binPath}] ${d.trimEnd()}`));
-  child.on('exit', (code, signal) => onExit(code, signal));
+
+  // A failed spawn (e.g. ENOENT for a bad/mis-packaged binary path) emits
+  // 'error' on the child. An EventEmitter with no 'error' listener throws,
+  // which would take down the Electron main process, so this listener must
+  // always exist. Node can emit both 'error' and 'exit' for the same failed
+  // spawn, but the caller must be told exactly once, so a single `notified`
+  // flag gates both handlers regardless of which fires, or in what order.
+  let notified = false;
+  child.on('error', (err) => {
+    if (typeof onError === 'function') {
+      onError(err);
+    } else {
+      console.error(`[${binPath}] ${err.message}`);
+    }
+    if (!notified) {
+      notified = true;
+      onExit(null, null);
+    }
+  });
+  child.on('exit', (code, signal) => {
+    if (notified) return;
+    notified = true;
+    onExit(code, signal);
+  });
 
   return child;
 }
@@ -1483,8 +1557,14 @@ git commit -m "feat: add TCC permission checks with graceful zoom degradation"
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: `bin/sources`, printing one JSON array and exiting. Each element:
+- Produces: `bin/sources [--exclude-bundle <id>]`, printing one JSON array and exiting. Each element:
   `{ id, kind, title, app, width, height, thumbnail }` where `id` is `"display:<n>"` or `"window:<n>"` and `thumbnail` is a base64 PNG data URL or `null`.
+
+**`--exclude-bundle` exists because self-exclusion cannot be self-determined.** The original design compared each window's owner against `Bundle.main.bundleIdentifier` to hide Loupe's own windows. That is always `nil` for a standalone `swiftc`-built binary — verified directly — so the comparison always passed and Loupe's windows were never excluded. Only the caller knows the identifier, so Electron passes it in. With the flag absent nothing is excluded, which is the right behaviour when running the binary by hand.
+
+**Errors are encoded with `JSONSerialization`, never hand-built.** An interpolated error string escaped only double quotes, so a backslash or newline in a macOS error message produced JSON that `JSON.parse` rejects — on precisely the path a user without Screen Recording permission hits.
+
+The shipped `src/native/Sources.swift` is authoritative for both; the sample below predates them.
 
 Implements FR-1 and TRD §3.1.
 
@@ -1580,7 +1660,7 @@ struct SourcesTool {
 
 - [ ] **Step 2: Build it**
 
-Run: `mkdir -p bin && swiftc -O src/native/Sources.swift -o bin/sources`
+Run: `mkdir -p bin && swiftc -O -parse-as-library src/native/Sources.swift -o bin/sources`
 Expected: compiles with no errors
 
 - [ ] **Step 3: Verify it produces valid JSON listing your displays**
@@ -1848,7 +1928,7 @@ struct CaptureTool {
 
 - [ ] **Step 2: Build it**
 
-Run: `swiftc -O src/native/Capture.swift -o bin/capture`
+Run: `swiftc -O -parse-as-library src/native/Capture.swift -o bin/capture`
 Expected: compiles with no errors
 
 - [ ] **Step 3: Record a five-second test clip**
@@ -2032,7 +2112,7 @@ CFRunLoopRun()
 Run: `swiftc -O src/native/InputTap.swift -o bin/inputtap`
 Expected: compiles with no errors
 
-**Note:** this file uses top-level code, so it must **not** be combined with an `@main` type. Keep it as its own binary.
+**Note:** this file uses top-level code, so it must **not** be combined with an `@main` type, and — unlike the other three helpers — it must **not** be built with `-parse-as-library`. A single Swift file that is not named `main.swift` compiles in script mode by default, which conflicts with `@main`; the other three carry `@main` and therefore need the flag, while this one needs its absence. Keep it as its own binary.
 
 - [ ] **Step 3: Verify the tap installs and emits**
 
@@ -2364,7 +2444,34 @@ ipcMain.handle('permissions:status', () => ({
 
 ipcMain.handle('permissions:open', (_e, pane) => permissions.openPane(pane));
 
-ipcMain.handle('record:start', async (_e, { source, mic }) => {
+// The main process is the actual trust boundary here, not the picker
+// renderer: it must not take `source`/`width`/`height`/`title`/`mic` on
+// faith from whatever called `startRecording` over the preload bridge.
+// `width`/`height` feed the camera solver's and the renderer's point-to-
+// pixel arithmetic, where a non-finite or negative value fails silently
+// deep in geometry maths instead of at an obvious boundary -- so they are
+// checked here, before anything is forwarded to `recorder.start()`.
+const SOURCE_ID_RE = /^(display|window):\d+$/;
+
+function validateStartOptions(opts) {
+  const { source, width, height, title, mic } = opts ?? {};
+  if (typeof source !== 'string' || !SOURCE_ID_RE.test(source)) {
+    throw new Error(`Invalid source id: ${JSON.stringify(source)}`);
+  }
+  if (typeof width !== 'number' || !Number.isFinite(width) || width <= 0) {
+    throw new Error(`Invalid width: ${JSON.stringify(width)}`);
+  }
+  if (typeof height !== 'number' || !Number.isFinite(height) || height <= 0) {
+    throw new Error(`Invalid height: ${JSON.stringify(height)}`);
+  }
+  if (title !== undefined && typeof title !== 'string') {
+    throw new Error(`Invalid title: ${JSON.stringify(title)}`);
+  }
+  return { source, width, height, title: typeof title === 'string' ? title : '', mic: Boolean(mic) };
+}
+
+ipcMain.handle('record:start', async (_e, rawOpts) => {
+  const { source, width, height, title, mic } = validateStartOptions(rawOpts);
   if (!permissions.canRecord()) throw new Error('Screen Recording permission is required');
   if (mic) await permissions.requestMicrophone();
 
@@ -2373,7 +2480,7 @@ ipcMain.handle('record:start', async (_e, { source, mic }) => {
 
   const hud = createHudWindow();
   await recorder.start({
-    source, mic, dir,
+    source, width, height, title, mic, dir,
     hudWindowId: hud.getMediaSourceId().split(':')[1],
     zoomEnabled: permissions.canZoom()
   });
@@ -2490,12 +2597,28 @@ function addPaneButton(parent, label, pane) {
   parent.appendChild(b);
 }
 
+// `source.title` is not trusted content: it is the title of some other
+// process's window, and any local process controls its own window title.
+// A hostile one could set its title to a script payload, and this picker's
+// preload bridge exposes `startRecording` -- so a title that reaches an
+// HTML parser here could start a microphone-enabled recording unprompted.
+// Build the card from DOM nodes and assign text via `textContent` instead
+// of `innerHTML`/interpolated markup, so a title is always rendered as
+// inert text no matter what it contains.
 function card(source) {
   const el = document.createElement('div');
   el.className = 'card';
-  el.innerHTML = `
-    <img src="${source.thumbnail ?? ''}" alt="">
-    <div class="title">${source.app ? source.app + ' — ' : ''}${source.title}</div>`;
+
+  const img = document.createElement('img');
+  img.src = source.thumbnail ?? '';
+  img.alt = '';
+  el.appendChild(img);
+
+  const title = document.createElement('div');
+  title.className = 'title';
+  title.textContent = source.app ? `${source.app} — ${source.title}` : source.title;
+  el.appendChild(title);
+
   // PRD FR-7: the OS cannot capture a single browser tab, so tell the user
   // the one move that makes it possible instead of leaving them hunting.
   if (source.kind === 'window' && BROWSERS.some((b) => (source.app ?? '').includes(b))) {
@@ -3107,7 +3230,7 @@ struct RenderTool {
 
 - [ ] **Step 7: Build it**
 
-Run: `swiftc -O src/native/Render.swift -o bin/render`
+Run: `swiftc -O -parse-as-library src/native/Render.swift -o bin/render`
 Expected: compiles with no errors
 
 - [ ] **Step 8: Render a recording end to end**
