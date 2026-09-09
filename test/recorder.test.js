@@ -200,6 +200,118 @@ test('a capture spawn failure tears down an already-running inputtap so it is no
   await assert.doesNotReject(rec.stop());
 });
 
+// A fake for the three new tests below where timing must be driven by the
+// test itself rather than a fixed setTimeout(0): each spawnHelper() call is
+// recorded (with its opts, so the test can invoke onMessage/onError/onExit
+// whenever it chooses) and each stopHelper() call returns a promise the test
+// controls the resolution of.
+function controllableHarness({ onError } = {}) {
+  const spawns = []; // { name, opts, child }
+  const stopCalls = []; // { child, resolve }
+  const spawnHelper = (bin, args, opts) => {
+    const name = bin.endsWith('capture') ? 'capture' : 'inputtap';
+    const child = {
+      name, kill() {}, exitCode: null, signalCode: null,
+      once(evt, cb) { if (evt === 'exit') this._exit = cb; }
+    };
+    spawns.push({ name, opts, child });
+    return child;
+  };
+  const stopHelper = (child) => new Promise((resolve) => {
+    stopCalls.push({ child, resolve });
+  });
+  const rec = createRecorder({ binDir: '/fake', spawnHelper, stopHelper, onError });
+  return { rec, spawns, stopCalls };
+}
+
+// Resolves stopHelper() calls as stop() queues them (it awaits them one at a
+// time, so a fixed number of "resolve whatever is pending, then yield twice"
+// rounds is enough to drain a normal two-child stop() to completion) and
+// returns its settled result.
+async function finishStop(stopCalls, promise) {
+  const resolved = new Set();
+  for (let round = 0; round < 6; round++) {
+    for (const call of stopCalls) {
+      if (!resolved.has(call)) {
+        resolved.add(call);
+        call.resolve(0);
+      }
+    }
+    // eslint-disable-next-line no-await-in-loop
+    await Promise.resolve();
+    // eslint-disable-next-line no-await-in-loop
+    await Promise.resolve();
+  }
+  return promise;
+}
+
+test('a delayed error from a previous session does not tear down the current session or misattribute state', async () => {
+  const seen = [];
+  const { rec, spawns, stopCalls } = controllableHarness({ onError: (e) => seen.push(e) });
+
+  // Session 1: start and cleanly stop it.
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x' });
+  const session1Capture = spawns.find((s) => s.name === 'capture');
+  session1Capture.opts.onMessage({ type: 'started', clock: 0 });
+  session1Capture.opts.onMessage({ type: 'stopped', duration: 1 });
+
+  const stopSession1 = rec.stop();
+  await finishStop(stopCalls, stopSession1);
+
+  // Session 2: a different recording, now in progress.
+  await rec.start({ source: 'display:2', mic: false, dir: '/tmp/y' });
+  const session2Capture = spawns.filter((s) => s.name === 'capture').pop();
+  session2Capture.opts.onMessage({ type: 'started', clock: 0 });
+
+  // A delayed 'error' event from session 1's long-dead capture process
+  // arrives only now, after session 2 has started.
+  session1Capture.opts.onError(new Error('late failure from session 1'));
+
+  const s = rec.state();
+  assert.strictEqual(s.error, null, 'session 2 state must not be overwritten by session 1 error');
+  assert.strictEqual(s.recording, true, 'session 2 must still be recording');
+  assert.strictEqual(seen.length, 0, "the caller's onError must not fire for a stale session");
+});
+
+test('stop() called twice after a successful recording saves once and the second call is falsy', async () => {
+  const { rec, spawns, stopCalls } = controllableHarness();
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x' });
+  const capture = spawns.find((s) => s.name === 'capture');
+  capture.opts.onMessage({ type: 'started', clock: 0 });
+  capture.opts.onMessage({ type: 'stopped', duration: 5 });
+
+  const stopPromise = rec.stop();
+  const first = await finishStop(stopCalls, stopPromise);
+  assert.ok(first && first.project, 'first stop() should succeed and return the saved project');
+
+  const second = await rec.stop();
+  assert.strictEqual(second, null, 'second stop() should be a clean no-op');
+});
+
+test("a delayed capture error during stop()'s await does not double-stop the same inputtap child", async () => {
+  const { rec, spawns, stopCalls } = controllableHarness();
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x' });
+  const capture = spawns.find((s) => s.name === 'capture');
+  capture.opts.onMessage({ type: 'started', clock: 0 });
+
+  const stopPromise = rec.stop();
+  // stop() has synchronously reached and called stopHelper(inputChild); it is
+  // now suspended on that await, with captureChild's stopHelper not yet called.
+  assert.strictEqual(stopCalls.length, 1);
+  assert.strictEqual(stopCalls[0].child.name, 'inputtap');
+
+  // Fire the delayed capture 'error' while stop() is mid-await on the very
+  // child it is already tearing down.
+  capture.opts.onError(new Error('late capture failure'));
+
+  // Let stop() finish: resolve the input stopHelper call, then whatever
+  // capture-side call follows.
+  await finishStop(stopCalls, stopPromise);
+
+  const inputStopCount = stopCalls.filter((c) => c.child.name === 'inputtap').length;
+  assert.strictEqual(inputStopCount, 1, 'inputtap must be stopped exactly once, not raced');
+});
+
 test('an optional onError callback fires immediately, without waiting for a state() poll', async () => {
   const tapErr = new Error('ENOENT inputtap');
   const sinks = {};

@@ -19,6 +19,20 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
   let duration = 0;
   let tapReenables = 0;
   let error = null;
+  // Bumped on every start(); a spawned helper's callbacks capture the
+  // generation current at spawn time and become inert once it no longer
+  // matches, so a delayed message/exit/error from a session that has since
+  // ended (or been superseded by a new start()) cannot mutate state that
+  // belongs to whatever is current.
+  let generation = 0;
+  // True once a stop() call has completed its work for the current session.
+  // Distinct from `source === null` ("never started"): source stays set
+  // after a successful stop() (it is not part of what start() needs to reset
+  // before spawning), so a second stop() call needs its own signal to
+  // recognise "already stopped" and short-circuit to a no-op rather than
+  // re-saving the project. Reset in start() alongside the rest of the
+  // per-session state.
+  let stopped = false;
 
   let zoomState = createZoomState();
   let clicks = [];
@@ -98,6 +112,9 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
   }
 
   async function start(opts) {
+    generation++;
+    const gen = generation;
+    stopped = false;
     dir = opts.dir;
     source = opts.source;
     sourceWidth = opts.width || 0;
@@ -121,18 +138,18 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
     if (opts.hudWindowId) args.push('--exclude-window', String(opts.hudWindowId));
 
     captureChild = spawnHelper(path.join(binDir, 'capture'), args, {
-      onMessage: onCapture,
+      onMessage: (msg) => { if (gen === generation) onCapture(msg); },
       onMalformed: (l) => console.error('capture malformed:', l),
-      onExit: () => { recording = false; },
-      onError: onCaptureError
+      onExit: () => { if (gen === generation) recording = false; },
+      onError: (err) => { if (gen === generation) onCaptureError(err); }
     });
 
     if (zoomEnabled) {
       inputChild = spawnHelper(path.join(binDir, 'inputtap'), [], {
-        onMessage: onInput,
+        onMessage: (msg) => { if (gen === generation) onInput(msg); },
         onMalformed: (l) => console.error('inputtap malformed:', l),
         onExit: () => {},
-        onError: onInputError
+        onError: (err) => { if (gen === generation) onInputError(err); }
       });
     }
 
@@ -145,12 +162,26 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
     // Rather than throwing out of an async function, resolve to null: a
     // caller-recognisable "there was nothing to stop", matching the falsy
     // shape callers already have to handle for other empty results.
-    if (source === null) return null;
+    // A second call after a completed stop() must also be a no-op: without
+    // `stopped`, source stays non-null after a successful stop() (start()
+    // owns resetting session state, not stop()), so a stop-button-plus-
+    // hotkey double call would otherwise rebuild and re-save the project a
+    // second time and return a second success result.
+    if (source === null || stopped) return null;
+    stopped = true;
 
-    if (inputChild) await stopHelper(inputChild);
-    if (captureChild) await stopHelper(captureChild);
+    // Capture and clear the shared references before awaiting, the same way
+    // onCaptureError already does. Otherwise a delayed capture 'error' that
+    // lands while this await is pending would still see a non-null
+    // inputChild/captureChild and race stopHelper() against the calls below
+    // on the same live process.
+    const toStopInput = inputChild;
+    const toStopCapture = captureChild;
     inputChild = null;
     captureChild = null;
+
+    if (toStopInput) await stopHelper(toStopInput);
+    if (toStopCapture) await stopHelper(toStopCapture);
     recording = false;
 
     const project = createProject(
