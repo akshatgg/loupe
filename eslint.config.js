@@ -2,13 +2,15 @@
 module.exports = [
   {
     files: ['**/*.js'],
+    ignores: ['src/renderer/**'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'commonjs',
       globals: { require: 'readonly', module: 'writable', process: 'readonly',
                  console: 'readonly', __dirname: 'readonly', Buffer: 'readonly',
                  setTimeout: 'readonly', clearTimeout: 'readonly',
-                 setInterval: 'readonly', clearInterval: 'readonly' }
+                 setInterval: 'readonly', clearInterval: 'readonly',
+                 setImmediate: 'readonly' }
     },
     rules: {
       'no-unused-vars': 'error',
@@ -17,5 +19,33 @@ module.exports = [
       eqeqeq: 'error'
     }
   },
-  { ignores: ['bin/', 'node_modules/', 'dist/', 'src/renderer/'] }
+  // The renderer scripts are plain browser scripts loaded via <script> tags
+  // (see src/renderer/*/index.html), not CommonJS modules -- they have no
+  // `require`/`module` and run with the DOM globals a preload script exposes
+  // (window.loupe) plus the ordinary browser environment. This is also,
+  // per the final review, the one place a real security bug lived (untrusted
+  // window titles reaching innerHTML in the picker) -- linting it is worth
+  // doing permanently even though it is clean today.
+  {
+    files: ['src/renderer/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'script',
+      globals: {
+        window: 'readonly', document: 'readonly', navigator: 'readonly',
+        console: 'readonly', requestAnimationFrame: 'readonly',
+        cancelAnimationFrame: 'readonly', setTimeout: 'readonly',
+        clearTimeout: 'readonly', setInterval: 'readonly',
+        clearInterval: 'readonly', fetch: 'readonly', URL: 'readonly',
+        localStorage: 'readonly', sessionStorage: 'readonly'
+      }
+    },
+    rules: {
+      'no-unused-vars': 'error',
+      'no-undef': 'error',
+      'prefer-const': 'error',
+      eqeqeq: 'error'
+    }
+  },
+  { ignores: ['bin/', 'node_modules/', 'dist/'] }
 ];

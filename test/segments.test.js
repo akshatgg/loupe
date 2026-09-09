@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { zoomSegments, deleteSegment } = require('../src/main/segments');
+const { zoomSegments, deleteSegment, validateSegment } = require('../src/main/segments');
 
 test('no keyframes means no segments', () => {
   assert.deepStrictEqual(zoomSegments([], 10), []);
@@ -55,4 +55,39 @@ test('deleting a segment removes its keyframes and leaves the rest', () => {
 test('deleting a segment never leaves the video zoomed in', () => {
   const kf = [{ t: 3, zoom: 3, cx: 0, cy: 0 }];
   assert.deepStrictEqual(deleteSegment(kf, { start: 3, end: 8 }), []);
+});
+
+test('validateSegment accepts a well-formed segment', () => {
+  assert.deepStrictEqual(validateSegment({ start: 1, end: 2 }), { start: 1, end: 2 });
+});
+
+test('validateSegment rejects a non-finite start', () => {
+  assert.throws(() => validateSegment({ start: -Infinity, end: 8 }), /Invalid segment start/);
+});
+
+test('validateSegment rejects a non-finite end', () => {
+  assert.throws(() => validateSegment({ start: 1, end: Infinity }), /Invalid segment end/);
+});
+
+test('validateSegment rejects NaN', () => {
+  assert.throws(() => validateSegment({ start: NaN, end: 1 }), /Invalid segment start/);
+});
+
+test('validateSegment rejects non-numeric fields', () => {
+  assert.throws(() => validateSegment({ start: '1', end: 2 }), /Invalid segment start/);
+});
+
+test('validateSegment rejects start after end', () => {
+  assert.throws(() => validateSegment({ start: 5, end: 2 }), /start \(5\) is after end \(2\)/);
+});
+
+test('validateSegment rejects a missing/malformed payload entirely', () => {
+  assert.throws(() => validateSegment(null), /Invalid segment start/);
+  assert.throws(() => validateSegment(undefined), /Invalid segment start/);
+  assert.throws(() => validateSegment({}), /Invalid segment start/);
+});
+
+// The exact attack from the finding: this must never reach deleteSegment.
+test('validateSegment rejects the wipe-every-keyframe payload', () => {
+  assert.throws(() => validateSegment({ start: -Infinity, end: Infinity }));
 });
