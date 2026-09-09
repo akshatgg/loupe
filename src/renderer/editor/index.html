@@ -6,11 +6,13 @@
   <div id="stagewrap"><canvas id="stage"></canvas></div>
   <video id="src" hidden></video>
   <div id="timeline">
-    <div id="track"></div>
+    <div id="track"><div id="playhead"></div><p id="notracks" hidden></p></div>
     <input id="scrub" type="range" min="0" max="1000" value="0">
+    <div class="times"><span id="tnow">0:00</span><span id="tend">0:00</span></div>
   </div>
   <footer>
     <button id="play">Play</button>
+    <span id="zoomnow" class="zoomnow"></span>
     <select id="preset">
       <option value="1080p">1080p</option>
       <option value="1440p">1440p</option>
