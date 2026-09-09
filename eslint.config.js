@@ -7,7 +7,8 @@ module.exports = [
       sourceType: 'commonjs',
       globals: { require: 'readonly', module: 'writable', process: 'readonly',
                  console: 'readonly', __dirname: 'readonly', Buffer: 'readonly',
-                 setTimeout: 'readonly', clearTimeout: 'readonly' }
+                 setTimeout: 'readonly', clearTimeout: 'readonly',
+                 setInterval: 'readonly', clearInterval: 'readonly' }
     },
     rules: {
       'no-unused-vars': 'error',
