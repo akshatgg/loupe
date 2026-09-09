@@ -35,9 +35,17 @@ function addPaneButton(parent, label, pane) {
 function card(source) {
   const el = document.createElement('div');
   el.className = 'card';
-  el.innerHTML = `
-    <img src="${source.thumbnail ?? ''}" alt="">
-    <div class="title">${source.app ? source.app + ' — ' : ''}${source.title}</div>`;
+
+  const img = document.createElement('img');
+  img.src = source.thumbnail ?? '';
+  img.alt = '';
+  el.appendChild(img);
+
+  const title = document.createElement('div');
+  title.className = 'title';
+  title.textContent = source.app ? `${source.app} — ${source.title}` : source.title;
+  el.appendChild(title);
+
   // PRD FR-7: the OS cannot capture a single browser tab, so tell the user
   // the one move that makes it possible instead of leaving them hunting.
   if (source.kind === 'window' && BROWSERS.some((b) => (source.app ?? '').includes(b))) {
