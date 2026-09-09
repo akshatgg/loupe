@@ -8,7 +8,7 @@ const { createPermissions } = require('./permissions');
 const { createRecorder } = require('./recorder');
 const { spawnHelper, stopHelper } = require('./helpers');
 const { solveCamera } = require('./camera');
-const { zoomSegments, deleteSegment } = require('./segments');
+const { zoomSegments, deleteSegment, validateSegment } = require('./segments');
 const { loadProject, saveProject, readCursorTrack, writeCameraTrack } = require('./project');
 
 const BIN_DIR = app.isPackaged
@@ -331,15 +331,41 @@ let editorDir = null;
 let exportChild = null;
 let exportOutPath = null;
 
+// editorDir/editorWindow/exportChild/exportOutPath are a single global
+// "current editor" slot, not one per calling window. Two choices were
+// available for fixing the corruption this caused (record, leave the editor
+// open, record again -- the stale editor's project:load/deleteZoom/export
+// silently target the new recording's directory): key this state by
+// event.sender instead, or close the previous editor whenever a new one
+// opens. Closing was chosen: an editor exists only because record:stop just
+// finished a recording and opened one for it (openEditorWindow has exactly
+// one call site), so there is never a legitimate reason for two editors to
+// be open at once, and "the editor" belongs to whichever recording most
+// recently finished. Keying by sender would let two editors run
+// concurrently, which this product has no use for and which would still
+// need every handler (project:load, deleteZoom, export:start) rewritten to
+// look up its caller's own state instead of a shared global -- a bigger,
+// riskier change for a capability nothing asks for.
 function openEditorWindow(dir) {
+  const prevWin = editorWindow;
+  if (prevWin && !prevWin.isDestroyed()) prevWin.close();
+
   editorDir = dir;
-  editorWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 1080, height: 720, title: 'Loupe — Edit',
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
   });
-  editorWindow.loadFile(path.join(__dirname, '..', 'renderer', 'editor', 'index.html'));
-  editorWindow.on('closed', () => {
-    editorWindow = null;
+  editorWindow = win;
+  win.loadFile(path.join(__dirname, '..', 'renderer', 'editor', 'index.html'));
+  win.on('closed', () => {
+    // `prevWin.close()` above does not close `win` synchronously in every
+    // Electron version/path, so this handler can still be the STALE
+    // editor's, firing after a newer editor has already replaced it in
+    // `editorWindow`. Only retire editorWindow/editorDir when the window
+    // closing is still the one on record -- otherwise this would null out
+    // (or worse, leave dangling) the state of the editor that is actually
+    // live, which is the exact corruption this fix exists to prevent.
+    if (editorWindow === win) editorWindow = null;
     // Closing the editor mid-export would otherwise orphan bin/render: it
     // keeps running, holds the output file open, burns CPU on a render
     // nobody will see, and its progress messages silently no-op against a
@@ -421,7 +447,12 @@ ipcMain.handle('project:load', () => {
   };
 });
 
-ipcMain.handle('project:deleteZoom', (_e, segment) => {
+ipcMain.handle('project:deleteZoom', (_e, rawSegment) => {
+  // The renderer is not a trust boundary, the same as record:start's
+  // rawOpts -- see validateSegment for why. Without this, a malformed
+  // payload like {start: -Infinity, end: Infinity} would wipe every
+  // keyframe and persist it via saveProject below.
+  const segment = validateSegment(rawSegment);
   const project = loadProject(editorDir);
   project.zoomKeyframes = deleteSegment(project.zoomKeyframes, segment);
   saveProject(editorDir, project);
@@ -462,6 +493,14 @@ ipcMain.handle('export:start', async (_e, { preset, codec }) => {
     const settle = (fn, arg) => {
       exportChild = null;
       exportOutPath = null;
+      // Only the editor-closed path (see openEditorWindow's 'closed'
+      // handler) used to unlink a partial export. A failed or rejected
+      // export here left `out` behind, named exactly like a finished
+      // export.mp4 -- not data loss (the raw recording is untouched) but a
+      // half-written file that looks done is a trap for later. `fn === reject`
+      // is the failure path; a successful export must keep its output, so
+      // this must never run for `fn === resolve`.
+      if (fn === reject) fs.promises.unlink(out).catch(() => {});
       fn(arg);
     };
     exportChild = spawnHelper(path.join(BIN_DIR, 'render'), [
@@ -505,13 +544,39 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 // than hanging on Cmd+Q forever.
 let quitting = false;
 app.on('before-quit', (event) => {
-  if (quitting || !hudWindow) return;
+  // Originally only ever considered hudWindow, so quitting mid-export (no
+  // recording in progress, but bin/render still running) skipped this
+  // whole block and fell straight to will-quit's synchronous teardownHud --
+  // which knows nothing about exports -- orphaning bin/render holding its
+  // output file open. exportChild is the same in-flight-export signal
+  // export:start already uses to refuse a second concurrent export, so it
+  // is checked here the same way hudWindow is.
+  if (quitting || (!hudWindow && !exportChild)) return;
   event.preventDefault();
   quitting = true;
-  Promise.race([
-    stopRecording().catch((err) => {
+  const tasks = [];
+  if (hudWindow) {
+    tasks.push(stopRecording().catch((err) => {
       console.error('Loupe: failed to stop recording cleanly while quitting:', err);
-    }),
+    }));
+  }
+  if (exportChild) {
+    // stopHelper() already handles graceful termination (SIGTERM, then
+    // SIGKILL after its own timeout) and is a no-op on an already-exited
+    // child, so it's safe to reuse verbatim here. The abandoned partial
+    // output is unlinked the same as the rejection and editor-closed paths,
+    // since quitting mid-export is just another way an export never
+    // finishes.
+    const child = exportChild;
+    const outPath = exportOutPath;
+    exportChild = null;
+    exportOutPath = null;
+    tasks.push(stopHelper(child).then(() => {
+      if (outPath) return fs.promises.unlink(outPath).catch(() => {});
+    }));
+  }
+  Promise.race([
+    Promise.all(tasks),
     new Promise((resolve) => setTimeout(resolve, 8000))
   ]).finally(() => app.quit());
 });
@@ -527,4 +592,15 @@ app.on('will-quit', () => {
   teardownHud();
 });
 
-module.exports = { createPickerWindow };
+module.exports = {
+  createPickerWindow,
+  // Exposed only so test/main-editor.test.js can drive the editor-scoping,
+  // export-cleanup, and quit-with-in-flight-export fixes directly (with a
+  // mocked 'electron') without spinning up a real Electron process. Nothing
+  // in the app itself uses these.
+  __test__: {
+    openEditorWindow,
+    editorState: () => ({ editorDir, editorWindow, exportChild, exportOutPath }),
+    setExportState: (child, outPath) => { exportChild = child; exportOutPath = outPath; }
+  }
+};
