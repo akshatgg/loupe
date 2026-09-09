@@ -21,10 +21,11 @@ func arg(_ name: String) -> String? {
     return args[i + 1]
 }
 
-/// Holds the mutable capture state (first/last presentation timestamps, frame
-/// count) that is written from the ScreenCaptureKit sample callback and the
-/// microphone sample callback, and read from `finish()` which runs on the
-/// main actor after the signal handler fires.
+/// Holds the mutable capture state (first-frame PTS, frame count, and the
+/// wall-clock bounds of the recording) that is written from the
+/// ScreenCaptureKit sample callback and the microphone sample callback, and
+/// read from `finish()` which runs on the main actor after the signal
+/// handler fires.
 ///
 /// Both callbacks are dispatched serially on `Capture.queue` (the stream and
 /// the audio session are both configured with that same queue as their
@@ -38,8 +39,17 @@ func arg(_ name: String) -> String? {
 final class CaptureState: @unchecked Sendable {
     private let queue: DispatchQueue
     private var firstPTS: CMTime?
-    private var lastPTS: CMTime = .zero
     private var frameCount = 0
+    // Recording length is measured on the wall clock (CACurrentMediaTime),
+    // not from frame PTS deltas: ScreenCaptureKit only delivers a frame when
+    // content changes, so a static window can go many seconds between
+    // frames and a PTS-delta duration would collapse to near zero even
+    // though the recording ran the whole time. CACurrentMediaTime() shares
+    // the mach timebase with CMSampleBuffer presentation timestamps and
+    // with bin/inputtap's clock, so mixing it with `firstPTS.seconds`
+    // elsewhere in this file stays consistent.
+    private var startWallClock: CFTimeInterval?
+    private var stopWallClock: CFTimeInterval?
 
     init(queue: DispatchQueue) {
         self.queue = queue
@@ -50,10 +60,20 @@ final class CaptureState: @unchecked Sendable {
     func recordFrame(pts: CMTime) -> CMTime? {
         dispatchPrecondition(condition: .onQueue(queue))
         let isFirst = firstPTS == nil
-        if isFirst { firstPTS = pts }
-        lastPTS = pts
+        if isFirst {
+            firstPTS = pts
+            startWallClock = CACurrentMediaTime()
+        }
         frameCount += 1
         return isFirst ? pts : nil
+    }
+
+    /// Must only be called from `queue`. Bumps the frame count for a
+    /// synthetic (idle-repaint) frame without disturbing `firstPTS` /
+    /// `startWallClock`, which must stay pinned to the first *real* frame.
+    func recordSyntheticFrame() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        frameCount += 1
     }
 
     /// Must only be called from `queue`.
@@ -68,13 +88,22 @@ final class CaptureState: @unchecked Sendable {
         return frameCount
     }
 
+    /// Must only be called from `queue`, once, when capture has stopped
+    /// (i.e. right after `SCStream.stopCapture()` returns). Marks the end
+    /// of the wall-clock window used by `finalDuration()`.
+    func markStopped() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        stopWallClock = CACurrentMediaTime()
+    }
+
     /// Safe to call from any queue: hops onto `queue` to read a consistent
-    /// snapshot after all capture callbacks have quiesced (i.e. after
-    /// `SCStream.stopCapture()` has completed).
+    /// snapshot after `markStopped()` has run. If no frame ever arrived,
+    /// returns 0 rather than dividing/subtracting against a missing start.
     func finalDuration() -> Double {
         queue.sync {
-            guard let firstPTS else { return 0 }
-            return lastPTS.seconds - firstPTS.seconds
+            guard let startWallClock else { return 0 }
+            let end = stopWallClock ?? CACurrentMediaTime()
+            return end - startWallClock
         }
     }
 }
@@ -89,6 +118,31 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
 
     private let state: CaptureState
     private let queue = DispatchQueue(label: "tech.markai.loupe.capture")
+
+    // Idle-repaint support: when ScreenCaptureKit stops delivering frames
+    // because nothing on screen changed, we re-append the last frame on a
+    // timer so the output file keeps pace with wall-clock time instead of
+    // holding a single frame for the whole recording. `lastSampleBuffer`
+    // and `lastFrameHostTime` are read and written only from `queue`
+    // (inside the stream-output callback and inside `repaintIfIdle`, which
+    // only ever runs as `idleTimer`'s event handler on `queue`), preserving
+    // the same single-queue confinement as `CaptureState`.
+    //
+    // 500ms was chosen over something closer to a frame interval (~16.7ms
+    // at 60fps): a static screen is by definition not changing, so
+    // repainting every frame tick buys no visual fidelity and would inflate
+    // the file by ~60x for a static recording. 500ms keeps the file's
+    // frame timeline dense enough that editor scrubbing, thumbnailing, and
+    // the downstream camera solver never see a gap wider than half a
+    // second, while adding only ~2 duplicate frames per second of
+    // stillness. Much longer (multi-second) intervals would risk a solver
+    // keyframe landing in a gap between synthetic frames, and would make a
+    // player's "how far along is this" progress bar visibly stutter when
+    // seeking through a static stretch.
+    private static let idleRepaintInterval: TimeInterval = 0.5
+    private var idleTimer: DispatchSourceTimer?
+    private var lastSampleBuffer: CMSampleBuffer?
+    private var lastFrameHostTime: CFTimeInterval = 0
 
     init(outURL: URL, width: Int, height: Int, withMic: Bool) throws {
         writer = try AVAssetWriter(outputURL: outURL, fileType: .mov)
@@ -145,6 +199,16 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
         try await stream.startCapture()
         self.stream = stream
+
+        // Scheduled on `queue` so its event handler (`repaintIfIdle`) runs
+        // with the same queue confinement as the stream and audio
+        // callbacks — no separate synchronization needed.
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + Self.idleRepaintInterval,
+                        repeating: Self.idleRepaintInterval)
+        timer.setEventHandler { [weak self] in self?.repaintIfIdle() }
+        timer.resume()
+        idleTimer = timer
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer,
@@ -166,6 +230,8 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
 
         guard videoInput.isReadyForMoreMediaData else { return }
         videoInput.append(buffer)
+        lastSampleBuffer = buffer
+        lastFrameHostTime = pts.seconds
 
         let frames = state.currentFrameCount()
         if frames % 60 == 0 {
@@ -173,6 +239,43 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
                 atPath: writer.outputURL.path)[.size] as? Int) ?? nil
             emit(["type": "progress", "frames": frames, "bytes": bytes ?? 0])
         }
+    }
+
+    /// Runs only as `idleTimer`'s event handler, which is scheduled on
+    /// `queue` — so this has the same queue confinement as the stream
+    /// output callback it shares `lastSampleBuffer`/`lastFrameHostTime`
+    /// with. If no real frame has landed in the last idle interval,
+    /// re-stamps and re-appends the most recent frame so the file's frame
+    /// timeline keeps pace with wall-clock time instead of holding a
+    /// single frame for the whole idle stretch.
+    private func repaintIfIdle() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard let last = lastSampleBuffer, state.hasFirstFrame() else { return }
+        let now = CACurrentMediaTime()
+        guard now - lastFrameHostTime >= Self.idleRepaintInterval else { return }
+        guard videoInput.isReadyForMoreMediaData else { return }
+
+        // Guard against ever going backwards/equal: a repainted frame's PTS
+        // must be strictly after the last one appended (real or synthetic)
+        // or AVAssetWriterInput will treat the sample as out of order.
+        let newSeconds = max(now, lastFrameHostTime + 0.001)
+        let newPTS = CMTime(seconds: newSeconds, preferredTimescale: 600)
+        var timing = CMSampleTimingInfo(duration: .invalid,
+                                         presentationTimeStamp: newPTS,
+                                         decodeTimeStamp: .invalid)
+        var repainted: CMSampleBuffer?
+        let status = CMSampleBufferCreateCopyWithNewTiming(
+            allocator: kCFAllocatorDefault,
+            sampleBuffer: last,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleBufferOut: &repainted)
+        guard status == noErr, let repainted else { return }
+
+        videoInput.append(repainted)
+        lastSampleBuffer = repainted
+        lastFrameHostTime = newSeconds
+        state.recordSyntheticFrame()
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput buffer: CMSampleBuffer,
@@ -187,6 +290,14 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
 
     func finish() async {
         try? await stream?.stopCapture()
+        // Stop the idle-repaint timer and mark the wall-clock stop time in
+        // the same trip onto `queue`, so no further repaint can fire after
+        // we've decided the recording is over.
+        queue.sync {
+            idleTimer?.cancel()
+            idleTimer = nil
+            state.markStopped()
+        }
         audioSession?.stopRunning()
         videoInput.markAsFinished()
         audioInput?.markAsFinished()
