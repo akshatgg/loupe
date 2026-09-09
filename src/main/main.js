@@ -7,6 +7,9 @@ const { execFile } = require('node:child_process');
 const { createPermissions } = require('./permissions');
 const { createRecorder } = require('./recorder');
 const { spawnHelper, stopHelper } = require('./helpers');
+const { solveCamera } = require('./camera');
+const { zoomSegments, deleteSegment } = require('./segments');
+const { loadProject, saveProject, readCursorTrack, writeCameraTrack } = require('./project');
 
 const BIN_DIR = path.join(__dirname, '..', '..', 'bin');
 const permissions = createPermissions({ systemPreferences, shell });
@@ -118,6 +121,7 @@ async function stopRecording() {
   // re-thrown afterward rather than swallowed.
   try {
     const result = await recorder.stop();
+    if (result?.dir) openEditorWindow(result.dir);
     return result;
   } finally {
     pickerWindow?.show();
@@ -234,6 +238,106 @@ app.whenReady().then(() => {
       'still works.'
     );
   }
+});
+
+let editorWindow = null;
+let editorDir = null;
+
+function openEditorWindow(dir) {
+  editorDir = dir;
+  editorWindow = new BrowserWindow({
+    width: 1080, height: 720, title: 'Loupe — Edit',
+    webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
+  });
+  editorWindow.loadFile(path.join(__dirname, '..', 'renderer', 'editor', 'index.html'));
+  editorWindow.on('closed', () => { editorWindow = null; });
+  return editorWindow;
+}
+
+function cameraFor(dir) {
+  const project = loadProject(dir);
+  const cursorTrack = readCursorTrack(dir);
+  return solveCamera({
+    keyframes: project.zoomKeyframes,
+    cursorTrack,
+    duration: project.capture.duration,
+    width: project.source.width,
+    height: project.source.height
+  });
+}
+
+// Export presets are expressed as a target long-edge pixel count rather than
+// a fixed WxH pair. A fixed 1920x1080 (16:9) pair would stretch or crop any
+// source whose aspect ratio differs -- and it does here: this machine's
+// display is 1470x956, an aspect ratio of 1.54, not 1.78. Scaling by the
+// long edge and deriving the other dimension from the SOURCE's own aspect
+// ratio guarantees the exported picture is never distorted, at the cost of
+// "1080p" not always meaning literally 1920x1080 -- it means "downscaled/
+// upscaled so the longer edge is ~1080px, at the source's true shape."
+// Dimensions are rounded to the nearest even number because H.264/HEVC
+// encoders require even width/height.
+const EXPORT_PRESETS = { '1080p': 1080, '1440p': 1440, '4k': 2160 };
+
+function evenRound(n) {
+  return Math.max(2, Math.round(n / 2) * 2);
+}
+
+function resolveExportSize(preset, source) {
+  const longEdgeTarget = EXPORT_PRESETS[preset];
+  if (!longEdgeTarget) throw new Error(`Unknown export preset: ${JSON.stringify(preset)}`);
+  const longEdgeSource = Math.max(source.width, source.height);
+  const scale = longEdgeTarget / longEdgeSource;
+  return {
+    width: evenRound(source.width * scale),
+    height: evenRound(source.height * scale)
+  };
+}
+
+ipcMain.handle('project:load', () => {
+  const project = loadProject(editorDir);
+  return {
+    dir: editorDir,
+    project,
+    video: path.join(editorDir, 'raw.mov'),
+    segments: zoomSegments(project.zoomKeyframes, project.capture.duration),
+    camera: cameraFor(editorDir)
+  };
+});
+
+ipcMain.handle('project:deleteZoom', (_e, segment) => {
+  const project = loadProject(editorDir);
+  project.zoomKeyframes = deleteSegment(project.zoomKeyframes, segment);
+  saveProject(editorDir, project);
+  return {
+    project,
+    segments: zoomSegments(project.zoomKeyframes, project.capture.duration),
+    camera: cameraFor(editorDir)
+  };
+});
+
+ipcMain.handle('export:start', async (_e, { preset, codec }) => {
+  const project = loadProject(editorDir);
+  const { width, height } = resolveExportSize(preset, project.source);
+  // The renderer draws from camera.bin, not from zoomKeyframes directly, so
+  // it must be rewritten here to reflect any deletions made in the editor --
+  // otherwise a deleted zoom would still show up in the exported file even
+  // though the preview no longer shows it.
+  writeCameraTrack(editorDir, cameraFor(editorDir));
+  const out = path.join(editorDir, `export-${width}x${height}.mp4`);
+  return new Promise((resolve, reject) => {
+    spawnHelper(path.join(BIN_DIR, 'render'), [
+      '--project', editorDir, '--out', out,
+      '--width', String(width), '--height', String(height), '--codec', codec || 'h264'
+    ], {
+      onMessage: (m) => {
+        if (m.type === 'progress') editorWindow?.webContents.send('export:progress', m);
+        if (m.type === 'error') reject(new Error(m.message));
+      },
+      onMalformed: () => {},
+      onExit: (code) => (code === 0 ? resolve(out) : reject(new Error(`render exited ${code}`))),
+      onError: (err) => reject(err)
+    });
+  });
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
