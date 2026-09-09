@@ -346,13 +346,36 @@ let exportOutPath = null;
 // need every handler (project:load, deleteZoom, export:start) rewritten to
 // look up its caller's own state instead of a shared global -- a bigger,
 // riskier change for a capability nothing asks for.
+// Chrome below the preview: timeline plus the export row.
+const EDITOR_CHROME_HEIGHT = 150;
+
+function editorWindowSize(dir) {
+  const fallback = { width: 1080, height: 720 };
+  try {
+    const { source } = loadProject(dir);
+    if (!Number.isFinite(source?.width) || !Number.isFinite(source?.height)
+        || source.width <= 0 || source.height <= 0) return fallback;
+    const width = 1080;
+    const height = Math.round(width * (source.height / source.width)) + EDITOR_CHROME_HEIGHT;
+    return { width, height };
+  } catch {
+    // A project that cannot be read is the editor's problem to report, not a
+    // reason to fail before the window even opens.
+    return fallback;
+  }
+}
+
 function openEditorWindow(dir) {
   const prevWin = editorWindow;
   if (prevWin && !prevWin.isDestroyed()) prevWin.close();
 
   editorDir = dir;
+  // Size the editor to the recording's own aspect ratio so the preview fills
+  // it. A fixed 16:9 window against a 1.54 display leaves bars either side
+  // that look like a capture defect but are only unused window.
+  const { width: winW, height: winH } = editorWindowSize(dir);
   const win = new BrowserWindow({
-    width: 1080, height: 720, title: 'Loupe — Edit',
+    width: winW, height: winH, title: 'Loupe — Edit',
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
   });
   editorWindow = win;
