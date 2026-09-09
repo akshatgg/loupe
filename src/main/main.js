@@ -3,33 +3,13 @@ const { app, BrowserWindow, ipcMain, systemPreferences, shell, dialog } = requir
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
-const { execFile, execFileSync } = require('node:child_process');
+const { execFile } = require('node:child_process');
 const { createPermissions } = require('./permissions');
 const { createRecorder } = require('./recorder');
 const { spawnHelper, stopHelper } = require('./helpers');
 
 const BIN_DIR = path.join(__dirname, '..', '..', 'bin');
 const permissions = createPermissions({ systemPreferences, shell });
-
-// Electron exposes no `app.bundleIdentifier` getter (Node's `app` object has
-// none), and app.getName() returns the *product* name ("Electron" in dev),
-// not the bundle id `bin/sources --exclude-bundle` needs to compare against.
-// The real identifier lives in the running .app's Info.plist, one directory
-// above Contents/Resources (process.resourcesPath). Read it once with
-// PlistBuddy; if that ever fails (non-macOS, unusual layout), fall back to
-// an empty string so --exclude-bundle simply filters nothing rather than
-// crashing sources:list.
-function getBundleIdentifier() {
-  try {
-    const infoPlist = path.join(path.dirname(process.resourcesPath), 'Info.plist');
-    return execFileSync('/usr/libexec/PlistBuddy',
-      ['-c', 'Print :CFBundleIdentifier', infoPlist], { encoding: 'utf8' }).trim();
-  } catch {
-    return '';
-  }
-}
-
-const BUNDLE_ID = getBundleIdentifier();
 
 // Surface a helper spawn failure to the user instead of leaving them staring
 // at a picker window that looks like it is recording but never will be.
@@ -66,7 +46,7 @@ function createHudWindow() {
 
 ipcMain.handle('sources:list', () =>
   new Promise((resolve, reject) => {
-    const args = BUNDLE_ID ? ['--exclude-bundle', BUNDLE_ID] : [];
+    const args = ['--exclude-pid', String(process.pid)];
     execFile(path.join(BIN_DIR, 'sources'), args, { maxBuffer: 64 * 1024 * 1024 },
       (err, stdout) => {
         if (err) return reject(new Error(stdout || err.message));
