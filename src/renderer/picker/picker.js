@@ -9,9 +9,14 @@ const BROWSERS = ['Chrome', 'Chromium', 'Edge', 'Brave', 'Arc', 'Safari'];
 // Displays first: recording the whole screen is the commonest case, and it is
 // also the tab that is never empty.
 const TABS = [
-  { kind: 'display', label: 'Entire Screen', empty: 'No displays found.' },
+  { kind: 'display', label: 'Entire screen', empty: 'No displays found.' },
   { kind: 'window', label: 'Window', empty: 'No open windows found.' }
 ];
+
+const isBrowser = (s) =>
+  s.kind === 'window' && BROWSERS.some((b) => (s.app ?? '').includes(b));
+
+const sourceLabel = (s) => (s.app ? `${s.app} — ${s.title}` : s.title);
 
 async function refreshPermissions() {
   const p = await window.loupe.permissions();
@@ -19,11 +24,11 @@ async function refreshPermissions() {
   const banner = document.getElementById('banner');
   if (!p.screenRecording) {
     banner.hidden = false;
-    banner.innerHTML = 'Loupe needs Screen Recording permission to capture your screen. ';
+    banner.textContent = 'Loupe needs Screen Recording permission to capture your screen. ';
     addPaneButton(banner, 'Open Settings', 'screenRecording');
   } else if (!p.accessibility) {
     banner.hidden = false;
-    banner.innerHTML = 'Zoom is off: Loupe needs Accessibility permission to read the scroll wheel. Recording still works. ';
+    banner.textContent = 'Zoom is off: Loupe needs Accessibility permission to read the scroll wheel. Recording still works. ';
     addPaneButton(banner, 'Open Settings', 'accessibility');
   } else {
     banner.hidden = true;
@@ -41,96 +46,130 @@ function addPaneButton(parent, label, pane) {
   parent.appendChild(b);
 }
 
-function card(source) {
-  const el = document.createElement('div');
-  el.className = 'card';
-
-  const img = document.createElement('img');
-  img.src = source.thumbnail ?? '';
-  img.alt = '';
-  el.appendChild(img);
-
-  const title = document.createElement('div');
-  title.className = 'title';
-  // textContent, never innerHTML: `title` and `app` are the OS window title and
-  // owning-application name, and any process on the machine chooses its own.
-  title.textContent = source.app ? `${source.app} — ${source.title}` : source.title;
-  el.appendChild(title);
-
-  // PRD FR-7: the OS cannot capture a single browser tab, so tell the user
-  // the one move that makes it possible instead of leaving them hunting.
-  if (source.kind === 'window' && BROWSERS.some((b) => (source.app ?? '').includes(b))) {
-    const hint = document.createElement('div');
-    hint.className = 'tabhint';
-    hint.textContent = 'Recording one tab? Drag it out into its own window first.';
-    el.appendChild(hint);
-  }
-  el.onclick = () => {
-    document.querySelectorAll('.card.selected').forEach((c) => c.classList.remove('selected'));
-    el.classList.add('selected');
-    selected = source;
-    refreshPermissions();
-  };
-  return el;
-}
-
 function renderTabs() {
   const nav = document.getElementById('tabs');
   nav.textContent = '';
   for (const tab of TABS) {
-    const n = allSources.filter((s) => s.kind === tab.kind).length;
     const b = document.createElement('button');
     b.type = 'button';
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-selected', String(tab.kind === activeTab));
     b.textContent = tab.label;
-    const count = document.createElement('span');
-    count.className = 'count';
-    count.textContent = String(n);
-    b.appendChild(count);
     b.onclick = () => {
       if (activeTab === tab.kind) return;
       activeTab = tab.kind;
-      // Switching tabs clears the selection: leaving a chosen source selected
-      // while it is scrolled out of view in another tab makes the enabled
-      // Start button look like it belongs to whatever is on screen now.
+      // Switching tabs clears the selection: leaving a source selected while
+      // it is hidden under another tab makes the enabled Start button look as
+      // though it belongs to whatever is on screen now.
       selected = null;
       renderTabs();
-      renderGrid();
+      renderList();
+      renderPreview();
       refreshPermissions();
     };
     nav.appendChild(b);
   }
 }
 
-function renderGrid() {
-  const grid = document.getElementById('grid');
+function renderList() {
+  const list = document.getElementById('list');
   const tab = TABS.find((t) => t.kind === activeTab);
   const shown = allSources.filter((s) => s.kind === activeTab);
-  grid.textContent = '';
+  list.textContent = '';
+
   if (shown.length === 0) {
-    grid.classList.add('empty');
-    grid.textContent = tab.empty;
+    const li = document.createElement('li');
+    li.className = 'none';
+    li.textContent = tab.empty;
+    list.appendChild(li);
     return;
   }
-  grid.classList.remove('empty');
-  shown.forEach((s) => grid.appendChild(card(s)));
+
+  for (const source of shown) {
+    const li = document.createElement('li');
+    li.setAttribute('role', 'option');
+    li.setAttribute('aria-selected', String(selected?.id === source.id));
+
+    const icon = document.createElement('img');
+    icon.className = 'icon';
+    icon.src = source.thumbnail ?? '';
+    icon.alt = '';
+    li.appendChild(icon);
+
+    const label = document.createElement('span');
+    label.className = 'label';
+    // textContent, never innerHTML: `title` and `app` are the OS window title
+    // and owning-application name, and any process picks its own.
+    label.textContent = sourceLabel(source);
+    li.appendChild(label);
+
+    li.onclick = () => {
+      selected = source;
+      renderList();
+      renderPreview();
+      refreshPermissions();
+    };
+    list.appendChild(li);
+  }
+}
+
+function renderPreview() {
+  const pane = document.getElementById('preview');
+  pane.textContent = '';
+
+  if (!selected) {
+    const ph = document.createElement('div');
+    ph.className = 'ph';
+    ph.textContent = 'Select a source to record';
+    pane.appendChild(ph);
+    return;
+  }
+
+  if (selected.thumbnail) {
+    const img = document.createElement('img');
+    img.src = selected.thumbnail;
+    img.alt = '';
+    pane.appendChild(img);
+  }
+
+  const cap = document.createElement('div');
+  cap.className = 'cap';
+  cap.textContent = sourceLabel(selected);
+  pane.appendChild(cap);
+
+  // PRD FR-7: the OS exposes displays, windows and applications to screen
+  // capture but never an individual browser tab, so say the one move that
+  // makes a single tab recordable rather than leaving the user hunting.
+  if (isBrowser(selected)) {
+    const hint = document.createElement('div');
+    hint.className = 'tabhint';
+    hint.textContent = 'Recording one tab? Drag it out into its own window first, then pick it here.';
+    pane.appendChild(hint);
+  }
 }
 
 async function load() {
-  const grid = document.getElementById('grid');
-  grid.classList.add('empty');
-  grid.textContent = 'Loading sources…';
+  const list = document.getElementById('list');
+  const loading = document.createElement('li');
+  loading.className = 'none';
+  loading.textContent = 'Loading sources…';
+  list.textContent = '';
+  list.appendChild(loading);
+
   try {
     allSources = await window.loupe.listSources();
     renderTabs();
-    renderGrid();
+    renderList();
   } catch (err) {
     allSources = [];
     renderTabs();
-    grid.classList.add('empty');
-    grid.textContent = `Could not list sources: ${err.message}`;
+    list.textContent = '';
+    const li = document.createElement('li');
+    li.className = 'none';
+    li.textContent = `Could not list sources: ${err.message}`;
+    list.appendChild(li);
   }
+  renderPreview();
   await refreshPermissions();
 }
 
@@ -156,9 +195,8 @@ recordButton.onclick = async () => {
       mic: document.getElementById('mic').checked
     });
     // Microphone was requested but denied: main.js already fell back to
-    // recording without it rather than failing the whole session outright
-    // (see main.js's record:start handler). The user asked for audio and
-    // silently not getting it would be confusing, so say so here instead.
+    // recording without it rather than failing the whole session outright.
+    // The user asked for audio and silently not getting it would confuse.
     if (result?.micRequested && !result.mic) {
       const banner = document.getElementById('banner');
       banner.hidden = false;
