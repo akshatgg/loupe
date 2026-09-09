@@ -100,6 +100,7 @@ function createHudWindow() {
       win.webContents.send('hud:update', {
         zoom: s.zoom, duration: s.duration, zoomEnabled: s.zoomEnabled,
         tapReenables: s.tapReenables, hasMic: s.hasMic,
+        error: s.error,
         elapsed: (Date.now() - startedAt) / 1000
       });
     }
@@ -161,8 +162,13 @@ ipcMain.handle('permissions:open', (_e, pane) => permissions.openPane(pane));
 // introduce a race that rejects legitimate recordings.
 const SOURCE_ID_RE = /^(display|window):\d+$/;
 
+// x/y are the source's global-space origin in points (Sources.swift's
+// SourceOut.x/y). Unlike width/height they may legitimately be negative --
+// a display left of or above the primary display -- so they are validated
+// only for being finite numbers, never for being positive. Optional (default
+// 0) so a picker/source list from before this field existed still works.
 function validateStartOptions(opts) {
-  const { source, width, height, title, mic } = opts ?? {};
+  const { source, width, height, title, mic, x, y } = opts ?? {};
   if (typeof source !== 'string' || !SOURCE_ID_RE.test(source)) {
     throw new Error(`Invalid source id: ${JSON.stringify(source)}`);
   }
@@ -172,14 +178,25 @@ function validateStartOptions(opts) {
   if (typeof height !== 'number' || !Number.isFinite(height) || height <= 0) {
     throw new Error(`Invalid height: ${JSON.stringify(height)}`);
   }
+  const ox = x === undefined ? 0 : x;
+  const oy = y === undefined ? 0 : y;
+  if (typeof ox !== 'number' || !Number.isFinite(ox)) {
+    throw new Error(`Invalid x: ${JSON.stringify(x)}`);
+  }
+  if (typeof oy !== 'number' || !Number.isFinite(oy)) {
+    throw new Error(`Invalid y: ${JSON.stringify(y)}`);
+  }
   if (title !== undefined && typeof title !== 'string') {
     throw new Error(`Invalid title: ${JSON.stringify(title)}`);
   }
-  return { source, width, height, title: typeof title === 'string' ? title : '', mic: Boolean(mic) };
+  return {
+    source, width, height, x: ox, y: oy,
+    title: typeof title === 'string' ? title : '', mic: Boolean(mic)
+  };
 }
 
 ipcMain.handle('record:start', async (_e, rawOpts) => {
-  const { source, width, height, title, mic } = validateStartOptions(rawOpts);
+  const { source, width, height, x, y, title, mic } = validateStartOptions(rawOpts);
   if (!permissions.canRecord()) throw new Error('Screen Recording permission is required');
   if (mic) await permissions.requestMicrophone();
 
@@ -190,7 +207,7 @@ ipcMain.handle('record:start', async (_e, rawOpts) => {
   const hud = createHudWindow();
   try {
     await recorder.start({
-      source, width, height, title, mic, dir,
+      source, width, height, x, y, title, mic, dir,
       // getMediaSourceId() returns "window:<CGWindowID>:0" on macOS; the
       // middle segment is the same windowID `bin/sources` reports as
       // "window:<n>" and that SCContentFilter(excludingWindows:) matches
@@ -394,7 +411,10 @@ ipcMain.handle('export:start', async (_e, { preset, codec }) => {
         if (m.type === 'progress') editorWindow?.webContents.send('export:progress', m);
         if (m.type === 'error') settle(reject, new Error(m.message));
       },
-      onMalformed: () => {},
+      // Silently dropping helper output here is exactly the pattern that
+      // hid the writer-failure bug this fix addresses elsewhere -- log it
+      // instead of discarding it, even though it isn't fatal to the export.
+      onMalformed: (l) => console.error('render malformed:', l),
       onExit: (code) => settle(
         code === 0 ? resolve : reject,
         code === 0 ? out : new Error(`render exited ${code}`)

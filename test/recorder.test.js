@@ -312,6 +312,124 @@ test("a delayed capture error during stop()'s await does not double-stop the sam
   assert.strictEqual(inputStopCount, 1, 'inputtap must be stopped exactly once, not raced');
 });
 
+test('clicks and cursor samples are rebased to source-local coordinates using the source origin', async () => {
+  const { rec, sinks } = harness();
+  // A window sitting at (400, 200) in global display space, as it would if
+  // it were not on the primary display's origin.
+  await rec.start({ source: 'window:1', mic: false, dir: '/tmp/x', x: 400, y: 200 });
+  sinks.capture({ type: 'started', clock: 100 });
+  sinks.inputtap({ type: 'click', clock: 101, x: 450, y: 260, button: 'left' });
+  sinks.inputtap({ type: 'cursor', clock: 101.5, x: 500, y: 300, shape: 'arrow' });
+
+  const s = rec.state();
+  assert.strictEqual(s.clicks[0].x, 50, 'global 450 minus origin 400 must be 50');
+  assert.strictEqual(s.clicks[0].y, 60, 'global 260 minus origin 200 must be 60');
+  assert.strictEqual(s.cursorTrack[0].x, 100, 'global 500 minus origin 400 must be 100');
+  assert.strictEqual(s.cursorTrack[0].y, 100, 'global 300 minus origin 200 must be 100');
+});
+
+test('zoom keyframe cursor positions are also rebased to the source origin', async () => {
+  const { rec, sinks } = harness();
+  await rec.start({ source: 'window:1', mic: false, dir: '/tmp/x', x: 400, y: 200 });
+  sinks.capture({ type: 'started', clock: 0 });
+  sinks.inputtap({ type: 'zoom', clock: 1, dy: 10, x: 450, y: 260 });
+
+  const kf = rec.state().zoomKeyframes;
+  assert.strictEqual(kf.length, 1);
+  assert.strictEqual(kf[0].cx, 50);
+  assert.strictEqual(kf[0].cy, 60);
+});
+
+test('a source with no origin (or a display at the primary origin) leaves coordinates unchanged', async () => {
+  const { rec, sinks } = harness();
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x' });
+  sinks.capture({ type: 'started', clock: 0 });
+  sinks.inputtap({ type: 'cursor', clock: 1, x: 30, y: 40, shape: 'arrow' });
+
+  assert.strictEqual(rec.state().cursorTrack[0].x, 30);
+  assert.strictEqual(rec.state().cursorTrack[0].y, 40);
+});
+
+test('a negative source origin (a display left of or above the primary) is subtracted correctly', async () => {
+  const { rec, sinks } = harness();
+  // A secondary display placed to the left of the primary has a negative x
+  // origin in global space; recorded coordinates must come out larger than
+  // the raw global value, not clamped to zero.
+  await rec.start({ source: 'display:2', mic: false, dir: '/tmp/x', x: -1920, y: 0 });
+  sinks.capture({ type: 'started', clock: 0 });
+  sinks.inputtap({ type: 'cursor', clock: 1, x: -1000, y: 50, shape: 'arrow' });
+
+  assert.strictEqual(rec.state().cursorTrack[0].x, 920, '-1000 minus origin -1920 must be 920');
+  assert.strictEqual(rec.state().cursorTrack[0].y, 50);
+});
+
+test("stop() records the source's origin onto project.source", async () => {
+  const { rec, sinks } = harness();
+  await rec.start({
+    source: 'window:1', mic: false, dir: '/tmp/x',
+    width: 800, height: 600, title: 'Notes', x: 400, y: 200
+  });
+  sinks.capture({ type: 'started', clock: 0 });
+  sinks.capture({ type: 'stopped', duration: 1 });
+
+  const { project } = await rec.stop();
+  assert.strictEqual(project.source.originX, 400);
+  assert.strictEqual(project.source.originY, 200);
+});
+
+test('a helper-reported capture error (not a spawn failure) reaches state().error and stops recording', async () => {
+  const { rec, sinks, stopped } = harness();
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x', zoomEnabled: true });
+  sinks.capture({ type: 'started', clock: 0 });
+
+  // The capture helper is still alive (unlike a spawn failure) but has just
+  // reported a fatal writer problem via its one {"type":"error"} line.
+  sinks.capture({ type: 'error', message: 'video append failed, writer status 3: disk full' });
+
+  const s = rec.state();
+  assert.ok(s.error, 'expected an error to be recorded');
+  assert.strictEqual(s.error.source, 'capture');
+  assert.strictEqual(s.error.message, 'video append failed, writer status 3: disk full');
+  assert.strictEqual(s.recording, false, 'a reported writer failure should stop the recording');
+  assert.ok(stopped.includes('inputtap'), 'an orphaned inputtap should be torn down');
+});
+
+test('a helper-reported inputtap error reaches state().error without stopping the recording', async () => {
+  const { rec, sinks } = harness();
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x', zoomEnabled: true });
+  sinks.capture({ type: 'started', clock: 0 });
+
+  sinks.inputtap({ type: 'error', message: 'could not recreate the event tap' });
+
+  const s = rec.state();
+  assert.ok(s.error, 'expected an error to be recorded');
+  assert.strictEqual(s.error.source, 'inputtap');
+  assert.strictEqual(s.error.message, 'could not recreate the event tap');
+  assert.strictEqual(s.recording, true, 'losing the gesture hook should not stop recording');
+});
+
+test("a helper-reported error calls the host's onError callback, not just state()", async () => {
+  const seen = [];
+  const sinks = {};
+  const rec = createRecorder({
+    binDir: '/fake',
+    spawnHelper: (bin, args, opts) => {
+      const name = bin.endsWith('capture') ? 'capture' : 'inputtap';
+      sinks[name] = opts.onMessage;
+      return { name, kill() {}, exitCode: null, signalCode: null, once() {} };
+    },
+    stopHelper: async () => 0,
+    onError: (e) => seen.push(e)
+  });
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x' });
+  sinks.capture({ type: 'started', clock: 0 });
+  sinks.capture({ type: 'error', message: 'writer failed' });
+
+  assert.strictEqual(seen.length, 1);
+  assert.strictEqual(seen[0].source, 'capture');
+  assert.strictEqual(seen[0].message, 'writer failed');
+});
+
 test('an optional onError callback fires immediately, without waiting for a state() poll', async () => {
   const tapErr = new Error('ENOENT inputtap');
   const sinks = {};
