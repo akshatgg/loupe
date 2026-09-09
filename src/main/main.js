@@ -21,8 +21,7 @@ function onRecorderError(err) {
   // A helper failure ends the recording just like a normal stop, so the HUD
   // poll timer must be torn down here too -- otherwise it keeps firing
   // against a window nobody will ever close.
-  if (hudTimer) { clearInterval(hudTimer); hudTimer = null; }
-  if (hudWindow) { hudWindow.close(); hudWindow = null; }
+  teardownHud();
   pickerWindow?.show();
 }
 
@@ -45,12 +44,32 @@ let hudWindow = null;
 let hudTimer = null;
 let startedAt = 0;
 
+// Single teardown path for the HUD window + its poll timer. Every call site
+// that used to null hudWindow/clear hudTimer by hand (stopRecording,
+// onRecorderError, the record:start catch block, and now the window's own
+// 'closed' event and app 'will-quit') funnels through here instead, so the
+// two pieces of state are always retired together.
+//
+// Idempotent by construction: hudWindow is read into a local and nulled
+// before anything else runs, so a second/concurrent call sees hudWindow
+// already null and does nothing. Closing an already-destroyed BrowserWindow
+// would throw, hence the isDestroyed() guard -- that is exactly the case
+// that used to crash the process when the OS destroyed the HUD out from
+// under us (e.g. Cmd+Q) and the next 200ms timer tick called
+// webContents.send() on the dangling reference.
+function teardownHud() {
+  if (hudTimer) { clearInterval(hudTimer); hudTimer = null; }
+  const win = hudWindow;
+  hudWindow = null;
+  if (win && !win.isDestroyed()) win.close();
+}
+
 // The floating recording overlay. Its BrowserWindow media-source id is
 // passed to `bin/capture --exclude-window` (see record:start below) so
 // ScreenCaptureKit excludes it from the recording -- verified end to end,
 // see task-14-report.md.
 function createHudWindow() {
-  hudWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 260, height: 56, x: 40, y: 60,
     frame: false, transparent: true, alwaysOnTop: true,
     resizable: false, movable: true, skipTaskbar: true,
@@ -59,20 +78,29 @@ function createHudWindow() {
     focusable: false, show: false,
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
   });
-  hudWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  hudWindow.loadFile(path.join(__dirname, '..', 'renderer', 'hud', 'index.html'));
-  hudWindow.once('ready-to-show', () => hudWindow?.showInactive());
+  hudWindow = win;
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.loadFile(path.join(__dirname, '..', 'renderer', 'hud', 'index.html'));
+  win.once('ready-to-show', () => win?.showInactive());
+  // Covers every way the window can go away that does NOT run through
+  // teardownHud() first -- most importantly Electron destroying it on its
+  // own when the app quits mid-recording (Cmd+Q, dock "Quit"). When
+  // teardownHud() itself calls win.close(), this handler fires again
+  // afterwards, but hudWindow is already null by then so it is a no-op.
+  win.once('closed', () => teardownHud());
 
   hudTimer = setInterval(() => {
     const s = recorder.state();
-    hudWindow?.webContents.send('hud:update', {
-      zoom: s.zoom, duration: s.duration, zoomEnabled: s.zoomEnabled,
-      tapReenables: s.tapReenables, hasMic: s.hasMic,
-      elapsed: (Date.now() - startedAt) / 1000
-    });
+    if (!win.isDestroyed()) {
+      win.webContents.send('hud:update', {
+        zoom: s.zoom, duration: s.duration, zoomEnabled: s.zoomEnabled,
+        tapReenables: s.tapReenables, hasMic: s.hasMic,
+        elapsed: (Date.now() - startedAt) / 1000
+      });
+    }
   }, 200);
 
-  return hudWindow;
+  return win;
 }
 
 // Both the Stop button (via ipcMain.handle('record:stop', ...)) and the
@@ -81,9 +109,7 @@ function createHudWindow() {
 // channel -- it must call stopRecording() itself.
 async function stopRecording() {
   if (!hudWindow) return null;
-  if (hudTimer) { clearInterval(hudTimer); hudTimer = null; }
-  const win = hudWindow;
-  hudWindow = null;
+  teardownHud();
   // recorder.stop() resolves to null when there is nothing to stop (e.g. a
   // second call racing the first); that is a valid, falsy result and must
   // not be dereferenced. A rejection, though, must not strand the user with
@@ -94,7 +120,6 @@ async function stopRecording() {
     const result = await recorder.stop();
     return result;
   } finally {
-    win.close();
     pickerWindow?.show();
   }
 }
@@ -168,8 +193,7 @@ ipcMain.handle('record:start', async (_e, rawOpts) => {
       zoomEnabled: permissions.canZoom()
     });
   } catch (err) {
-    if (hudTimer) { clearInterval(hudTimer); hudTimer = null; }
-    if (hudWindow) { hudWindow.close(); hudWindow = null; }
+    teardownHud();
     throw err;
   }
   pickerWindow?.hide();
@@ -178,12 +202,80 @@ ipcMain.handle('record:start', async (_e, rawOpts) => {
 
 ipcMain.handle('record:stop', stopRecording);
 
+// Whether the Control+Shift+S stop-recording shortcut is actually held by
+// us. globalShortcut.register() returns false (not a rejection/throw) when
+// another application already owns the combination, and that failure was
+// previously silent: the user presses the shortcut mid-recording, nothing
+// happens, and there is no error anywhere to explain why. Logged clearly
+// below rather than surfaced as a startup dialog -- a modal here would
+// interrupt every recording session over a shortcut collision that the HUD
+// Stop button already works around. Indicating this in the HUD itself would
+// need a renderer change (a new field on 'hud:update' plus UI to render it),
+// which is out of scope for this main-process-only fix -- see
+// task-14-report.md.
+let stopShortcutRegistered = false;
+
 app.whenReady().then(() => {
   createPickerWindow();
-  globalShortcut.register('Control+Shift+S', () => { stopRecording(); });
+  stopShortcutRegistered = globalShortcut.register('Control+Shift+S', () => {
+    // Unlike ipcMain.handle('record:stop', stopRecording), Electron has no
+    // built-in mechanism to forward a rejection from a globalShortcut
+    // callback anywhere -- an unhandled rejection here would otherwise just
+    // vanish into (or crash) the main process with no user-visible signal.
+    stopRecording().catch((err) => {
+      console.error('Loupe: stop-recording shortcut failed to stop the recording:', err);
+      dialog.showErrorBox('Loupe', `Failed to stop recording: ${err.message}`);
+    });
+  });
+  if (!stopShortcutRegistered) {
+    console.error(
+      'Loupe: could not register the Control+Shift+S stop-recording shortcut ' +
+      '(another application likely already holds it). The HUD Stop button ' +
+      'still works.'
+    );
+  }
 });
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
-app.on('will-quit', () => { globalShortcut.unregisterAll(); });
+
+// Quitting mid-recording (Cmd+Q, dock "Quit", etc.) is an ordinary way for a
+// session to end, not an edge case, and the capture helper deserves the
+// chance to finalize its file rather than being killed out from under a
+// half-written recording. 'will-quit' cannot do that: it fires after
+// Electron has already started tearing down windows, and returning a
+// promise or awaiting anything in it does not delay the quit -- so it is
+// only ever safe to use for synchronous cleanup. 'before-quit' fires
+// earlier and, uniquely, honours event.preventDefault() to hold off the
+// quit while async work runs; that is what makes a real stop-and-save
+// achievable at all here, and the `quitting` flag lets the second
+// before-quit (from our own app.quit() call below) through instead of
+// looping forever. The outer timeout is a deliberate belt-and-suspenders:
+// stopHelper() already SIGKILLs a stuck helper after 3s each (see
+// helpers.js), so normal shutdown finishes well under 8s, but if that
+// invariant is ever violated this still guarantees the app quits rather
+// than hanging on Cmd+Q forever.
+let quitting = false;
+app.on('before-quit', (event) => {
+  if (quitting || !hudWindow) return;
+  event.preventDefault();
+  quitting = true;
+  Promise.race([
+    stopRecording().catch((err) => {
+      console.error('Loupe: failed to stop recording cleanly while quitting:', err);
+    }),
+    new Promise((resolve) => setTimeout(resolve, 8000))
+  ]).finally(() => app.quit());
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
+  // Final synchronous safety net: if some path reached actual quit without
+  // going through stopRecording()/onRecorderError (e.g. before-quit's
+  // timeout fired, or a future quit path we haven't accounted for), this
+  // guarantees hudTimer is cleared before the process goes down rather than
+  // relying on the window's own 'closed' event, which may not have fired
+  // yet at this point in shutdown.
+  teardownHud();
+});
 
 module.exports = { createPickerWindow };
