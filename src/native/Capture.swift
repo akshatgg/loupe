@@ -122,11 +122,12 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
     // Idle-repaint support: when ScreenCaptureKit stops delivering frames
     // because nothing on screen changed, we re-append the last frame on a
     // timer so the output file keeps pace with wall-clock time instead of
-    // holding a single frame for the whole recording. `lastSampleBuffer`
-    // and `lastFrameHostTime` are read and written only from `queue`
-    // (inside the stream-output callback and inside `repaintIfIdle`, which
-    // only ever runs as `idleTimer`'s event handler on `queue`), preserving
-    // the same single-queue confinement as `CaptureState`.
+    // holding a single frame for the whole recording. `lastSampleBuffer`,
+    // `lastFrameHostTime`, `lastAppendedPTS`, and `writerFailureReported`
+    // are read and written only from `queue` (inside the stream-output
+    // callback and inside `repaintIfIdle`, which only ever runs as
+    // `idleTimer`'s event handler on `queue`), preserving the same
+    // single-queue confinement as `CaptureState`.
     //
     // 500ms was chosen over something closer to a frame interval (~16.7ms
     // at 60fps): a static screen is by definition not changing, so
@@ -143,6 +144,19 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
     private var idleTimer: DispatchSourceTimer?
     private var lastSampleBuffer: CMSampleBuffer?
     private var lastFrameHostTime: CFTimeInterval = 0
+
+    // The PTS actually handed to `videoInput.append`, whichever path
+    // produced it (real frame or synthetic repaint). Every append — real or
+    // synthetic — is enforced strictly greater than this before it is
+    // attempted, so `AVAssetWriterInput`'s monotonic-PTS requirement holds
+    // regardless of which path fires next. Read/written only from `queue`.
+    private var lastAppendedPTS: CMTime?
+
+    // Set the first time `videoInput.append` returns false, so a failed
+    // writer (which fails every subsequent append too) produces exactly one
+    // `error` line instead of one per dropped frame for the rest of the
+    // recording. Read/written only from `queue`.
+    private var writerFailureReported = false
 
     init(outURL: URL, width: Int, height: Int, withMic: Bool) throws {
         writer = try AVAssetWriter(outputURL: outURL, fileType: .mov)
@@ -202,7 +216,13 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
 
         // Scheduled on `queue` so its event handler (`repaintIfIdle`) runs
         // with the same queue confinement as the stream and audio
-        // callbacks — no separate synchronization needed.
+        // callbacks. The `idleTimer` field itself is *not* queue-confined —
+        // this assignment runs wherever `start()`'s caller runs, not on
+        // `queue` — so its safety is a sequencing argument, not confinement:
+        // the only other access is `finish()`'s `queue.sync` block, and
+        // `finish()` cannot be called until `start()` has already returned
+        // (this assignment included), so that later access always happens
+        // after this write.
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + Self.idleRepaintInterval,
                         repeating: Self.idleRepaintInterval)
@@ -228,10 +248,9 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
             emit(["type": "started", "clock": startPTS.seconds])
         }
 
-        guard videoInput.isReadyForMoreMediaData else { return }
-        videoInput.append(buffer)
-        lastSampleBuffer = buffer
-        lastFrameHostTime = pts.seconds
+        guard let appended = appendAndTrack(buffer, pts: pts) else { return }
+        lastSampleBuffer = appended
+        lastFrameHostTime = lastAppendedPTS?.seconds ?? pts.seconds
 
         let frames = state.currentFrameCount()
         if frames % 60 == 0 {
@@ -255,13 +274,9 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
         guard now - lastFrameHostTime >= Self.idleRepaintInterval else { return }
         guard videoInput.isReadyForMoreMediaData else { return }
 
-        // Guard against ever going backwards/equal: a repainted frame's PTS
-        // must be strictly after the last one appended (real or synthetic)
-        // or AVAssetWriterInput will treat the sample as out of order.
-        let newSeconds = max(now, lastFrameHostTime + 0.001)
-        let newPTS = CMTime(seconds: newSeconds, preferredTimescale: 600)
+        let candidatePTS = CMTime(seconds: now, preferredTimescale: 600)
         var timing = CMSampleTimingInfo(duration: .invalid,
-                                         presentationTimeStamp: newPTS,
+                                         presentationTimeStamp: candidatePTS,
                                          decodeTimeStamp: .invalid)
         var repainted: CMSampleBuffer?
         let status = CMSampleBufferCreateCopyWithNewTiming(
@@ -272,10 +287,93 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
             sampleBufferOut: &repainted)
         guard status == noErr, let repainted else { return }
 
-        videoInput.append(repainted)
-        lastSampleBuffer = repainted
-        lastFrameHostTime = newSeconds
+        // `appendAndTrack` re-checks and, if needed, re-stamps `candidatePTS`
+        // against `lastAppendedPTS` — this is what keeps a synthetic repaint
+        // from landing behind a real frame that was appended after `now` was
+        // read above but before this append happens.
+        guard let appended = appendAndTrack(repainted, pts: candidatePTS) else { return }
+        lastSampleBuffer = appended
+        lastFrameHostTime = lastAppendedPTS?.seconds ?? now
         state.recordSyntheticFrame()
+    }
+
+    /// Appends `buffer` to `videoInput`, enforcing the strictly-increasing
+    /// presentation-timestamp invariant `AVAssetWriterInput` requires, and
+    /// checking the append's result. Both the real-frame path (in
+    /// `stream(_:didOutputSampleBuffer:of:)`) and the idle-repaint path (in
+    /// `repaintIfIdle`) go through this one function so the invariant holds
+    /// no matter which one fires next. Must only be called from `queue`.
+    ///
+    /// If `pts` is at or behind `lastAppendedPTS`, the frame is restamped to
+    /// land just past it rather than dropped. The reachable case is a real
+    /// frame racing a synthetic repaint: content changes and a frame is
+    /// captured stamped `T − ε`, but before it is delivered the idle timer
+    /// fires and appends a synthetic frame stamped `T`, so the real frame
+    /// arrives already behind. That real frame is exactly the content this
+    /// whole idle-repaint scheme exists to keep — skipping it would throw
+    /// away a genuine on-screen change, whereas nudging its timestamp by one
+    /// tick (~1.7ms at the 600 timescale used below) is far below the
+    /// granularity (one frame interval, ~16.7ms at 60fps) that downstream
+    /// zoom keyframes align against. So: restamp, don't skip, for both real
+    /// and synthetic frames.
+    ///
+    /// Returns the buffer actually appended (identical to `buffer` unless
+    /// restamped), or `nil` if nothing was appended.
+    @discardableResult
+    private func appendAndTrack(_ buffer: CMSampleBuffer, pts: CMTime) -> CMSampleBuffer? {
+        dispatchPrecondition(condition: .onQueue(queue))
+        var toAppend = buffer
+        var appendedPTS = pts
+
+        if let last = lastAppendedPTS, pts <= last {
+            // Bump by exactly one tick of a fixed 600 timescale using integer
+            // value arithmetic, not `last.seconds + epsilon` reconstructed via
+            // `CMTime(seconds:preferredTimescale:)`: a small-enough seconds
+            // epsilon can round back down to the same tick it started from
+            // (e.g. `10.000 + 0.001` at timescale 600, whose tick is
+            // ~0.001667s, rounds to the same `CMTime` as `10.000`), which
+            // would silently fail to advance the timestamp at all. Adding 1
+            // to the integer tick value cannot round away — it is always
+            // strictly greater.
+            let last600 = CMTimeConvertScale(last, timescale: 600, method: .default)
+            appendedPTS = CMTime(value: last600.value + 1, timescale: 600)
+            var timing = CMSampleTimingInfo(duration: .invalid,
+                                             presentationTimeStamp: appendedPTS,
+                                             decodeTimeStamp: .invalid)
+            var restamped: CMSampleBuffer?
+            let status = CMSampleBufferCreateCopyWithNewTiming(
+                allocator: kCFAllocatorDefault,
+                sampleBuffer: buffer,
+                sampleTimingEntryCount: 1,
+                sampleTimingArray: &timing,
+                sampleBufferOut: &restamped)
+            guard status == noErr, let restamped else { return nil }
+            toAppend = restamped
+        }
+
+        guard videoInput.isReadyForMoreMediaData else { return nil }
+        guard videoInput.append(toAppend) else {
+            reportWriterFailureIfNeeded()
+            return nil
+        }
+        lastAppendedPTS = appendedPTS
+        return toAppend
+    }
+
+    /// Emits one `error` NDJSON line the first time `videoInput.append`
+    /// fails, rather than one per subsequent dropped frame: once
+    /// `AVAssetWriter.status` is `.failed`, every later append fails too, so
+    /// without this guard the rest of the recording would flood stdout with
+    /// a duplicate line per frame instead of the single line that actually
+    /// tells the caller the recording is being lost. Must only be called
+    /// from `queue`.
+    private func reportWriterFailureIfNeeded() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard !writerFailureReported else { return }
+        writerFailureReported = true
+        let detail = writer.error?.localizedDescription ?? "unknown error"
+        emit(["type": "error",
+              "message": "video append failed, writer status \(writer.status.rawValue): \(detail)"])
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput buffer: CMSampleBuffer,
