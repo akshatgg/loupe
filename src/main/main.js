@@ -266,16 +266,31 @@ function cameraFor(dir) {
   });
 }
 
-// Export presets are expressed as a target long-edge pixel count rather than
-// a fixed WxH pair. A fixed 1920x1080 (16:9) pair would stretch or crop any
+// Export presets are expressed as a target HEIGHT (the number of vertical
+// lines the "p" in e.g. "1080p" conventionally refers to) rather than a
+// fixed WxH pair. A fixed 1920x1080 (16:9) pair would stretch or crop any
 // source whose aspect ratio differs -- and it does here: this machine's
 // display is 1470x956, an aspect ratio of 1.54, not 1.78. Scaling by the
-// long edge and deriving the other dimension from the SOURCE's own aspect
-// ratio guarantees the exported picture is never distorted, at the cost of
+// height and deriving the width from the SOURCE's own aspect ratio
+// guarantees the exported picture is never distorted, at the cost of
 // "1080p" not always meaning literally 1920x1080 -- it means "downscaled/
-// upscaled so the longer edge is ~1080px, at the source's true shape."
+// upscaled so the picture is 1080 lines tall, at the source's true shape."
+// Targeting height (rather than the longer edge) matters because "p" is a
+// vertical-resolution convention: a source that is wider than 16:9 would,
+// under a long-edge target, come out shorter than the preset name promises
+// (e.g. a 1470x956 source at "1080p" would previously yield 1080x702 --
+// fewer lines than 720p, and a quarter of the pixels a real 1080p frame
+// carries) -- exactly backwards from what selecting "1080p" should mean.
 // Dimensions are rounded to the nearest even number because H.264/HEVC
 // encoders require even width/height.
+//
+// Upscaling is intentionally allowed: a preset taller than the source's own
+// pixels (e.g. picking 4k against a source shorter than 2160) does not add
+// real detail to the full frame, but the exported canvas is not just the
+// full frame -- the camera track can zoom into a crop of it, and a larger
+// export canvas gives that crop more room to be rendered without looking
+// blocky. Refusing to honor the chosen preset would take that headroom away
+// for a modest, and arguably wrong, file-size saving.
 const EXPORT_PRESETS = { '1080p': 1080, '1440p': 1440, '4k': 2160 };
 
 function evenRound(n) {
@@ -283,10 +298,9 @@ function evenRound(n) {
 }
 
 function resolveExportSize(preset, source) {
-  const longEdgeTarget = EXPORT_PRESETS[preset];
-  if (!longEdgeTarget) throw new Error(`Unknown export preset: ${JSON.stringify(preset)}`);
-  const longEdgeSource = Math.max(source.width, source.height);
-  const scale = longEdgeTarget / longEdgeSource;
+  const heightTarget = EXPORT_PRESETS[preset];
+  if (!heightTarget) throw new Error(`Unknown export preset: ${JSON.stringify(preset)}`);
+  const scale = heightTarget / source.height;
   return {
     width: evenRound(source.width * scale),
     height: evenRound(source.height * scale)
