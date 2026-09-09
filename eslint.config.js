@@ -6,7 +6,8 @@ module.exports = [
       ecmaVersion: 2023,
       sourceType: 'commonjs',
       globals: { require: 'readonly', module: 'writable', process: 'readonly',
-                 console: 'readonly', __dirname: 'readonly', Buffer: 'readonly' }
+                 console: 'readonly', __dirname: 'readonly', Buffer: 'readonly',
+                 setTimeout: 'readonly', clearTimeout: 'readonly' }
     },
     rules: {
       'no-unused-vars': 'error',
