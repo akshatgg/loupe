@@ -11,7 +11,9 @@ const { solveCamera } = require('./camera');
 const { zoomSegments, deleteSegment } = require('./segments');
 const { loadProject, saveProject, readCursorTrack, writeCameraTrack } = require('./project');
 
-const BIN_DIR = path.join(__dirname, '..', '..', 'bin');
+const BIN_DIR = app.isPackaged
+  ? path.join(process.resourcesPath, 'bin')
+  : path.join(__dirname, '..', '..', 'bin');
 const permissions = createPermissions({ systemPreferences, shell });
 
 // Surface a helper spawn failure to the user instead of leaving them staring
