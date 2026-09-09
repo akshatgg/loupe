@@ -507,11 +507,21 @@ function createZoomState() {
 function applyScroll(state, { t, dy, x, y }) {
   // Events arrive from the OS via a Swift event tap. One non-finite dy would
   // set target to NaN, and NaN * exp(...) stays NaN, so zoom would be dead
-  // for the rest of the recording with no way to recover.
+  // for the rest of the recording with no way to recover. Reject it here,
+  // before target is touched.
   if (!Number.isFinite(dy)) return false;
 
   const next = clamp(state.target * Math.exp(dy * SENSITIVITY), ZOOM_MIN, ZOOM_MAX);
   const zoomChanged = next !== state.target;
+  state.target = next;
+
+  // A non-finite cursor position wouldn't corrupt state.target (it's already
+  // committed above), but it would get written into a keyframe's cx/cy,
+  // handing the downstream renderer a NaN camera position. Unlike dy, a bad
+  // x/y should only cost us the keyframe, not the zoom change: the next
+  // event with usable coordinates will emit a keyframe carrying the current
+  // (accumulated) target, so nothing is lost.
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
 
   // lastCursor is the position last COMMITTED to, not the one last seen.
   // Comparing against the previous raw sample would let sub-epsilon movement
@@ -522,8 +532,6 @@ function applyScroll(state, { t, dy, x, y }) {
   const cursorMoved =
     Math.abs(x - state.lastCursor.x) >= CURSOR_EPSILON ||
     Math.abs(y - state.lastCursor.y) >= CURSOR_EPSILON;
-
-  state.target = next;
 
   if (!zoomChanged && !cursorMoved) return false;
 

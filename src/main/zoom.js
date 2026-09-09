@@ -22,12 +22,21 @@ function createZoomState() {
 function applyScroll(state, { t, dy, x, y }) {
   // A degenerate dy (NaN, +/-Infinity, or an undefined-derived value) would
   // corrupt state.target permanently, since clamp(NaN, ...) is NaN and NaN
-  // poisons every future computation. Reject it here instead. x/y get the
-  // same treatment: a non-finite cursor position wouldn't corrupt state (the
-  // NaN comparisons below just evaluate to "not moved"), but it would still
-  // get written into a keyframe's cx/cy, handing the downstream renderer a
-  // NaN camera position. Better to drop the event at the same guard point.
-  if (!Number.isFinite(dy) || !Number.isFinite(x) || !Number.isFinite(y)) return false;
+  // poisons every future computation. Reject it here instead, before target
+  // is touched.
+  if (!Number.isFinite(dy)) return false;
+
+  const next = clamp(state.target * Math.exp(dy * SENSITIVITY), ZOOM_MIN, ZOOM_MAX);
+  const zoomChanged = next !== state.target;
+  state.target = next;
+
+  // A non-finite cursor position wouldn't corrupt state.target (it's already
+  // committed above), but it would get written into a keyframe's cx/cy,
+  // handing the downstream renderer a NaN camera position. Unlike dy, a bad
+  // x/y should only cost us the keyframe, not the zoom change: the next
+  // event with usable coordinates will emit a keyframe carrying the current
+  // (accumulated) target, so nothing is lost.
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
 
   // First call ever: seed the baseline from this event's position and treat
   // the cursor as not having moved yet.
@@ -35,13 +44,9 @@ function applyScroll(state, { t, dy, x, y }) {
     state.lastCursor = { x, y };
   }
 
-  const next = clamp(state.target * Math.exp(dy * SENSITIVITY), ZOOM_MIN, ZOOM_MAX);
-  const zoomChanged = next !== state.target;
   const cursorMoved =
     Math.abs(x - state.lastCursor.x) >= CURSOR_EPSILON ||
     Math.abs(y - state.lastCursor.y) >= CURSOR_EPSILON;
-
-  state.target = next;
 
   if (!zoomChanged && !cursorMoved) return false;
 

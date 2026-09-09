@@ -100,3 +100,55 @@ test('a non-finite dy is ignored and leaves target usable', () => {
   applyScroll(s, { t: 2, dy: 10, x: 100, y: 100 });
   assert.ok(s.target > before);
 });
+
+test('a non-finite x still updates target but emits no keyframe', () => {
+  const s = createZoomState();
+  const before = s.target;
+  const result = applyScroll(s, { t: 1, dy: 10, x: NaN, y: 100 });
+  assert.strictEqual(result, false);
+  assert.ok(s.target > before, 'target should still move on a valid dy');
+  assert.strictEqual(s.keyframes.length, 0);
+});
+
+test('a non-finite y still updates target but emits no keyframe', () => {
+  const s = createZoomState();
+  const before = s.target;
+  const result = applyScroll(s, { t: 1, dy: 10, x: 100, y: NaN });
+  assert.strictEqual(result, false);
+  assert.ok(s.target > before, 'target should still move on a valid dy');
+  assert.strictEqual(s.keyframes.length, 0);
+});
+
+test('a following event with good coordinates emits a keyframe carrying the accumulated target', () => {
+  const s = createZoomState();
+  // Seed the baseline with a real keyframe.
+  applyScroll(s, { t: 1, dy: 10, x: 100, y: 100 });
+  assert.strictEqual(s.keyframes.length, 1);
+  // Bad coordinates: zoom still accumulates, but no keyframe.
+  applyScroll(s, { t: 2, dy: 10, x: NaN, y: 100 });
+  const accumulated = s.target;
+  assert.strictEqual(s.keyframes.length, 1);
+  // Good coordinates again, cursor moved: emits a keyframe with the
+  // accumulated (not the pre-skip) target.
+  const result = applyScroll(s, { t: 3, dy: 0, x: 400, y: 400 });
+  assert.strictEqual(result, true);
+  assert.strictEqual(s.keyframes.length, 2);
+  assert.strictEqual(s.keyframes[1].zoom, accumulated);
+  assert.strictEqual(s.keyframes[1].cx, 400);
+  assert.strictEqual(s.keyframes[1].cy, 400);
+});
+
+test('a skipped non-finite-coordinate event does not corrupt lastCursor', () => {
+  const s = createZoomState();
+  applyScroll(s, { t: 0, dy: 10, x: 100, y: 100 });
+  assert.strictEqual(s.keyframes.length, 1);
+  // Bad coordinates: no keyframe, lastCursor must remain untouched.
+  applyScroll(s, { t: 1, dy: 10, x: NaN, y: 100 });
+  assert.strictEqual(s.keyframes.length, 1);
+  assert.deepStrictEqual(s.lastCursor, { x: 100, y: 100 });
+  // A subsequent small move from the untouched baseline still behaves
+  // normally (below epsilon => no emit).
+  const result = applyScroll(s, { t: 2, dy: 0, x: 100.5, y: 100 });
+  assert.strictEqual(result, false);
+  assert.strictEqual(s.keyframes.length, 1);
+});
