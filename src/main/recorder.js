@@ -199,7 +199,7 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
 
   function state() {
     return {
-      recording, zoomEnabled, tapReenables, duration, error,
+      recording, zoomEnabled, tapReenables, duration, error, hasMic,
       zoomKeyframes: zoomState.keyframes, clicks, cursorTrack,
       zoom: zoomState.target
     };
