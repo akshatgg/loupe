@@ -86,11 +86,17 @@ async function stopRecording() {
   hudWindow = null;
   // recorder.stop() resolves to null when there is nothing to stop (e.g. a
   // second call racing the first); that is a valid, falsy result and must
-  // not be dereferenced.
-  const result = await recorder.stop();
-  win.close();
-  pickerWindow?.show();
-  return result;
+  // not be dereferenced. A rejection, though, must not strand the user with
+  // no window at all: the picker has to come back regardless of how
+  // stop() ends, so the recovery runs in `finally` and the failure is
+  // re-thrown afterward rather than swallowed.
+  try {
+    const result = await recorder.stop();
+    return result;
+  } finally {
+    win.close();
+    pickerWindow?.show();
+  }
 }
 
 ipcMain.handle('sources:list', () =>
@@ -112,7 +118,37 @@ ipcMain.handle('permissions:status', () => ({
 
 ipcMain.handle('permissions:open', (_e, pane) => permissions.openPane(pane));
 
-ipcMain.handle('record:start', async (_e, { source, width, height, title, mic }) => {
+// The main process is the actual trust boundary here, not the picker
+// renderer: a compromised or hostile renderer can invoke this handler with
+// whatever it likes, so every field is checked against the shape the app
+// itself produces before it is allowed anywhere near recorder.start() --
+// `width`/`height` in particular feed the camera solver's and renderer's
+// arithmetic, where a non-finite or negative value fails silently deep in
+// geometry maths rather than at an obvious boundary. `source` is not
+// checked against a live source list on purpose: the window list can
+// change between listing and recording, and re-verifying here would just
+// introduce a race that rejects legitimate recordings.
+const SOURCE_ID_RE = /^(display|window):\d+$/;
+
+function validateStartOptions(opts) {
+  const { source, width, height, title, mic } = opts ?? {};
+  if (typeof source !== 'string' || !SOURCE_ID_RE.test(source)) {
+    throw new Error(`Invalid source id: ${JSON.stringify(source)}`);
+  }
+  if (typeof width !== 'number' || !Number.isFinite(width) || width <= 0) {
+    throw new Error(`Invalid width: ${JSON.stringify(width)}`);
+  }
+  if (typeof height !== 'number' || !Number.isFinite(height) || height <= 0) {
+    throw new Error(`Invalid height: ${JSON.stringify(height)}`);
+  }
+  if (title !== undefined && typeof title !== 'string') {
+    throw new Error(`Invalid title: ${JSON.stringify(title)}`);
+  }
+  return { source, width, height, title: typeof title === 'string' ? title : '', mic: Boolean(mic) };
+}
+
+ipcMain.handle('record:start', async (_e, rawOpts) => {
+  const { source, width, height, title, mic } = validateStartOptions(rawOpts);
   if (!permissions.canRecord()) throw new Error('Screen Recording permission is required');
   if (mic) await permissions.requestMicrophone();
 

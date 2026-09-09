@@ -1557,8 +1557,14 @@ git commit -m "feat: add TCC permission checks with graceful zoom degradation"
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: `bin/sources`, printing one JSON array and exiting. Each element:
+- Produces: `bin/sources [--exclude-bundle <id>]`, printing one JSON array and exiting. Each element:
   `{ id, kind, title, app, width, height, thumbnail }` where `id` is `"display:<n>"` or `"window:<n>"` and `thumbnail` is a base64 PNG data URL or `null`.
+
+**`--exclude-bundle` exists because self-exclusion cannot be self-determined.** The original design compared each window's owner against `Bundle.main.bundleIdentifier` to hide Loupe's own windows. That is always `nil` for a standalone `swiftc`-built binary — verified directly — so the comparison always passed and Loupe's windows were never excluded. Only the caller knows the identifier, so Electron passes it in. With the flag absent nothing is excluded, which is the right behaviour when running the binary by hand.
+
+**Errors are encoded with `JSONSerialization`, never hand-built.** An interpolated error string escaped only double quotes, so a backslash or newline in a macOS error message produced JSON that `JSON.parse` rejects — on precisely the path a user without Screen Recording permission hits.
+
+The shipped `src/native/Sources.swift` is authoritative for both; the sample below predates them.
 
 Implements FR-1 and TRD §3.1.
 
@@ -2438,7 +2444,34 @@ ipcMain.handle('permissions:status', () => ({
 
 ipcMain.handle('permissions:open', (_e, pane) => permissions.openPane(pane));
 
-ipcMain.handle('record:start', async (_e, { source, mic }) => {
+// The main process is the actual trust boundary here, not the picker
+// renderer: it must not take `source`/`width`/`height`/`title`/`mic` on
+// faith from whatever called `startRecording` over the preload bridge.
+// `width`/`height` feed the camera solver's and the renderer's point-to-
+// pixel arithmetic, where a non-finite or negative value fails silently
+// deep in geometry maths instead of at an obvious boundary -- so they are
+// checked here, before anything is forwarded to `recorder.start()`.
+const SOURCE_ID_RE = /^(display|window):\d+$/;
+
+function validateStartOptions(opts) {
+  const { source, width, height, title, mic } = opts ?? {};
+  if (typeof source !== 'string' || !SOURCE_ID_RE.test(source)) {
+    throw new Error(`Invalid source id: ${JSON.stringify(source)}`);
+  }
+  if (typeof width !== 'number' || !Number.isFinite(width) || width <= 0) {
+    throw new Error(`Invalid width: ${JSON.stringify(width)}`);
+  }
+  if (typeof height !== 'number' || !Number.isFinite(height) || height <= 0) {
+    throw new Error(`Invalid height: ${JSON.stringify(height)}`);
+  }
+  if (title !== undefined && typeof title !== 'string') {
+    throw new Error(`Invalid title: ${JSON.stringify(title)}`);
+  }
+  return { source, width, height, title: typeof title === 'string' ? title : '', mic: Boolean(mic) };
+}
+
+ipcMain.handle('record:start', async (_e, rawOpts) => {
+  const { source, width, height, title, mic } = validateStartOptions(rawOpts);
   if (!permissions.canRecord()) throw new Error('Screen Recording permission is required');
   if (mic) await permissions.requestMicrophone();
 
@@ -2447,7 +2480,7 @@ ipcMain.handle('record:start', async (_e, { source, mic }) => {
 
   const hud = createHudWindow();
   await recorder.start({
-    source, mic, dir,
+    source, width, height, title, mic, dir,
     hudWindowId: hud.getMediaSourceId().split(':')[1],
     zoomEnabled: permissions.canZoom()
   });
@@ -2564,12 +2597,28 @@ function addPaneButton(parent, label, pane) {
   parent.appendChild(b);
 }
 
+// `source.title` is not trusted content: it is the title of some other
+// process's window, and any local process controls its own window title.
+// A hostile one could set its title to a script payload, and this picker's
+// preload bridge exposes `startRecording` -- so a title that reaches an
+// HTML parser here could start a microphone-enabled recording unprompted.
+// Build the card from DOM nodes and assign text via `textContent` instead
+// of `innerHTML`/interpolated markup, so a title is always rendered as
+// inert text no matter what it contains.
 function card(source) {
   const el = document.createElement('div');
   el.className = 'card';
-  el.innerHTML = `
-    <img src="${source.thumbnail ?? ''}" alt="">
-    <div class="title">${source.app ? source.app + ' — ' : ''}${source.title}</div>`;
+
+  const img = document.createElement('img');
+  img.src = source.thumbnail ?? '';
+  img.alt = '';
+  el.appendChild(img);
+
+  const title = document.createElement('div');
+  title.className = 'title';
+  title.textContent = source.app ? `${source.app} — ${source.title}` : source.title;
+  el.appendChild(title);
+
   // PRD FR-7: the OS cannot capture a single browser tab, so tell the user
   // the one move that makes it possible instead of leaving them hunting.
   if (source.kind === 'window' && BROWSERS.some((b) => (source.app ?? '').includes(b))) {
