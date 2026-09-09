@@ -102,7 +102,62 @@ function solvePath(zoomSamples, cursor, { width, height }) {
   return { cx, cy };
 }
 
+const SMOOTH_CUTOFF_HZ = 1.2;
+
+function alphaFor(cutoffHz, sampleRate) {
+  return 1 - Math.exp((-2 * Math.PI * cutoffHz) / sampleRate);
+}
+
+// Forward pass then backward pass. Running the same filter in both
+// directions cancels the phase shift, so the output has zero lag.
+function smoothPath(arr, alpha) {
+  const n = arr.length;
+  if (n === 0) return new Float64Array(0);
+
+  const forward = new Float64Array(n);
+  let acc = arr[0];
+  for (let i = 0; i < n; i++) {
+    acc += alpha * (arr[i] - acc);
+    forward[i] = acc;
+  }
+
+  const out = new Float64Array(n);
+  acc = forward[n - 1];
+  for (let i = n - 1; i >= 0; i--) {
+    acc += alpha * (forward[i] - acc);
+    out[i] = acc;
+  }
+  return out;
+}
+
+function solveCamera({ keyframes, cursorTrack, duration, width, height, sampleRate = SAMPLE_RATE }) {
+  const zoom = easeZoom(keyframes, duration, sampleRate);
+  const cursor = resampleCursor(cursorTrack, duration, sampleRate);
+  const raw = solvePath(zoom, cursor, { width, height });
+  const alpha = alphaFor(SMOOTH_CUTOFF_HZ, sampleRate);
+  const cx = smoothPath(raw.cx, alpha);
+  const cy = smoothPath(raw.cy, alpha);
+
+  const dt = 1 / sampleRate;
+  const out = new Array(zoom.length);
+  for (let i = 0; i < zoom.length; i++) {
+    const z = zoom[i];
+    const vw = width / z;
+    const vh = height / z;
+    // Re-clamp: smoothing can push the frame past the screen edge, which
+    // would render as black bars.
+    out[i] = {
+      t: i * dt,
+      zoom: z,
+      cx: clamp(cx[i], vw / 2, width - vw / 2),
+      cy: clamp(cy[i], vh / 2, height - vh / 2)
+    };
+  }
+  return out;
+}
+
 module.exports = {
-  easeZoom, resampleCursor, solvePath, clamp, sampleCount,
-  SAMPLE_RATE, TAU, DEAD_ZONE_FRACTION
+  easeZoom, resampleCursor, solvePath, smoothPath, alphaFor, solveCamera,
+  clamp, sampleCount,
+  SAMPLE_RATE, TAU, DEAD_ZONE_FRACTION, SMOOTH_CUTOFF_HZ
 };
