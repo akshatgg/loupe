@@ -55,6 +55,11 @@ function createPickerWindow() {
     width: 940, height: 660, title: 'Loupe',
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
   });
+  // Only windows on the active Space are listed, so choosing a window that
+  // lives on another desktop means switching to it. A picker pinned to its own
+  // Space would be left behind at exactly that moment, so it follows instead --
+  // switch desktops, hit Refresh, and the window is there to pick.
+  pickerWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   pickerWindow.loadFile(path.join(__dirname, '..', 'renderer', 'picker', 'index.html'));
   return pickerWindow;
 }
