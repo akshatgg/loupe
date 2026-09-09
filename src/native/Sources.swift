@@ -61,11 +61,11 @@ struct SourcesTool {
                                                height: display.height)))
             }
 
-            let excludeBundle = arg("--exclude-bundle")
+            let excludePid = arg("--exclude-pid").flatMap { Int32($0) }
             for window in content.windows {
                 guard let title = window.title, !title.isEmpty,
                       window.frame.width > 40, window.frame.height > 40,
-                      excludeBundle == nil || window.owningApplication?.bundleIdentifier != excludeBundle
+                      excludePid == nil || window.owningApplication?.processID != excludePid
                 else { continue }
 
                 let filter = SCContentFilter(desktopIndependentWindow: window)
