@@ -4,8 +4,9 @@ const { ZOOM_MIN } = require('./zoom');
 
 const SAMPLE_RATE = 120;
 
-// Critically damped spring. Response reaches ~95% at about 4.7 * TAU,
-// so 0.082 gives the ~400ms settle specified in TRD 4.2.
+// Critically damped spring: x(t) = 1 - (1 + t/TAU) * exp(-t/TAU).
+// Reaching 95% at 400ms needs TAU = 0.0843 exactly, so 0.082 clears it with
+// margin at 95.5%. The 0.085 originally specified lands at 94.84% and misses.
 const TAU = 0.082;
 
 // The inner 50% of the visible rect. Cursor movement inside it moves nothing.
