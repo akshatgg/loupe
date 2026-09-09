@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Loupe — Edit</title>
+<link rel="stylesheet" href="editor.css">
+<body>
+  <canvas id="stage"></canvas>
+  <video id="src" hidden></video>
+  <div id="timeline">
+    <div id="track"></div>
+    <input id="scrub" type="range" min="0" max="1000" value="0">
+  </div>
+  <footer>
+    <button id="play">Play</button>
+    <select id="preset">
+      <option value="1080p">1080p</option>
+      <option value="1440p">1440p</option>
+      <option value="4k">4K</option>
+    </select>
+    <button id="export">Export MP4</button>
+    <span id="status"></span>
+  </footer>
+  <script src="editor.js"></script>
+</body>
