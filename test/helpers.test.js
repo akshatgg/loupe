@@ -91,6 +91,106 @@ test('spawnHelper survives a failed spawn with no onError supplied', async () =>
   assert.ok(true);
 });
 
+test("stopHelper waits for 'close', not 'exit', even once exitCode is already set", async () => {
+  // A minimal fake child that reproduces the exact ordering Node guarantees
+  // for a real ChildProcess: 'exit' (the process has been reaped) fires
+  // strictly before 'close' (its stdio has finished draining to us). Real
+  // helpers.test.js coverage of this below uses an actual OS process, but a
+  // real process's exit-to-close gap is a handful of microseconds -- too
+  // small to assert against deterministically. This fake makes the gap
+  // explicit and controllable, and is what actually pins down the fix:
+  // stopHelper must not resolve merely because exitCode/signalCode are set.
+  const { EventEmitter } = require('node:events');
+  const child = new EventEmitter();
+  child.exitCode = null;
+  child.signalCode = null;
+  child.kill = () => {
+    setTimeout(() => {
+      child.exitCode = 0;
+      child.emit('exit', 0, null);
+      // 'close' -- and therefore the moment the real helper's last stdout
+      // line would have been parsed -- arrives in a later tick.
+      setTimeout(() => child.emit('close', 0), 0);
+    }, 0);
+  };
+
+  const order = [];
+  child.once('exit', () => order.push('exit'));
+  const resolved = stopHelper(child, 2000).then((code) => { order.push('resolved'); return code; });
+  const code = await resolved;
+  assert.deepStrictEqual(order, ['exit', 'resolved'], "'close' must fire before stopHelper resolves");
+  assert.strictEqual(code, 0);
+});
+
+test('stopHelper does not resolve before all buffered stdout has been parsed (real process)', async () => {
+  // A real-process companion to the fake-timeline test above: writes a
+  // large NDJSON line via fs.writeSync (synchronous, so nothing here is
+  // lost to buffering the way process.stdout.write()+process.exit() could
+  // lose it) and lets the script exit naturally. At this size the child's
+  // 'exit' reliably fires before its stdout has finished draining to us --
+  // verified empirically while writing this test -- exercising the same
+  // race the fake-timeline test pins down, but through the real spawn/pipe
+  // machinery end to end.
+  const os = require('node:os');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const scriptPath = path.join(os.tmpdir(), `loupe-stophelper-test-${process.pid}.js`);
+  fs.writeFileSync(scriptPath, [
+    "const fs = require('fs');",
+    "const padding = 'x'.repeat(8 * 1024 * 1024);",
+    "fs.writeSync(1, JSON.stringify({type:'padding', big: padding}) + '\\n');",
+    "fs.writeSync(1, JSON.stringify({type:'stopped', duration: 7}) + '\\n');"
+  ].join('\n'));
+
+  try {
+    const messages = [];
+    let resolveExited;
+    const exited = new Promise((resolve) => { resolveExited = resolve; });
+    const child = spawnHelper(process.execPath, [scriptPath], {
+      onMessage: (m) => messages.push(m),
+      onMalformed: () => {},
+      onExit: () => resolveExited()
+    });
+    // Let the script run and exit on its own -- this is what puts the child
+    // into the "already exited, stdio maybe still draining" state that
+    // matters here. Calling stopHelper() immediately (no wait) would instead
+    // SIGTERM the process before Node has even finished starting it, which
+    // proves nothing about the drain race.
+    await exited;
+    await stopHelper(child, 5000);
+    const stopped = messages.find((m) => m.type === 'stopped');
+    assert.ok(stopped, 'the final NDJSON line should have been parsed before stopHelper resolved');
+    assert.strictEqual(stopped.duration, 7);
+  } finally {
+    fs.unlinkSync(scriptPath);
+  }
+});
+
+test('a kill() failure on an already-running child does not suppress its real exit code', async () => {
+  // Simulates ChildProcess emitting 'error' well after a successful spawn
+  // (e.g. stopHelper()'s child.kill() failing) rather than the classic
+  // ENOENT-before-spawn case. The exit handler must still see the real exit
+  // code afterwards, not the onExit(null, null) fallback meant only for a
+  // process that never started.
+  let resolveExit;
+  const exited = new Promise((resolve) => { resolveExit = resolve; });
+  // The 20ms delay before the real exit gives the test room to spawn, wait
+  // for 'spawn', and inject the fake kill() failure before the process
+  // actually terminates -- racing child.once('exit', ...) directly against
+  // an instant process.exit() risks missing the event entirely since
+  // EventEmitter never replays a past emission.
+  const child = spawnHelper(process.execPath, ['-e', 'setTimeout(() => process.exit(3), 20)'], {
+    onMessage: () => {},
+    onMalformed: () => {},
+    onExit: (...args) => resolveExit(args),
+    onError: () => {}
+  });
+  await new Promise((resolve) => child.once('spawn', resolve));
+  child.emit('error', new Error('simulated kill() failure'));
+  const exitArgs = await exited;
+  assert.deepStrictEqual(exitArgs, [3, null]);
+});
+
 test('spawnHelper notifies the caller exactly once on a failed spawn', async () => {
   let exitCalls = 0;
   await new Promise((resolve) => {

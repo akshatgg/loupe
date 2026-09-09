@@ -95,7 +95,7 @@ recordButton.onclick = async () => {
     // expect points, converting to pixels only at render time. x/y are the
     // source's global-space origin; `?? 0` covers a stale/older bin/sources
     // build whose entries don't carry it yet.
-    await window.loupe.startRecording({
+    const result = await window.loupe.startRecording({
       source: selected.id,
       width: selected.width,
       height: selected.height,
@@ -104,6 +104,15 @@ recordButton.onclick = async () => {
       title: selected.title,
       mic: document.getElementById('mic').checked
     });
+    // Microphone was requested but denied: main.js already fell back to
+    // recording without it rather than failing the whole session outright
+    // (see main.js's record:start handler). The user asked for audio and
+    // silently not getting it would be confusing, so say so here instead.
+    if (result?.micRequested && !result.mic) {
+      const banner = document.getElementById('banner');
+      banner.hidden = false;
+      banner.textContent = 'Recording started without audio: microphone permission was denied.';
+    }
   } catch (err) {
     recordButton.textContent = 'Start recording';
     recordButton.disabled = !latestPermissions?.canRecord || !selected;

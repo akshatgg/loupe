@@ -430,6 +430,94 @@ test("a helper-reported error calls the host's onError callback, not just state(
   assert.strictEqual(seen[0].message, 'writer failed');
 });
 
+test('start() rejects while a recording is already in progress, without touching the live children', async () => {
+  const { rec, sinks, children } = harness();
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x' });
+  sinks.capture({ type: 'started', clock: 0 });
+  const firstCapture = children.capture;
+  const firstInput = children.inputtap;
+
+  await assert.rejects(
+    rec.start({ source: 'display:2', mic: false, dir: '/tmp/y' }),
+    /already in progress/
+  );
+
+  // The first session's children must be untouched: no orphaning, no
+  // silently-replaced references.
+  assert.strictEqual(children.capture, firstCapture);
+  assert.strictEqual(children.inputtap, firstInput);
+  assert.strictEqual(rec.state().recording, true);
+});
+
+test('a non-zero inputtap exit is surfaced in state().error without stopping the recording', async () => {
+  const { rec, spawns } = controllableHarness();
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x', zoomEnabled: true });
+  const capture = spawns.find((s) => s.name === 'capture');
+  capture.opts.onMessage({ type: 'started', clock: 0 });
+  const inputtap = spawns.find((s) => s.name === 'inputtap');
+
+  // InputTap.swift's fail() path: emits {"type":"error"} then exit(1). Only
+  // the exit is simulated here to prove the exit code alone (with no prior
+  // error message) is enough to surface something -- the message-based path
+  // is already covered above.
+  inputtap.opts.onExit(1, null);
+
+  const s = rec.state();
+  assert.ok(s.error, 'expected an error to be recorded from the bare exit code');
+  assert.strictEqual(s.error.source, 'inputtap');
+  assert.strictEqual(s.recording, true, 'losing the gesture hook should not stop recording');
+});
+
+test('a signal-terminated inputtap exit (normal shutdown) does not report a spurious error', async () => {
+  const { rec, spawns } = controllableHarness();
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x', zoomEnabled: true });
+  const inputtap = spawns.find((s) => s.name === 'inputtap');
+
+  // stop()/onCaptureError's cleanup both SIGTERM the child: code is null,
+  // not 0, so this must never be confused with a crash.
+  inputtap.opts.onExit(null, 'SIGTERM');
+
+  assert.strictEqual(rec.state().error, null);
+});
+
+test('an exit-code error does not clobber a more specific inputtap error message already recorded', async () => {
+  const { rec, spawns } = controllableHarness();
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x', zoomEnabled: true });
+  const inputtap = spawns.find((s) => s.name === 'inputtap');
+
+  inputtap.opts.onMessage({ type: 'error', message: 'could not recreate the event tap' });
+  inputtap.opts.onExit(1, null);
+
+  assert.strictEqual(rec.state().error.message, 'could not recreate the event tap');
+});
+
+test('a stopped message delivered right before its stopHelper call resolves is reflected in project.capture.duration', async () => {
+  // Models the contract the real stopHelper()'s 'close' (not 'exit') fix
+  // guarantees: by the time the promise recorder.stop() awaits actually
+  // resolves, every NDJSON line the helper will ever write -- including a
+  // final {"type":"stopped",...} -- has already been parsed off stdout and
+  // handed to onMessage. Delivering 'stopped' immediately before resolving
+  // the fake stopHelper call, rather than before calling stop() at all
+  // (which is all the older tests above do), is what makes this different
+  // from the existing coverage: it proves recorder.js reads `duration` at
+  // the right time relative to that guarantee, not just that it reads it
+  // eventually.
+  const { rec, spawns, stopCalls } = controllableHarness();
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x', zoomEnabled: false });
+  const capture = spawns.find((s) => s.name === 'capture');
+  capture.opts.onMessage({ type: 'started', clock: 0 });
+
+  const stopPromise = rec.stop();
+  assert.strictEqual(stopCalls.length, 1);
+  assert.strictEqual(stopCalls[0].child.name, 'capture');
+
+  capture.opts.onMessage({ type: 'stopped', duration: 12 });
+  stopCalls[0].resolve(0);
+
+  const { project } = await stopPromise;
+  assert.strictEqual(project.capture.duration, 12);
+});
+
 test('an optional onError callback fires immediately, without waiting for a state() poll', async () => {
   const tapErr = new Error('ENOENT inputtap');
   const sinks = {};
