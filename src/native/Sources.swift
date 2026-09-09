@@ -12,6 +12,18 @@ struct SourceOut: Encodable {
     let thumbnail: String?
 }
 
+func emit(_ dict: [String: Any]) {
+    guard let data = try? JSONSerialization.data(withJSONObject: dict) else { return }
+    FileHandle.standardOutput.write(data)
+    FileHandle.standardOutput.write(Data("\n".utf8))
+}
+
+func arg(_ name: String) -> String? {
+    let args = CommandLine.arguments
+    guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
+    return args[i + 1]
+}
+
 func thumbnail(for filter: SCContentFilter, width: Int, height: Int) async -> String? {
     let config = SCStreamConfiguration()
     let scale = 320.0 / Double(max(width, 1))
@@ -49,11 +61,11 @@ struct SourcesTool {
                                                height: display.height)))
             }
 
-            let ownBundle = Bundle.main.bundleIdentifier
+            let excludeBundle = arg("--exclude-bundle")
             for window in content.windows {
                 guard let title = window.title, !title.isEmpty,
                       window.frame.width > 40, window.frame.height > 40,
-                      window.owningApplication?.bundleIdentifier != ownBundle
+                      excludeBundle == nil || window.owningApplication?.bundleIdentifier != excludeBundle
                 else { continue }
 
                 let filter = SCContentFilter(desktopIndependentWindow: window)
@@ -74,9 +86,7 @@ struct SourcesTool {
             FileHandle.standardOutput.write(Data("\n".utf8))
             exit(0)
         } catch {
-            let message = error.localizedDescription
-                .replacingOccurrences(of: "\"", with: "'")
-            print("{\"type\":\"error\",\"message\":\"\(message)\"}")
+            emit(["type": "error", "message": error.localizedDescription])
             exit(1)
         }
     }
