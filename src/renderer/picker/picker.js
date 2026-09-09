@@ -1,8 +1,17 @@
 'use strict';
 let selected = null;
 let latestPermissions = null;
+let allSources = [];
+let activeTab = 'display';
 
 const BROWSERS = ['Chrome', 'Chromium', 'Edge', 'Brave', 'Arc', 'Safari'];
+
+// Displays first: recording the whole screen is the commonest case, and it is
+// also the tab that is never empty.
+const TABS = [
+  { kind: 'display', label: 'Entire Screen', empty: 'No displays found.' },
+  { kind: 'window', label: 'Window', empty: 'No open windows found.' }
+];
 
 async function refreshPermissions() {
   const p = await window.loupe.permissions();
@@ -43,6 +52,8 @@ function card(source) {
 
   const title = document.createElement('div');
   title.className = 'title';
+  // textContent, never innerHTML: `title` and `app` are the OS window title and
+  // owning-application name, and any process on the machine chooses its own.
   title.textContent = source.app ? `${source.app} — ${source.title}` : source.title;
   el.appendChild(title);
 
@@ -63,20 +74,60 @@ function card(source) {
   return el;
 }
 
+function renderTabs() {
+  const nav = document.getElementById('tabs');
+  nav.textContent = '';
+  for (const tab of TABS) {
+    const n = allSources.filter((s) => s.kind === tab.kind).length;
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(tab.kind === activeTab));
+    b.textContent = tab.label;
+    const count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = String(n);
+    b.appendChild(count);
+    b.onclick = () => {
+      if (activeTab === tab.kind) return;
+      activeTab = tab.kind;
+      // Switching tabs clears the selection: leaving a chosen source selected
+      // while it is scrolled out of view in another tab makes the enabled
+      // Start button look like it belongs to whatever is on screen now.
+      selected = null;
+      renderTabs();
+      renderGrid();
+      refreshPermissions();
+    };
+    nav.appendChild(b);
+  }
+}
+
+function renderGrid() {
+  const grid = document.getElementById('grid');
+  const tab = TABS.find((t) => t.kind === activeTab);
+  const shown = allSources.filter((s) => s.kind === activeTab);
+  grid.textContent = '';
+  if (shown.length === 0) {
+    grid.classList.add('empty');
+    grid.textContent = tab.empty;
+    return;
+  }
+  grid.classList.remove('empty');
+  shown.forEach((s) => grid.appendChild(card(s)));
+}
+
 async function load() {
   const grid = document.getElementById('grid');
+  grid.classList.add('empty');
   grid.textContent = 'Loading sources…';
   try {
-    const sources = await window.loupe.listSources();
-    grid.textContent = '';
-    if (sources.length === 0) {
-      grid.classList.add('empty');
-      grid.textContent = 'No displays or windows found.';
-    } else {
-      grid.classList.remove('empty');
-      sources.forEach((s) => grid.appendChild(card(s)));
-    }
+    allSources = await window.loupe.listSources();
+    renderTabs();
+    renderGrid();
   } catch (err) {
+    allSources = [];
+    renderTabs();
     grid.classList.add('empty');
     grid.textContent = `Could not list sources: ${err.message}`;
   }
