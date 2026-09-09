@@ -15,6 +15,19 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
+// Spins until `isReady()` is true, but aborts via `fail` (naming `stage`) the
+// moment the writer has failed instead of spinning forever. AVFoundation
+// leaves an input permanently not-ready once its writer fails, so without
+// this check a failed writer would hang the process rather than exit.
+func waitForReady(_ writer: AVAssetWriter, stage: String, isReady: () -> Bool) {
+    while !isReady() {
+        if writer.status == .failed {
+            fail("\(stage): writer failed: \(writer.error?.localizedDescription ?? "unknown")")
+        }
+        usleep(2000)
+    }
+}
+
 func arg(_ name: String) -> String? {
     let a = CommandLine.arguments
     guard let i = a.firstIndex(of: name), i + 1 < a.count else { return nil }
@@ -203,12 +216,20 @@ struct RenderTool {
 
         let ciContext = CIContext(options: [.useSoftwareRenderer: false])
         var frame = 0
+        var skippedFrames = 0
 
         while let buffer = videoOut.copyNextSampleBuffer() {
-            guard let pixels = CMSampleBufferGetImageBuffer(buffer) else { continue }
+            guard let pixels = CMSampleBufferGetImageBuffer(buffer) else {
+                skippedFrames += 1
+                continue
+            }
             let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
             let t = pts.seconds
-            let cam = sample(camera, at: t, default: noZoomDefault)
+            var cam = sample(camera, at: t, default: noZoomDefault)
+            // Defensive only: the solver never emits zoom == 0, but a
+            // malformed camera.bin could, and dividing by it would make
+            // vw/vh infinite and produce a degenerate crop rect.
+            if cam.zoom == 0 { cam.zoom = 1 }
 
             // Crop rect in top-left pixel space.
             let vw = project.source.width / cam.zoom * scale
@@ -228,8 +249,10 @@ struct RenderTool {
 
             guard let pool = adaptor.pixelBufferPool else { fail("no pixel buffer pool") }
             var dest: CVPixelBuffer?
-            CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &dest)
-            guard let dest else { fail("could not allocate output frame") }
+            let poolStatus = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &dest)
+            guard let dest, poolStatus == kCVReturnSuccess else {
+                fail("frame \(frame): could not allocate output frame (CVReturn \(poolStatus))")
+            }
 
             ciContext.render(source, to: dest)
 
@@ -264,8 +287,10 @@ struct RenderTool {
             }
             CVPixelBufferUnlockBaseAddress(dest, [])
 
-            while !videoIn.isReadyForMoreMediaData { usleep(2000) }
-            adaptor.append(dest, withPresentationTime: pts)
+            waitForReady(writer, stage: "video frame \(frame)") { videoIn.isReadyForMoreMediaData }
+            guard adaptor.append(dest, withPresentationTime: pts) else {
+                fail("video frame \(frame): append failed: \(writer.error?.localizedDescription ?? "unknown")")
+            }
 
             frame += 1
             if frame % 30 == 0 { emit(["type": "progress", "frame": frame]) }
@@ -273,9 +298,13 @@ struct RenderTool {
         videoIn.markAsFinished()
 
         if let audioIn, let audioOut {
+            var audioFrame = 0
             while let buffer = audioOut.copyNextSampleBuffer() {
-                while !audioIn.isReadyForMoreMediaData { usleep(2000) }
-                audioIn.append(buffer)
+                waitForReady(writer, stage: "audio frame \(audioFrame)") { audioIn.isReadyForMoreMediaData }
+                guard audioIn.append(buffer) else {
+                    fail("audio frame \(audioFrame): append failed: \(writer.error?.localizedDescription ?? "unknown")")
+                }
+                audioFrame += 1
             }
             audioIn.markAsFinished()
         }
@@ -284,7 +313,7 @@ struct RenderTool {
         if writer.status == .failed {
             fail(writer.error?.localizedDescription ?? "write failed")
         }
-        emit(["type": "done", "file": outPath, "frames": frame])
+        emit(["type": "done", "file": outPath, "frames": frame, "skippedFrames": skippedFrames])
         exit(0)
     }
 }
