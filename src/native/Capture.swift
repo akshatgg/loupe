@@ -420,10 +420,27 @@ struct CaptureTool {
         _ = NSApplication.shared
 
         guard let sourceId = arg("--source"), let out = arg("--out") else {
-            fail("usage: capture --source <id> --out <path> --mic <0|1> [--exclude-window <id>]")
+            fail("usage: capture --source <id> --out <path> --mic <0|1> " +
+                 "[--exclude-window <id>] [--crop-x N --crop-y N --crop-w N --crop-h N]")
         }
         let withMic = arg("--mic") == "1"
         let excludeWindowID = arg("--exclude-window").flatMap { UInt32($0) }
+
+        // A region crop, if present: the four --crop-* args are all-or-nothing
+        // (main.js's recorder.js only ever passes all four together), in
+        // logical points, in the SAME global display coordinate space
+        // bin/sources reports source x/y in -- not yet rebased against any
+        // particular display's origin. That rebasing happens below, once we
+        // know which display was requested, because SCStreamConfiguration's
+        // sourceRect is relative to the display's own origin, not global.
+        let crop: CGRect? = {
+            guard let cx = arg("--crop-x").flatMap(Double.init),
+                  let cy = arg("--crop-y").flatMap(Double.init),
+                  let cw = arg("--crop-w").flatMap(Double.init),
+                  let ch = arg("--crop-h").flatMap(Double.init)
+            else { return nil }
+            return CGRect(x: cx, y: cy, width: cw, height: ch)
+        }()
 
         do {
             let content = try await SCShareableContent.excludingDesktopWindows(
@@ -431,9 +448,18 @@ struct CaptureTool {
             let parts = sourceId.split(separator: ":")
             guard parts.count == 2 else { fail("bad source id: \(sourceId)") }
 
+            // Region cropping is scoped to display sources: a window's own
+            // frame already IS the "crop" a user would draw against a window,
+            // and SCStreamConfiguration's sourceRect is documented against a
+            // display's coordinate space, not a window's.
+            if crop != nil, parts[0] != "display" {
+                fail("region crop is only supported for display sources")
+            }
+
             var filter: SCContentFilter
             var width = 0
             var height = 0
+            var sourceRect: CGRect?
 
             if parts[0] == "display" {
                 guard let id = UInt32(parts[1]),
@@ -441,8 +467,21 @@ struct CaptureTool {
                 else { fail("display not found: \(sourceId)") }
                 let excluded = content.windows.filter { $0.windowID == excludeWindowID }
                 filter = SCContentFilter(display: display, excludingWindows: excluded)
-                width = display.width
-                height = display.height
+                if let crop {
+                    // Rebase the crop's global-space origin against this
+                    // display's own origin -- SCStreamConfiguration.sourceRect
+                    // is display-local, unlike every other coordinate this
+                    // tool and bin/sources deal in.
+                    let origin = display.frame.origin
+                    sourceRect = CGRect(x: crop.origin.x - origin.x,
+                                         y: crop.origin.y - origin.y,
+                                         width: crop.width, height: crop.height)
+                    width = Int(crop.width)
+                    height = Int(crop.height)
+                } else {
+                    width = display.width
+                    height = display.height
+                }
             } else {
                 guard let id = UInt32(parts[1]),
                       let window = content.windows.first(where: { $0.windowID == id })
@@ -462,6 +501,7 @@ struct CaptureTool {
             let config = SCStreamConfiguration()
             config.width = width
             config.height = height
+            if let sourceRect { config.sourceRect = sourceRect }
             config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
             config.pixelFormat = kCVPixelFormatType_32BGRA
             config.showsCursor = false      // drawn at render time instead

@@ -25,6 +25,17 @@
     <input type="checkbox" id="mic" class="switch">
   </div>
 
+  <div class="optionrow" id="regionRow" hidden>
+    <div class="regioninfo">
+      <span class="glyph" aria-hidden="true">▦</span>
+      <span id="regionLabel">Recording the whole source</span>
+    </div>
+    <div class="regionactions">
+      <button id="clearRegion" class="ghost" type="button" hidden>Clear</button>
+      <button id="pickRegion" class="ghost" type="button">Record a region…</button>
+    </div>
+  </div>
+
   <footer>
     <button id="refresh" class="ghost">Refresh</button>
     <p id="hint" class="hint"></p>
