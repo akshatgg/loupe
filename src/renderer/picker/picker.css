@@ -53,6 +53,12 @@ nav button[aria-selected="true"] { color: #8ab4f8; border-bottom-color: #8ab4f8;
 .optionrow label { display: flex; align-items: center; gap: 11px; cursor: pointer; }
 .glyph { opacity: .85; }
 
+.regioninfo { display: flex; align-items: center; gap: 11px; color: #c8ccd0; }
+.regionactions { display: flex; gap: 8px; }
+.regionactions .ghost { padding: 6px 14px; font-size: 12px; }
+
+#preview .region { color: #9ab4d8; font-size: 11px; line-height: 1.4; }
+
 /* Pill switch, in place of a bare checkbox. */
 .switch { appearance: none; width: 38px; height: 21px; border-radius: 11px;
           background: #5f6368; position: relative; cursor: pointer; margin: 0;

@@ -152,14 +152,25 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
     stopped = false;
     dir = opts.dir;
     source = opts.source;
-    sourceWidth = opts.width || 0;
-    sourceHeight = opts.height || 0;
+    // A region crop, when present, IS the source from here on: bin/capture
+    // is told to capture only that rectangle (see the --crop-* args below),
+    // so the file on disk only ever contains the cropped pixels. Using the
+    // crop's own size/origin as sourceWidth/Height/OriginX/Y -- rather than
+    // the full source's -- is what makes consume() below rebase cursor/click
+    // coordinates into crop-local points and project.source (set in stop())
+    // describe the crop, with no other file needing to know a crop happened.
+    const region = opts.region ?? null;
+    sourceWidth = (region ? region.width : opts.width) || 0;
+    sourceHeight = (region ? region.height : opts.height) || 0;
     sourceTitle = opts.title || '';
-    // opts.x/y may legitimately be negative (a display left of or above the
-    // primary one) so `|| 0` (which would treat -0-ish falsy numbers oddly)
-    // is avoided in favor of an explicit undefined check.
-    sourceOriginX = opts.x === undefined ? 0 : opts.x;
-    sourceOriginY = opts.y === undefined ? 0 : opts.y;
+    // opts.x/y (or region.x/y) may legitimately be negative (a display left
+    // of or above the primary one) so `|| 0` (which would treat -0-ish
+    // falsy numbers oddly) is avoided in favor of an explicit undefined
+    // check.
+    const originX = region ? region.x : opts.x;
+    const originY = region ? region.y : opts.y;
+    sourceOriginX = originX === undefined ? 0 : originX;
+    sourceOriginY = originY === undefined ? 0 : originY;
     hasMic = Boolean(opts.mic);
     zoomEnabled = opts.zoomEnabled !== false;
     captureClock = null;
@@ -176,6 +187,15 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
     const args = ['--source', source, '--out', path.join(dir, 'raw.mov'),
                   '--mic', hasMic ? '1' : '0'];
     if (opts.hudWindowId) args.push('--exclude-window', String(opts.hudWindowId));
+    // region.x/y are passed through untouched (global points, same as
+    // --exclude-window's coordinate-free id) -- Capture.swift is what
+    // rebases them against the target display's own origin, since it's the
+    // one that knows which display SCStreamConfiguration.sourceRect is
+    // relative to.
+    if (region) {
+      args.push('--crop-x', String(region.x), '--crop-y', String(region.y),
+                 '--crop-w', String(region.width), '--crop-h', String(region.height));
+    }
 
     captureChild = spawnHelper(path.join(binDir, 'capture'), args, {
       onMessage: (msg) => { if (gen === generation) onCapture(msg); },

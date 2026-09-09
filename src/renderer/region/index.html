@@ -1,0 +1,30 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Loupe — Select Region</title>
+<link rel="stylesheet" href="region.css">
+<body>
+  <div id="rect">
+    <div class="handle" data-handle="nw"></div>
+    <div class="handle" data-handle="n"></div>
+    <div class="handle" data-handle="ne"></div>
+    <div class="handle" data-handle="e"></div>
+    <div class="handle" data-handle="se"></div>
+    <div class="handle" data-handle="s"></div>
+    <div class="handle" data-handle="sw"></div>
+    <div class="handle" data-handle="w"></div>
+    <div id="readout"></div>
+  </div>
+
+  <div id="windowMenu" hidden role="menu"></div>
+
+  <div id="toolbar">
+    <button id="presetFull" type="button" class="ghost">Whole screen</button>
+    <button id="presetWindow" type="button" class="ghost">Fit a window</button>
+    <button id="presetDraw" type="button" class="ghost">Draw your own</button>
+    <span class="spacer"></span>
+    <button id="cancel" type="button" class="ghost">Cancel (Esc)</button>
+    <button id="confirm" type="button">Use this region (Enter)</button>
+  </div>
+
+  <script src="region.js"></script>
+</body>

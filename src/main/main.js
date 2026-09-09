@@ -10,6 +10,7 @@ const { spawnHelper, stopHelper } = require('./helpers');
 const { solveCamera } = require('./camera');
 const { zoomSegments, deleteSegment, validateSegment } = require('./segments');
 const { loadProject, saveProject, readCursorTrack, writeCameraTrack } = require('./project');
+const { validateRegion, clampRegionToBounds } = require('./region');
 
 const BIN_DIR = app.isPackaged
   ? path.join(process.resourcesPath, 'bin')
@@ -160,6 +161,97 @@ ipcMain.handle('sources:list', () =>
       });
   }));
 
+// The region-selection overlay: a transparent, frameless, always-on-top
+// window covering exactly the target display, positioned at the display's
+// own global-space x/y/width/height (the same numbers bin/sources reports,
+// in points) so the overlay's own local coordinate space lines up 1:1 with
+// that global space -- region.js only ever has to add the target's origin
+// back in, never convert a scale.
+//
+// Only one overlay can be open at a time (mirrors exportChild's single-
+// flight guard): regionResolve is the pending record:start-shaped caller's
+// resolve function, and regionInitData is what the overlay's own
+// region:init handler hands back once its renderer has loaded.
+let regionWindow = null;
+let regionResolve = null;
+let regionInitData = null;
+
+function closeRegionWindow() {
+  const win = regionWindow;
+  regionWindow = null;
+  if (win && !win.isDestroyed()) win.close();
+}
+
+function settleRegionPick(result) {
+  if (!regionResolve) return;
+  const resolve = regionResolve;
+  regionResolve = null;
+  resolve(result);
+}
+
+function openRegionPicker(target, windows) {
+  if (regionWindow) throw new Error('A region picker is already open.');
+  regionInitData = { target, windows };
+  return new Promise((resolve) => {
+    regionResolve = resolve;
+    const win = new BrowserWindow({
+      x: Math.round(target.x), y: Math.round(target.y),
+      width: Math.round(target.width), height: Math.round(target.height),
+      frame: false, transparent: true, hasShadow: false,
+      resizable: false, movable: false, skipTaskbar: true,
+      fullscreenable: false, show: false, backgroundColor: '#00000000',
+      webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
+    });
+    regionWindow = win;
+    win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    // 'screen-saver' puts the overlay above the picker AND above whatever
+    // else is on screen, matching the always-on-top the brief asks for.
+    win.setAlwaysOnTop(true, 'screen-saver');
+    win.loadFile(path.join(__dirname, '..', 'renderer', 'region', 'index.html'));
+    win.once('ready-to-show', () => win?.showInactive());
+    // Covers the window being destroyed by any path other than
+    // region:confirm/region:cancel closing it themselves (e.g. Cmd+Q while
+    // the overlay is open) -- without this, record:start's caller (the
+    // picker) would hang forever waiting on a promise nothing ever settles.
+    win.once('closed', () => {
+      regionWindow = null;
+      regionInitData = null;
+      settleRegionPick(null);
+    });
+  });
+}
+
+ipcMain.handle('region:pick', (_e, payload) => {
+  const target = payload?.target;
+  if (!target || !Number.isFinite(target.x) || !Number.isFinite(target.y)
+      || typeof target.width !== 'number' || typeof target.height !== 'number'
+      || target.width <= 0 || target.height <= 0) {
+    throw new Error('Invalid region-picker target.');
+  }
+  const windows = Array.isArray(payload?.windows) ? payload.windows : [];
+  return openRegionPicker(target, windows);
+});
+
+ipcMain.handle('region:init', () => regionInitData);
+
+ipcMain.handle('region:confirm', (_e, rawRegion) => {
+  if (!regionInitData) return;
+  const bounds = regionInitData.target;
+  // The overlay renderer is not a trust boundary any more than the picker
+  // is -- validateRegion enforces the same finite/minimum-size shape
+  // record:start does, and clampRegionToBounds pulls it back inside the
+  // target display in case anything upstream (a stale drag, a rounding
+  // edge) let it slip past the edge.
+  const region = clampRegionToBounds(validateRegion(rawRegion), bounds);
+  settleRegionPick(region);
+  closeRegionWindow();
+});
+
+ipcMain.handle('region:cancel', () => {
+  settleRegionPick(null);
+  closeRegionWindow();
+});
+
 ipcMain.handle('permissions:status', () => ({
   screenRecording: permissions.screenRecording(),
   accessibility: permissions.accessibility(),
@@ -192,7 +284,7 @@ const SOURCE_ID_RE = /^(display|window):\d+$/;
 // only for being finite numbers, never for being positive. Optional (default
 // 0) so a picker/source list from before this field existed still works.
 function validateStartOptions(opts) {
-  const { source, width, height, title, mic, x, y } = opts ?? {};
+  const { source, width, height, title, mic, x, y, region } = opts ?? {};
   if (typeof source !== 'string' || !SOURCE_ID_RE.test(source)) {
     throw new Error(`Invalid source id: ${JSON.stringify(source)}`);
   }
@@ -213,9 +305,24 @@ function validateStartOptions(opts) {
   if (title !== undefined && typeof title !== 'string') {
     throw new Error(`Invalid title: ${JSON.stringify(title)}`);
   }
+  // A region crop is scoped to display sources (Capture.swift refuses it
+  // otherwise -- see its "region crop is only supported for display
+  // sources" fail() -- and SCStreamConfiguration.sourceRect is documented
+  // against a display's own coordinate space, not a window's). Validated
+  // the same way width/height/x/y are: finite numbers, positive size at or
+  // above a sensible minimum, via validateRegion (shared with the region
+  // overlay's own region:confirm handler below).
+  let validatedRegion;
+  if (region !== undefined) {
+    if (!source.startsWith('display:')) {
+      throw new Error('A region crop is only supported for display sources.');
+    }
+    validatedRegion = validateRegion(region);
+  }
   return {
     source, width, height, x: ox, y: oy,
-    title: typeof title === 'string' ? title : '', mic: Boolean(mic)
+    title: typeof title === 'string' ? title : '', mic: Boolean(mic),
+    region: validatedRegion
   };
 }
 
@@ -242,7 +349,7 @@ ipcMain.handle('record:start', async (_e, rawOpts) => {
   }
   starting = true;
   try {
-    const { source, width, height, x, y, title, mic } = validateStartOptions(rawOpts);
+    const { source, width, height, x, y, title, mic, region } = validateStartOptions(rawOpts);
     if (!permissions.canRecord()) throw new Error('Screen Recording permission is required');
 
     // A denied mic prompt used to be discarded entirely: bin/capture was
@@ -270,7 +377,7 @@ ipcMain.handle('record:start', async (_e, rawOpts) => {
     const hud = createHudWindow();
     try {
       await recorder.start({
-        source, width, height, x, y, title, mic: recordMic, dir,
+        source, width, height, x, y, title, mic: recordMic, dir, region,
         // getMediaSourceId() returns "window:<CGWindowID>:0" on macOS; the
         // middle segment is the same windowID `bin/sources` reports as
         // "window:<n>" and that SCContentFilter(excludingWindows:) matches
@@ -629,6 +736,7 @@ module.exports = {
   __test__: {
     openEditorWindow,
     editorState: () => ({ editorDir, editorWindow, exportChild, exportOutPath }),
-    setExportState: (child, outPath) => { exportChild = child; exportOutPath = outPath; }
+    setExportState: (child, outPath) => { exportChild = child; exportOutPath = outPath; },
+    validateStartOptions
   }
 };

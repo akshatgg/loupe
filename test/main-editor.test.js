@@ -225,3 +225,36 @@ test('quitting mid-export stops the render helper and unlinks the partial file',
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('validateStartOptions accepts a well-formed region on a display source', () => {
+  const { main } = freshMain();
+  const region = { x: 50, y: 60, width: 600, height: 400 };
+  const result = main.__test__.validateStartOptions({
+    source: 'display:1', width: 1470, height: 956, region
+  });
+  assert.deepStrictEqual(result.region, region);
+});
+
+test('validateStartOptions rejects a region on a window source', () => {
+  const { main } = freshMain();
+  assert.throws(() => main.__test__.validateStartOptions({
+    source: 'window:99', width: 800, height: 600,
+    region: { x: 0, y: 0, width: 200, height: 200 }
+  }), /region crop is only supported for display sources/);
+});
+
+test('validateStartOptions rejects a region below the minimum size', () => {
+  const { main } = freshMain();
+  assert.throws(() => main.__test__.validateStartOptions({
+    source: 'display:1', width: 1470, height: 956,
+    region: { x: 0, y: 0, width: 2, height: 3 }
+  }));
+});
+
+test('validateStartOptions leaves region undefined when none was requested', () => {
+  const { main } = freshMain();
+  const result = main.__test__.validateStartOptions({
+    source: 'display:1', width: 1470, height: 956
+  });
+  assert.strictEqual(result.region, undefined);
+});
