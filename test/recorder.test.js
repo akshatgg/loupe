@@ -25,9 +25,14 @@ function harness({ onError } = {}) {
     children[name] = child;
     return child;
   };
-  const stopHelper = async (child) => { child._exit?.(0); return 0; };
+  const stopped = [];
+  const stopHelper = async (child) => {
+    stopped.push(child.name);
+    child._exit?.(0);
+    return 0;
+  };
   const rec = createRecorder({ binDir: '/fake', spawnHelper, stopHelper });
-  return { rec, sinks, children };
+  return { rec, sinks, children, stopped };
 }
 
 test('gesture events arriving before the first frame are rebased, not lost', async () => {
@@ -122,4 +127,98 @@ test('an inputtap spawn failure is surfaced but does not stop the recording', as
   assert.ok(s.error, 'expected an error to be recorded');
   assert.strictEqual(s.error.source, 'inputtap');
   assert.strictEqual(s.recording, true, 'losing the gesture hook should not stop recording');
+});
+
+test('duration from a prior recording does not leak into the next one', async () => {
+  const { rec, sinks } = harness();
+
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x' });
+  sinks.capture({ type: 'started', clock: 0 });
+  sinks.capture({ type: 'stopped', duration: 42 });
+  await rec.stop();
+
+  // Second recording: capture starts but never emits 'stopped' before stop()
+  // is called (e.g. the process died). duration must not still read 42.
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/y' });
+  assert.strictEqual(rec.state().duration, 0, 'duration should reset on start()');
+  sinks.capture({ type: 'started', clock: 0 });
+
+  const { project } = await rec.stop();
+  assert.strictEqual(project.capture.duration, 0);
+});
+
+test('inputChild is not a stale reference from a previous recording once zoom is disabled', async () => {
+  const { rec, sinks, stopped } = harness();
+
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x', zoomEnabled: true });
+  sinks.capture({ type: 'started', clock: 0 });
+  await rec.stop();
+
+  stopped.length = 0;
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/y', zoomEnabled: false });
+  sinks.capture({ type: 'started', clock: 0 });
+  await rec.stop();
+
+  assert.ok(!stopped.includes('inputtap'), 'no inputtap child should exist to stop in a zoom-disabled session');
+});
+
+test('start then start again resets clicks, cursor track and tap re-enable count', async () => {
+  const { rec, sinks } = harness();
+
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x' });
+  sinks.capture({ type: 'started', clock: 0 });
+  sinks.inputtap({ type: 'click', clock: 1, x: 1, y: 1, button: 'left' });
+  sinks.inputtap({ type: 'tap_reenabled', clock: 1 });
+  await rec.stop();
+
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/y' });
+  const s = rec.state();
+  assert.strictEqual(s.clicks.length, 0);
+  assert.strictEqual(s.cursorTrack.length, 0);
+  assert.strictEqual(s.tapReenables, 0);
+});
+
+test('stop() before start() is a clean no-op rather than throwing', async () => {
+  const { rec } = harness();
+  const result = await rec.stop();
+  assert.strictEqual(result, null, 'nothing to stop should resolve to null');
+  assert.strictEqual(rec.state().recording, false);
+});
+
+test('a capture spawn failure tears down an already-running inputtap so it is not orphaned', async () => {
+  const captureErr = new Error('ENOENT capture');
+  const { rec, stopped } = harness({ onError: { capture: captureErr } });
+
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x', zoomEnabled: true });
+
+  // Allow the queued timer (simulating the async 'error' event) to run.
+  await new Promise((r) => setTimeout(r, 10));
+
+  assert.ok(stopped.includes('inputtap'), 'inputtap should be stopped when capture fails to spawn');
+
+  // stop() afterwards must not misbehave (e.g. double-stop / throw).
+  await assert.doesNotReject(rec.stop());
+});
+
+test('an optional onError callback fires immediately, without waiting for a state() poll', async () => {
+  const tapErr = new Error('ENOENT inputtap');
+  const sinks = {};
+  const spawnHelper = (bin, args, opts) => {
+    const name = bin.endsWith('capture') ? 'capture' : 'inputtap';
+    sinks[name] = opts.onMessage;
+    if (name === 'inputtap') {
+      setTimeout(() => { opts.onError(tapErr); opts.onExit(null, null); }, 0);
+    }
+    return { name, kill() {}, exitCode: null, signalCode: null, once() {} };
+  };
+  const stopHelper = async () => 0;
+
+  const seen = [];
+  const rec = createRecorder({ binDir: '/fake', spawnHelper, stopHelper, onError: (e) => seen.push(e) });
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x' });
+
+  await new Promise((r) => setTimeout(r, 10));
+
+  assert.strictEqual(seen.length, 1);
+  assert.strictEqual(seen[0].source, 'inputtap');
 });

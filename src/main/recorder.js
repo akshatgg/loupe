@@ -4,7 +4,7 @@ const path = require('node:path');
 const { createZoomState, applyScroll } = require('./zoom');
 const { createProject, saveProject, writeCursorTrack } = require('./project');
 
-function createRecorder({ binDir, spawnHelper, stopHelper }) {
+function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
   let captureChild = null;
   let inputChild = null;
   let captureClock = null;
@@ -65,13 +65,36 @@ function createRecorder({ binDir, spawnHelper, stopHelper }) {
   // all: this stops the session and is distinguished (source: 'capture')
   // from losing the gesture hook, which is merely an inconvenience for zoom
   // and should not be treated as recording failure (source: 'inputtap').
+  function notifyError() {
+    if (typeof onError === 'function') {
+      try {
+        onError(error);
+      } catch {
+        // A caller's error handler must not take down the recorder.
+      }
+    }
+  }
+
   function onCaptureError(err) {
     error = { source: 'capture', message: err.message };
     recording = false;
+    // A dead capture process means the recording is over. inputtap may
+    // already be running (it is spawned after capture) and would otherwise
+    // be orphaned, holding the system-wide event tap with no recording in
+    // progress. Tear it down here; stopHelper() is a harmless no-op on an
+    // already-exited child, and clearing the reference means a later
+    // stop() call won't try to stop it a second time.
+    if (inputChild) {
+      const toStop = inputChild;
+      inputChild = null;
+      stopHelper(toStop).catch(() => {});
+    }
+    notifyError();
   }
 
   function onInputError(err) {
     error = { source: 'inputtap', message: err.message };
+    notifyError();
   }
 
   async function start(opts) {
@@ -89,6 +112,9 @@ function createRecorder({ binDir, spawnHelper, stopHelper }) {
     pending.length = 0;
     tapReenables = 0;
     error = null;
+    duration = 0;
+    captureChild = null;
+    inputChild = null;
 
     const args = ['--source', source, '--out', path.join(dir, 'raw.mov'),
                   '--mic', hasMic ? '1' : '0'];
@@ -114,8 +140,17 @@ function createRecorder({ binDir, spawnHelper, stopHelper }) {
   }
 
   async function stop() {
+    // stop() can be reached from a stop button or a global hotkey, either of
+    // which may fire with no recording ever started (source is still null).
+    // Rather than throwing out of an async function, resolve to null: a
+    // caller-recognisable "there was nothing to stop", matching the falsy
+    // shape callers already have to handle for other empty results.
+    if (source === null) return null;
+
     if (inputChild) await stopHelper(inputChild);
     if (captureChild) await stopHelper(captureChild);
+    inputChild = null;
+    captureChild = null;
     recording = false;
 
     const project = createProject(
