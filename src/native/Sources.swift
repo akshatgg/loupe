@@ -9,6 +9,16 @@ struct SourceOut: Encodable {
     let app: String?
     let width: Int
     let height: Int
+    // The source's top-left origin in the global display coordinate space,
+    // in logical points -- the same space bin/inputtap's CGEvent.location
+    // reports cursor/click positions in. A display left of or above the
+    // primary display legitimately has a negative origin, so this is signed
+    // and NOT clamped to zero. Consumers (recorder.js) subtract this from
+    // every recorded cursor/click coordinate so cursorTrack/clicks end up in
+    // source-local points regardless of which display or window was
+    // recorded, or where it sits on screen.
+    let x: Int
+    let y: Int
     let thumbnail: String?
 }
 
@@ -56,6 +66,8 @@ struct SourcesTool {
                     app: nil,
                     width: display.width,
                     height: display.height,
+                    x: Int(display.frame.origin.x),
+                    y: Int(display.frame.origin.y),
                     thumbnail: await thumbnail(for: filter,
                                                width: display.width,
                                                height: display.height)))
@@ -78,6 +90,8 @@ struct SourcesTool {
                     app: window.owningApplication?.applicationName,
                     width: w,
                     height: h,
+                    x: Int(window.frame.origin.x),
+                    y: Int(window.frame.origin.y),
                     thumbnail: await thumbnail(for: filter, width: w, height: h)))
             }
 

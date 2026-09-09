@@ -90,13 +90,17 @@ recordButton.onclick = async () => {
   recordButton.disabled = true;
   recordButton.textContent = 'Starting…';
   try {
-    // width/height/title come straight from the bin/sources entry the user
-    // picked, in logical points — the camera solver and recorder both
-    // expect points, converting to pixels only at render time.
+    // width/height/title/x/y come straight from the bin/sources entry the
+    // user picked, in logical points — the camera solver and recorder both
+    // expect points, converting to pixels only at render time. x/y are the
+    // source's global-space origin; `?? 0` covers a stale/older bin/sources
+    // build whose entries don't carry it yet.
     await window.loupe.startRecording({
       source: selected.id,
       width: selected.width,
       height: selected.height,
+      x: selected.x ?? 0,
+      y: selected.y ?? 0,
       title: selected.title,
       mic: document.getElementById('mic').checked
     });

@@ -13,6 +13,15 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
   let sourceWidth = 0;
   let sourceHeight = 0;
   let sourceTitle = '';
+  // The source's top-left origin in global display space, in points -- see
+  // Sources.swift's SourceOut.x/y. bin/inputtap reports cursor/click
+  // coordinates in that same global space (CGEvent.location), so consume()
+  // below subtracts these to store cursorTrack/clicks in source-local
+  // points, matching what camera.js and Render.swift already assume.
+  // Defaults to 0 so a source picked before this field existed, or a
+  // display/window at the primary origin, behaves exactly as before.
+  let sourceOriginX = 0;
+  let sourceOriginY = 0;
   let hasMic = false;
   let zoomEnabled = true;
   let recording = false;
@@ -44,13 +53,17 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
     if (t < 0) return; // happened before the first frame
     switch (msg.type) {
       case 'zoom':
-        if (zoomEnabled) applyScroll(zoomState, { t, dy: msg.dy, x: msg.x, y: msg.y });
+        if (zoomEnabled) {
+          applyScroll(zoomState, {
+            t, dy: msg.dy, x: msg.x - sourceOriginX, y: msg.y - sourceOriginY
+          });
+        }
         break;
       case 'click':
-        clicks.push({ t, x: msg.x, y: msg.y, button: msg.button });
+        clicks.push({ t, x: msg.x - sourceOriginX, y: msg.y - sourceOriginY, button: msg.button });
         break;
       case 'cursor':
-        cursorTrack.push({ t, x: msg.x, y: msg.y, shape: msg.shape });
+        cursorTrack.push({ t, x: msg.x - sourceOriginX, y: msg.y - sourceOriginY, shape: msg.shape });
         break;
       default:
         break;
@@ -59,7 +72,12 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
 
   function onInput(msg) {
     if (msg.type === 'tap_reenabled') { tapReenables++; return; }
-    if (msg.type === 'ready' || msg.type === 'error') return;
+    if (msg.type === 'ready') return;
+    // inputtap reports its own fatal errors (e.g. it lost the event tap and
+    // could not recover) the same way capture does: one {"type":"error"}
+    // NDJSON line while the process is still alive. Route it through the
+    // exact same path a spawn failure takes so the user is told either way.
+    if (msg.type === 'error') { onInputError({ message: msg.message }); return; }
     // Buffer until the capture clock origin is known, then rebase.
     if (captureClock === null) { pending.push(msg); return; }
     consume(msg);
@@ -72,6 +90,12 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
       pending.length = 0;
     } else if (msg.type === 'stopped') {
       duration = msg.duration;
+    } else if (msg.type === 'error') {
+      // A writer failure (or "no microphone available" / "cannot attach
+      // audio output") reported by the still-running capture helper. Same
+      // path as a spawn failure: mark the session errored, stop an
+      // already-running inputtap so it isn't orphaned, and notify the host.
+      onCaptureError({ message: msg.message });
     }
   }
 
@@ -120,6 +144,11 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
     sourceWidth = opts.width || 0;
     sourceHeight = opts.height || 0;
     sourceTitle = opts.title || '';
+    // opts.x/y may legitimately be negative (a display left of or above the
+    // primary one) so `|| 0` (which would treat -0-ish falsy numbers oddly)
+    // is avoided in favor of an explicit undefined check.
+    sourceOriginX = opts.x === undefined ? 0 : opts.x;
+    sourceOriginY = opts.y === undefined ? 0 : opts.y;
     hasMic = Boolean(opts.mic);
     zoomEnabled = opts.zoomEnabled !== false;
     captureClock = null;
@@ -186,7 +215,12 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
 
     const project = createProject(
       { kind: source.split(':')[0], id: source, title: sourceTitle,
-        width: sourceWidth, height: sourceHeight },
+        width: sourceWidth, height: sourceHeight,
+        // Recorded for reference/debugging only: cursorTrack and clicks are
+        // already rebased to source-local points by consume() above, so
+        // camera.js, Render.swift and the editor preview never need to read
+        // these back out.
+        originX: sourceOriginX, originY: sourceOriginY },
       { file: 'raw.mov', fps: 60, duration, hasMicTrack: hasMic }
     );
     project.zoomKeyframes = zoomState.keyframes;

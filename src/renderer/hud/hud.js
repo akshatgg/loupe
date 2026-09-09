@@ -15,6 +15,13 @@ window.loupe.onHud((d) => {
   if (!d.zoomEnabled) warn.textContent = 'zoom off';
   else if (d.tapReenables > 0) warn.textContent = `tap recovered ×${d.tapReenables}`;
   else warn.textContent = '';
+
+  // A helper-reported error (e.g. the video writer failed mid-recording)
+  // must be visible here -- previously it was discarded entirely and the
+  // HUD kept counting as if nothing had happened. textContent only: this
+  // is untrusted-ish diagnostic text from a native helper, never HTML.
+  const err = document.getElementById('error');
+  err.textContent = d.error ? `${d.error.source}: ${d.error.message}` : '';
 });
 
 document.getElementById('stop').onclick = () => window.loupe.stopRecording();
