@@ -2,7 +2,7 @@
 module.exports = [
   {
     files: ['**/*.js'],
-    ignores: ['src/renderer/**'],
+    ignores: ['src/renderer/**', 'web/**'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'commonjs',
@@ -47,5 +47,28 @@ module.exports = [
       eqeqeq: 'error'
     }
   },
-  { ignores: ['bin/', 'node_modules/', 'dist/'] }
+  // The website (web/, deployed to Vercel) is plain browser scripts too.
+  {
+    files: ['web/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'script',
+      globals: {
+        window: 'readonly', document: 'readonly', navigator: 'readonly',
+        console: 'readonly', fetch: 'readonly', URL: 'readonly', Intl: 'readonly',
+        setTimeout: 'readonly', clearTimeout: 'readonly',
+        setInterval: 'readonly', clearInterval: 'readonly',
+        requestAnimationFrame: 'readonly', cancelAnimationFrame: 'readonly',
+        matchMedia: 'readonly', IntersectionObserver: 'readonly',
+        getComputedStyle: 'readonly', performance: 'readonly', location: 'readonly'
+      }
+    },
+    rules: {
+      'no-unused-vars': 'error',
+      'no-undef': 'error',
+      'prefer-const': 'error',
+      eqeqeq: 'error'
+    }
+  },
+  { ignores: ['bin/', 'node_modules/', 'dist/', '.build-native/', 'web/node_modules/'] }
 ];
