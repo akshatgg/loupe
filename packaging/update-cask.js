@@ -50,7 +50,7 @@ cask "loupe" do
   desc "Screen recorder that zooms in while you record"
   homepage "https://loupeapp.vercel.app"
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "Loupe.app"
 
