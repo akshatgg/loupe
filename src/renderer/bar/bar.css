@@ -1,0 +1,50 @@
+:root { color-scheme: dark; }
+/* #recording sets display:flex, which would otherwise beat the UA's
+   [hidden] rule and leave both states on screen at once. */
+[hidden] { display: none !important; }
+body { margin: 0; font: 12px -apple-system, system-ui; -webkit-app-region: drag;
+       background: rgba(20,20,22,.92); color: #fff; border-radius: 12px;
+       box-sizing: border-box; -webkit-user-select: none; user-select: none;
+       width: 420px; padding: 10px 14px; }
+
+.row { display: flex; align-items: center; gap: 10px; }
+.row + .row { margin-top: 8px; }
+
+.dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.dot.idle { background: #8ab4f8; }
+.dot.rec { background: #ef4444; animation: pulse 1.4s infinite; }
+@keyframes pulse { 50% { opacity: .25; } }
+
+.source { font-size: 13px; overflow: hidden; text-overflow: ellipsis;
+          white-space: nowrap; }
+
+.modes { display: flex; gap: 6px; -webkit-app-region: no-drag; }
+.modes button { appearance: none; border: 0; font: inherit; cursor: pointer;
+                padding: 6px 10px; border-radius: 14px;
+                background: rgba(255,255,255,.1); color: #e8eaed; }
+.modes button:hover { background: rgba(255,255,255,.18); }
+.modes button[aria-pressed="true"] { background: #8ab4f8; color: #202124; }
+
+.spacer { flex: 1; }
+
+button { -webkit-app-region: no-drag; font: inherit; border: 0;
+         border-radius: 6px; padding: 6px 14px; cursor: pointer; }
+button.icon { width: 30px; height: 30px; padding: 0; border-radius: 50%;
+              display: grid; place-items: center; flex-shrink: 0;
+              background: rgba(255,255,255,.1); }
+button.icon:hover { background: rgba(255,255,255,.18); }
+button.icon svg { width: 16px; height: 16px; fill: #ef4444; }
+#start { box-shadow: inset 0 0 0 2px rgba(255,255,255,.85); }
+#start:disabled { box-shadow: inset 0 0 0 2px #4a4b4e; cursor: default; }
+#start:disabled svg { fill: #85888c; animation: pulse 1s infinite; }
+.ghost { background: rgba(255,255,255,.1); color: #e8eaed; }
+.ghost:hover { background: rgba(255,255,255,.18); }
+.ghost:disabled { background: rgba(255,255,255,.05); color: #6c6f73; cursor: default; }
+
+#recording { display: flex; align-items: center; gap: 10px; height: 30px; }
+#recording .time { font-variant-numeric: tabular-nums; font-size: 14px; }
+#recording .zoom { opacity: .8; font-variant-numeric: tabular-nums; }
+#recording .mic { opacity: .8; }
+#recording .warn { color: #fbbf24; font-size: 11px; }
+#recording .error { color: #fca5a5; font-size: 11px; }
+#recording #stop { margin-left: auto; }

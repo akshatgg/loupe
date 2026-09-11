@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <title>Loupe</title>
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#36383d"/>
+      <stop offset="1" stop-color="#19191b"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0.15" y1="0.1" x2="0.85" y2="0.95">
+      <stop offset="0" stop-color="#b9d2fb"/>
+      <stop offset="0.55" stop-color="#8ab4f8"/>
+      <stop offset="1" stop-color="#5b8ce0"/>
+    </linearGradient>
+    <radialGradient id="glass" cx="0.38" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#2c3c59"/>
+      <stop offset="1" stop-color="#131822"/>
+    </radialGradient>
+    <!-- The screen's pixels, and the same pixels seen through the lens. -->
+    <pattern id="px" width="44" height="44" patternUnits="userSpaceOnUse" x="12" y="12">
+      <circle cx="22" cy="22" r="5" fill="#ffffff" fill-opacity=".08"/>
+    </pattern>
+    <pattern id="pxLens" width="110" height="110" patternUnits="userSpaceOnUse" x="-43" y="-43">
+      <circle cx="55" cy="55" r="12.5" fill="#8ab4f8" fill-opacity=".2"/>
+    </pattern>
+    <filter id="drop" x="-10%" y="-10%" width="120%" height="125%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="12"/>
+      <feOffset dy="12"/>
+      <feComponentTransfer><feFuncA type="linear" slope=".3"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <g filter="url(#drop)">
+    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#body)"/>
+  </g>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#px)"/>
+  <rect x="101" y="101" width="822" height="822" rx="184" fill="none" stroke="#ffffff" stroke-opacity=".08" stroke-width="2"/>
+
+  <circle cx="512" cy="512" r="262" fill="url(#glass)"/>
+  <circle cx="512" cy="512" r="262" fill="url(#pxLens)"/>
+  <circle cx="512" cy="512" r="299" fill="none" stroke="url(#rim)" stroke-width="76"/>
+  <path d="M320 470 A 200 200 0 0 1 470 320" fill="none" stroke="#ffffff" stroke-opacity=".22" stroke-width="18" stroke-linecap="round"/>
+
+  <path transform="translate(424 350) scale(18)" d="M0 0 L0 16.2 L3.9 12.5 L6.4 18.4 L8.9 17.3 L6.4 11.6 L11.4 11.6 Z" fill="#ffffff" stroke="#111214" stroke-width=".8" stroke-linejoin="round"/>
+</svg>

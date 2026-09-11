@@ -1,0 +1,4 @@
+# Only the website is deployed (Vercel project root: web/). Everything else --
+# the app source, node_modules, built DMGs -- stays out of the upload.
+/*
+!/web

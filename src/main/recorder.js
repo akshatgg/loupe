@@ -3,6 +3,7 @@
 const path = require('node:path');
 const { createZoomState, applyScroll } = require('./zoom');
 const { createProject, saveProject, writeCursorTrack } = require('./project');
+const { buildExcludeWindowArgs } = require('./exclude-args');
 
 function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
   let captureChild = null;
@@ -152,14 +153,25 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
     stopped = false;
     dir = opts.dir;
     source = opts.source;
-    sourceWidth = opts.width || 0;
-    sourceHeight = opts.height || 0;
+    // A region crop, when present, IS the source from here on: bin/capture
+    // is told to capture only that rectangle (see the --crop-* args below),
+    // so the file on disk only ever contains the cropped pixels. Using the
+    // crop's own size/origin as sourceWidth/Height/OriginX/Y -- rather than
+    // the full source's -- is what makes consume() below rebase cursor/click
+    // coordinates into crop-local points and project.source (set in stop())
+    // describe the crop, with no other file needing to know a crop happened.
+    const region = opts.region ?? null;
+    sourceWidth = (region ? region.width : opts.width) || 0;
+    sourceHeight = (region ? region.height : opts.height) || 0;
     sourceTitle = opts.title || '';
-    // opts.x/y may legitimately be negative (a display left of or above the
-    // primary one) so `|| 0` (which would treat -0-ish falsy numbers oddly)
-    // is avoided in favor of an explicit undefined check.
-    sourceOriginX = opts.x === undefined ? 0 : opts.x;
-    sourceOriginY = opts.y === undefined ? 0 : opts.y;
+    // opts.x/y (or region.x/y) may legitimately be negative (a display left
+    // of or above the primary one) so `|| 0` (which would treat -0-ish
+    // falsy numbers oddly) is avoided in favor of an explicit undefined
+    // check.
+    const originX = region ? region.x : opts.x;
+    const originY = region ? region.y : opts.y;
+    sourceOriginX = originX === undefined ? 0 : originX;
+    sourceOriginY = originY === undefined ? 0 : originY;
     hasMic = Boolean(opts.mic);
     zoomEnabled = opts.zoomEnabled !== false;
     captureClock = null;
@@ -175,7 +187,23 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
 
     const args = ['--source', source, '--out', path.join(dir, 'raw.mov'),
                   '--mic', hasMic ? '1' : '0'];
-    if (opts.hudWindowId) args.push('--exclude-window', String(opts.hudWindowId));
+    // Every Loupe-owned overlay window that could be on screen when capture
+    // starts -- the control bar (always) and, with the outline still
+    // open, the region-selection overlay -- must be excluded.
+    // Hiding/closing those windows on the Electron side is not relied on as
+    // the only protection (see main.js's bar:start): bin/capture is always
+    // told about every id that COULD be on screen, whether or not it still
+    // is by the time this spawns.
+    args.push(...buildExcludeWindowArgs(opts.excludeWindowIds));
+    // region.x/y are passed through untouched (global points, same as
+    // --exclude-window's coordinate-free id) -- Capture.swift is what
+    // rebases them against the target display's own origin, since it's the
+    // one that knows which display SCStreamConfiguration.sourceRect is
+    // relative to.
+    if (region) {
+      args.push('--crop-x', String(region.x), '--crop-y', String(region.y),
+                 '--crop-w', String(region.width), '--crop-h', String(region.height));
+    }
 
     captureChild = spawnHelper(path.join(binDir, 'capture'), args, {
       onMessage: (msg) => { if (gen === generation) onCapture(msg); },
@@ -185,7 +213,9 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
     });
 
     if (zoomEnabled) {
-      inputChild = spawnHelper(path.join(binDir, 'inputtap'), [], {
+      // How zooming is triggered (modifier key / mouse side button) --
+      // settings.js's inputTapArgs, from the user's saved choice.
+      inputChild = spawnHelper(path.join(binDir, 'inputtap'), opts.inputTapArgs ?? [], {
         onMessage: (msg) => { if (gen === generation) onInput(msg); },
         onMalformed: (l) => console.error('inputtap malformed:', l),
         // A non-zero exit here (e.g. Accessibility revoked mid-recording,
@@ -250,6 +280,10 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
       { file: 'raw.mov', fps: 60, duration, hasMicTrack: hasMic }
     );
     project.zoomKeyframes = zoomState.keyframes;
+    // The editor's zoom removal is non-destructive (segments.js removeZoom):
+    // this copy is never edited, so any removed zoom can be restored.
+    project.recordedZoomKeyframes = zoomState.keyframes.map((kf) => ({ ...kf }));
+    project.removedZooms = [];
     project.clicks = clicks;
 
     saveProject(dir, project);

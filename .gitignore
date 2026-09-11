@@ -4,3 +4,6 @@ dist/
 .DS_Store
 *.mov
 *.m4a
+.build-native/
+.vercel
+.env*

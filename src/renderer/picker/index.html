@@ -4,14 +4,50 @@
 <link rel="stylesheet" href="picker.css">
 <body>
   <header>
-    <h1>Record</h1>
-    <label class="mic"><input type="checkbox" id="mic"> Record microphone</label>
+    <h1>Choose what to record</h1>
+    <p class="sub" id="zoomHelp">Hold <kbd>⌥</kbd> and scroll while recording to zoom in.</p>
   </header>
+
+  <nav id="tabs" role="tablist"></nav>
+
   <div id="banner" hidden></div>
-  <div id="grid" class="grid"></div>
+
+  <div class="panel">
+    <ul id="list" role="listbox" aria-label="Sources"></ul>
+    <div id="preview"><div class="ph">Select a source to record</div></div>
+  </div>
+
+  <div class="options">
+    <div class="optionrow">
+      <label for="mic">
+        <span class="glyph" aria-hidden="true">🎙</span>
+        Record microphone
+      </label>
+      <input type="checkbox" id="mic" class="switch">
+    </div>
+    <div class="optionrow">
+      <span class="rowlabel" id="zoomLabel">
+        <span class="glyph" aria-hidden="true">🔍</span>
+        Zoom shortcuts — hold one and scroll
+      </span>
+      <div class="shortcuts" role="group" aria-labelledby="zoomLabel">
+        <div class="shortcut">
+          <button type="button" class="capture" data-slot="0"></button>
+          <button type="button" class="clear" data-slot="0" aria-label="Remove this shortcut">×</button>
+        </div>
+        <div class="shortcut">
+          <button type="button" class="capture" data-slot="1"></button>
+          <button type="button" class="clear" data-slot="1" aria-label="Remove this shortcut">×</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <footer>
+    <button id="refresh" class="ghost">Refresh</button>
     <p id="hint" class="hint"></p>
-    <button id="record" disabled>Start recording</button>
+    <button id="record" disabled>Continue</button>
   </footer>
+
   <script src="picker.js"></script>
 </body>

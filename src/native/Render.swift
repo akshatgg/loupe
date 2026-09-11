@@ -38,8 +38,32 @@ struct CameraSample { var t: Double; var zoom: Double; var cx: Double; var cy: D
 struct CursorSample { var t: Double; var x: Double; var y: Double }
 
 struct Click: Decodable { let t: Double; let x: Double; let y: Double }
-struct Settings: Decodable { let clickHighlights: Bool }
+// showCursor is optional: projects from before it existed have no key, and
+// those have always shown the cursor.
+struct Settings: Decodable { let clickHighlights: Bool; let showCursor: Bool? }
 struct SourceInfo: Decodable { let width: Double; let height: Double }
+// retime.json, written by main.js (speed.js retimePlan) at export: for each
+// output frame k (shown at k/fps), the recording time it shows; and the
+// constant-rate slices to stretch the audio by, so it matches the video.
+struct AudioSlice: Decodable { let srcStart: Double; let srcEnd: Double; let rate: Double }
+struct RetimePlan: Decodable {
+    let fps: Int
+    let outputDuration: Double
+    let frames: [Double]
+    let audio: [AudioSlice]
+    let preservePitch: Bool
+
+    // No speed stretches: the recording, straight through, at 60fps.
+    static func straight(duration: Double) -> RetimePlan {
+        let count = max(1, Int((duration * 60).rounded(.up)))
+        return RetimePlan(fps: 60, outputDuration: duration,
+                          frames: (0..<count).map { Double($0) / 60 },
+                          audio: [], preservePitch: true)
+    }
+}
+
+func cmTime(_ seconds: Double) -> CMTime { CMTime(seconds: seconds, preferredTimescale: 1_000_000) }
+
 struct Project: Decodable {
     let source: SourceInfo
     let clicks: [Click]
@@ -167,16 +191,60 @@ struct RenderTool {
         // Camera math is in logical points; the video is in physical pixels.
         let scale = naturalSize.width / project.source.width
 
+        // Which moment of the recording each output frame shows, and how to
+        // stretch the audio to match -- written by main.js from speed.js, so
+        // no timing math lives here. A project exported before speed control
+        // existed has no plan: play it straight through at 60fps.
+        let plan: RetimePlan
+        if let data = try? Data(contentsOf: dir.appendingPathComponent("retime.json")),
+           let decoded = try? JSONDecoder().decode(RetimePlan.self, from: data) {
+            plan = decoded
+        } else {
+            plan = RetimePlan.straight(duration: (try? await asset.load(.duration).seconds) ?? 0)
+        }
+
         guard let reader = try? AVAssetReader(asset: asset) else { fail("cannot read raw.mov") }
         let videoOut = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
         ])
         reader.add(videoOut)
 
-        var audioOut: AVAssetReaderTrackOutput?
-        if let audioTrack = try? await asset.loadTracks(withMediaType: .audio).first {
-            let out = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: nil)
-            if reader.canAdd(out) { reader.add(out); audioOut = out }
+        // Audio goes through a composition whose time ranges are scaled by
+        // the plan's slices, read back through an audio mix output that
+        // time-stretches with pitch kept natural (PRD FR-22/23) -- or at tape
+        // speed if that setting is off. With no speed stretches this is just
+        // the original audio.
+        var audioReader: AVAssetReader?
+        var audioOut: AVAssetReaderAudioMixOutput?
+        if let audioTrack = try? await asset.loadTracks(withMediaType: .audio).first,
+           let assetDuration = try? await asset.load(.duration) {
+            let composition = AVMutableComposition()
+            if let track = composition.addMutableTrack(withMediaType: .audio,
+                                                       preferredTrackID: kCMPersistentTrackID_Invalid),
+               (try? track.insertTimeRange(CMTimeRange(start: .zero, duration: assetDuration),
+                                           of: audioTrack, at: .zero)) != nil {
+                // Later slices first: scaling a range shifts everything after
+                // it, so going backwards keeps every slice not yet scaled at
+                // its original (recording-time) position in the composition.
+                for slice in plan.audio.reversed() {
+                    let length = slice.srcEnd - slice.srcStart
+                    track.scaleTimeRange(CMTimeRange(start: cmTime(slice.srcStart), duration: cmTime(length)),
+                                         toDuration: cmTime(length / slice.rate))
+                }
+                let out = AVAssetReaderAudioMixOutput(audioTracks: [track], audioSettings: [
+                    AVFormatIDKey: kAudioFormatLinearPCM,
+                    AVSampleRateKey: 48_000, AVNumberOfChannelsKey: 2,
+                    AVLinearPCMBitDepthKey: 16, AVLinearPCMIsFloatKey: false,
+                    AVLinearPCMIsBigEndianKey: false, AVLinearPCMIsNonInterleaved: false
+                ])
+                out.audioTimePitchAlgorithm = plan.preservePitch ? .spectral : .varispeed
+                if let r = try? AVAssetReader(asset: composition), r.canAdd(out) {
+                    r.add(out)
+                    r.timeRange = CMTimeRange(start: .zero, duration: cmTime(plan.outputDuration))
+                    audioReader = r
+                    audioOut = out
+                }
+            }
         }
 
         let outURL = URL(fileURLWithPath: outPath)
@@ -202,12 +270,19 @@ struct RenderTool {
 
         var audioIn: AVAssetWriterInput?
         if audioOut != nil {
-            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: nil)
+            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 48_000,
+                AVNumberOfChannelsKey: 2, AVEncoderBitRateKey: 256_000
+            ])
+            input.expectsMediaDataInRealTime = false
             if writer.canAdd(input) { writer.add(input); audioIn = input }
         }
 
         guard reader.startReading() else {
             fail("reader failed to start: \(reader.error?.localizedDescription ?? "unknown")")
+        }
+        if let audioReader, audioIn != nil, !audioReader.startReading() {
+            fail("audio reader failed to start: \(audioReader.error?.localizedDescription ?? "unknown")")
         }
         guard writer.startWriting() else {
             fail("writer failed to start: \(writer.error?.localizedDescription ?? "unknown")")
@@ -217,14 +292,58 @@ struct RenderTool {
         let ciContext = CIContext(options: [.useSoftwareRenderer: false])
         var frame = 0
         var skippedFrames = 0
+        var audioFrames = 0
+        var audioDone = audioIn == nil
+        var pendingAudio: CMSampleBuffer?
 
-        while let buffer = videoOut.copyNextSampleBuffer() {
-            guard let pixels = CMSampleBufferGetImageBuffer(buffer) else {
+        // Audio is written interleaved with the video -- up to a second
+        // ahead of the latest video frame -- rather than all at the end:
+        // AVAssetWriter can hold one input back while the other lags.
+        func pumpAudio(upTo limit: Double) {
+            guard !audioDone, let audioIn, let audioOut else { return }
+            while audioIn.isReadyForMoreMediaData {
+                guard let buffer = pendingAudio ?? audioOut.copyNextSampleBuffer() else {
+                    audioIn.markAsFinished()
+                    audioDone = true
+                    return
+                }
+                if CMSampleBufferGetPresentationTimeStamp(buffer).seconds > limit {
+                    pendingAudio = buffer
+                    return
+                }
+                pendingAudio = nil
+                guard audioIn.append(buffer) else {
+                    fail("audio frame \(audioFrames): append failed: \(writer.error?.localizedDescription ?? "unknown")")
+                }
+                audioFrames += 1
+            }
+        }
+
+        func nextSourceFrame() -> CMSampleBuffer? {
+            while let buffer = videoOut.copyNextSampleBuffer() {
+                if CMSampleBufferGetImageBuffer(buffer) != nil { return buffer }
+                skippedFrames += 1
+            }
+            return nil
+        }
+
+        // Output-driven: one frame per plan entry, at a steady fps. Each shows
+        // the newest recorded frame at or before its recording time -- a fast
+        // stretch skips frames, a slow one holds them -- with the zoom, cursor
+        // and click ripples drawn for that exact recording time, so they stay
+        // smooth even where the screen itself (and so the recording) is still.
+        var current: CMSampleBuffer?
+        var next = nextSourceFrame()
+        for (k, t) in plan.frames.enumerated() {
+            while let n = next, CMSampleBufferGetPresentationTimeStamp(n).seconds <= t + 1e-4 {
+                current = n
+                next = nextSourceFrame()
+            }
+            // Before the first recorded frame arrives, show that first frame.
+            guard let buffer = current ?? next, let pixels = CMSampleBufferGetImageBuffer(buffer) else {
                 skippedFrames += 1
                 continue
             }
-            let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
-            let t = pts.seconds
             var cam = sample(camera, at: t, default: noZoomDefault)
             // Defensive only: the solver never emits zoom == 0, but a
             // malformed camera.bin could, and dividing by it would make
@@ -280,33 +399,34 @@ struct RenderTool {
                                    age: t - click.t, scale: cursorScale)
                     }
                 }
-                if let c = sampleCursor(cursor, at: t) {
+                if project.settings.showCursor ?? true, let c = sampleCursor(cursor, at: t) {
                     drawCursor(ctx, at: CGPoint(x: toOutX(c.x), y: toOutY(c.y)),
                                scale: cursorScale)
                 }
             }
             CVPixelBufferUnlockBaseAddress(dest, [])
 
-            waitForReady(writer, stage: "video frame \(frame)") { videoIn.isReadyForMoreMediaData }
+            let pts = CMTime(value: CMTimeValue(k), timescale: CMTimeScale(plan.fps))
+            while !videoIn.isReadyForMoreMediaData {
+                if writer.status == .failed {
+                    fail("video frame \(frame): writer failed: \(writer.error?.localizedDescription ?? "unknown")")
+                }
+                pumpAudio(upTo: pts.seconds + 1.0)
+                usleep(2000)
+            }
             guard adaptor.append(dest, withPresentationTime: pts) else {
                 fail("video frame \(frame): append failed: \(writer.error?.localizedDescription ?? "unknown")")
             }
 
             frame += 1
-            if frame % 30 == 0 { emit(["type": "progress", "frame": frame]) }
+            if frame % 30 == 0 { emit(["type": "progress", "frame": frame, "total": plan.frames.count]) }
+            pumpAudio(upTo: pts.seconds + 1.0)
         }
         videoIn.markAsFinished()
 
-        if let audioIn, let audioOut {
-            var audioFrame = 0
-            while let buffer = audioOut.copyNextSampleBuffer() {
-                waitForReady(writer, stage: "audio frame \(audioFrame)") { audioIn.isReadyForMoreMediaData }
-                guard audioIn.append(buffer) else {
-                    fail("audio frame \(audioFrame): append failed: \(writer.error?.localizedDescription ?? "unknown")")
-                }
-                audioFrame += 1
-            }
-            audioIn.markAsFinished()
+        while !audioDone {
+            waitForReady(writer, stage: "audio frame \(audioFrames)") { audioIn?.isReadyForMoreMediaData ?? true }
+            pumpAudio(upTo: .infinity)
         }
 
         await writer.finishWriting()

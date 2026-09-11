@@ -1,0 +1,47 @@
+:root { color-scheme: dark; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden;
+             background: transparent; cursor: crosshair; user-select: none; }
+body { font: 12px -apple-system, system-ui; color: #e8eaed; }
+
+/* The selection rectangle. The box-shadow trick dims everything OUTSIDE the
+   rect without any extra full-screen overlay elements: a spread radius far
+   larger than the viewport paints solid outside the rect's own box, and it
+   tracks the rect's left/top/width/height automatically since it's the
+   rect's own shadow. */
+#rect {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px dashed #fff;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .55);
+  cursor: move;
+}
+#rect[hidden] { display: none; }
+
+.handle {
+  position: absolute;
+  width: 14px; height: 14px;
+  margin: -7px;
+  background: #fff;
+  border: 1.5px solid #202124;
+  border-radius: 3px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .5);
+}
+.handle[data-handle="n"]  { top: 0; left: 50%; cursor: n-resize; }
+.handle[data-handle="s"]  { top: 100%; left: 50%; cursor: s-resize; }
+.handle[data-handle="e"]  { top: 50%; left: 100%; cursor: e-resize; }
+.handle[data-handle="w"]  { top: 50%; left: 0; cursor: w-resize; }
+.handle[data-handle="ne"] { top: 0; left: 100%; cursor: ne-resize; }
+.handle[data-handle="nw"] { top: 0; left: 0; cursor: nw-resize; }
+.handle[data-handle="se"] { top: 100%; left: 100%; cursor: se-resize; }
+.handle[data-handle="sw"] { top: 100%; left: 0; cursor: sw-resize; }
+
+#readout {
+  position: absolute;
+  top: -28px; left: 0;
+  padding: 4px 9px;
+  background: rgba(20, 20, 22, .85);
+  border-radius: 6px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}

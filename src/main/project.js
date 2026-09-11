@@ -22,6 +22,11 @@ function createProject(source, capture) {
     settings: {
       preserveVoicePitch: true,
       clickHighlights: true,
+      // The capture never contains the cursor (Capture.swift showsCursor =
+      // false); it is drawn back in from cursor.bin by the editor preview and
+      // Render.swift -- or left out entirely when this is false. Projects
+      // from before this setting existed have no key, which means shown.
+      showCursor: true,
       cursorSmoothing: true,
       rampMs: 200
     },

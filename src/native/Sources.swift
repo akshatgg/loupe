@@ -49,6 +49,26 @@ func thumbnail(for filter: SCContentFilter, width: Int, height: Int) async -> St
     return "data:image/png;base64," + png.base64EncodedString()
 }
 
+
+// macOS composites the desktop out of windows that belong to system agents:
+// wallpaper layers, the Dock's backdrop, Notification Centre, a per-display
+// "backstop". They are real windows with real titles, but there is nothing in
+// them to look at -- they thumbnail as solid black -- and recording one gets
+// the user nothing. Offering them as capture sources is noise at best and
+// misleading at worst, so they are filtered out here rather than in the UI,
+// where every consumer of bin/sources would have to repeat the same list.
+let systemAgentBundleIDs: Set<String> = [
+    "com.apple.dock",
+    "com.apple.WindowManager",
+    "com.apple.wallpaper",
+    "com.apple.wallpaper.agent",
+    "com.apple.notificationcenterui",
+    "com.apple.controlcenter",
+    "com.apple.systemuiserver",
+    "com.apple.Spotlight",
+    "com.apple.screencaptureui"
+]
+
 @main
 struct SourcesTool {
     static func main() async {
@@ -75,9 +95,15 @@ struct SourcesTool {
 
             let excludePid = arg("--exclude-pid").flatMap { Int32($0) }
             for window in content.windows {
-                guard let title = window.title, !title.isEmpty,
+                // A window with no owning application is a compositing surface
+                // rather than something a user opened -- "Display 1 Backstop"
+                // is the common one, and it reports an empty app name.
+                guard let owner = window.owningApplication,
+                      !owner.applicationName.isEmpty,
+                      !systemAgentBundleIDs.contains(owner.bundleIdentifier),
+                      let title = window.title, !title.isEmpty,
                       window.frame.width > 40, window.frame.height > 40,
-                      excludePid == nil || window.owningApplication?.processID != excludePid
+                      excludePid == nil || owner.processID != excludePid
                 else { continue }
 
                 let filter = SCContentFilter(desktopIndependentWindow: window)
