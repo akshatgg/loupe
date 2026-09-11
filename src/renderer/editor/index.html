@@ -7,12 +7,23 @@
   <video id="src" hidden></video>
   <div id="timeline">
     <div id="track"><div id="playhead"></div><p id="notracks" hidden></p></div>
+    <div id="speedtrack" title="Drag across a stretch to speed it up or slow it down">
+      <div id="speedsel" hidden></div>
+      <p id="speedhint">Speed: drag across any stretch here to speed it up or slow it down</p>
+    </div>
+    <div id="speedmenu" hidden role="menu" aria-label="Speed for this stretch"></div>
     <input id="scrub" type="range" min="0" max="1000" value="0">
     <div class="times"><span id="tnow">0:00</span><span id="tend">0:00</span></div>
   </div>
   <footer>
     <button id="play">Play</button>
     <span id="zoomnow" class="zoomnow"></span>
+    <button id="undoZoom" hidden title="Bring back the last zoom you removed (⌘Z)">Undo</button>
+    <button id="restoreZooms" hidden>Restore all zooms</button>
+    <label class="toggle" title="Draw the mouse cursor in the video">
+      <input type="checkbox" id="showCursor" checked> Show cursor
+    </label>
+    <span class="spacer"></span>
     <select id="preset">
       <option value="1080p">1080p</option>
       <option value="1440p">1440p</option>

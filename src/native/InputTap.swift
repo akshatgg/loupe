@@ -19,10 +19,66 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
+func arg(_ name: String) -> String? {
+    let args = CommandLine.arguments
+    guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
+    return args[i + 1]
+}
+
+// The zoom shortcuts, from Loupe's settings (settings.js inputTapArgs): a
+// comma list of buttons, any of which held while scrolling zooms. "" means
+// none; with no flag at all this is the original behaviour, Option only.
+struct ZoomTriggers {
+    var modifiers: CGEventFlags = []
+    var sideButtons = false   // back/forward: button 3 and up
+    var middleButton = false  // button 2
+
+    init(_ spec: String?) {
+        for name in (spec ?? "option").split(separator: ",") {
+            switch name {
+            case "option": modifiers.insert(.maskAlternate)
+            case "control": modifiers.insert(.maskControl)
+            case "command": modifiers.insert(.maskCommand)
+            case "shift": modifiers.insert(.maskShift)
+            case "mouse-side": sideButtons = true
+            case "mouse-middle": middleButton = true
+            default: break
+            }
+        }
+    }
+
+    func matches(button: Int64) -> Bool {
+        (sideButtons && button >= 3) || (middleButton && button == 2)
+    }
+}
+
+// Tags the mouse clicks this tap replays (see replayClick), so the tap lets
+// its own replays through instead of catching them again.
+let replayTag: Int64 = 0x4C4F555045 // "LOUPE"
+
 final class TapState {
     var tap: CFMachPort?
     var lastCursorEmit: Double = 0
     let cursorInterval = 1.0 / 120.0
+    let triggers = ZoomTriggers(arg("--zoom-triggers"))
+    // The shortcut mouse button currently held down (swallowed until
+    // release), and whether any scroll-zoom happened while it was.
+    var buttonHeld: Int64?
+    var zoomedDuringHold = false
+}
+
+// A shortcut-button press that turned out NOT to be a zoom gesture is
+// replayed on release, so the button still does its normal job (browser
+// Back/Forward for a side button, open-in-new-tab for the middle one).
+func replayClick(button: Int64, at location: CGPoint) {
+    for type in [CGEventType.otherMouseDown, .otherMouseUp] {
+        guard let e = CGEvent(mouseEventSource: nil, mouseType: type,
+                              mouseCursorPosition: location, mouseButton: .center)
+        else { continue }
+        e.setIntegerValueField(.mouseEventButtonNumber, value: button)
+        e.setIntegerValueField(.eventSourceUserData, value: replayTag)
+        e.post(tap: .cgSessionEventTap)
+    }
 }
 
 func cursorShape() -> String {
@@ -45,19 +101,49 @@ let callback: CGEventTapCallBack = { _, type, event, userInfo in
         return nil
     }
 
+    // Our own replayed side-button clicks go straight through.
+    if event.getIntegerValueField(.eventSourceUserData) == replayTag {
+        return Unmanaged.passUnretained(event)
+    }
+
     let now = CACurrentMediaTime()
     let location = event.location
 
     switch type {
     case .scrollWheel:
-        // ONLY Option+scroll is consumed. Everything else passes through
-        // untouched, with no added latency.
-        guard event.flags.contains(.maskAlternate) else {
+        // ONLY a zoom-trigger scroll is consumed. Everything else passes
+        // through untouched, with no added latency.
+        let byModifier = !event.flags.intersection(state.triggers.modifiers).isEmpty
+        let byButton = state.buttonHeld != nil
+        guard byModifier || byButton else {
             return Unmanaged.passUnretained(event)
         }
-        let dy = event.getDoubleValueField(.scrollWheelEventPointDeltaAxis1)
+        var dy = event.getDoubleValueField(.scrollWheelEventPointDeltaAxis1)
+        // Zoom follows the wheel/fingers physically -- scroll up (away from
+        // you) zooms in, back down zooms out -- whatever the Natural
+        // scrolling setting, which flips the delta macOS reports.
+        if NSEvent(cgEvent: event)?.isDirectionInvertedFromDevice == true { dy = -dy }
+        if byButton { state.zoomedDuringHold = true }
         emit(["type": "zoom", "clock": now, "dy": dy,
               "x": location.x, "y": location.y])
+        return nil
+
+    case .otherMouseDown:
+        let button = event.getIntegerValueField(.mouseEventButtonNumber)
+        guard state.buttonHeld == nil, state.triggers.matches(button: button) else {
+            return Unmanaged.passUnretained(event)
+        }
+        // Held back until release: only then do we know whether this was a
+        // zoom (swallow it) or an ordinary click (replay it).
+        state.buttonHeld = button
+        state.zoomedDuringHold = false
+        return nil
+
+    case .otherMouseUp:
+        let button = event.getIntegerValueField(.mouseEventButtonNumber)
+        guard state.buttonHeld == button else { return Unmanaged.passUnretained(event) }
+        state.buttonHeld = nil
+        if !state.zoomedDuringHold { replayClick(button: button, at: location) }
         return nil
 
     case .leftMouseDown, .rightMouseDown:
@@ -66,7 +152,8 @@ let callback: CGEventTapCallBack = { _, type, event, userInfo in
               "button": type == .leftMouseDown ? "left" : "right"])
         return Unmanaged.passUnretained(event)
 
-    case .mouseMoved, .leftMouseDragged:
+    // otherMouseDragged: moving the mouse while holding a side button to zoom.
+    case .mouseMoved, .leftMouseDragged, .otherMouseDragged:
         if now - state.lastCursorEmit >= state.cursorInterval {
             state.lastCursorEmit = now
             emit(["type": "cursor", "clock": now,
@@ -94,7 +181,10 @@ let mask: CGEventMask =
     (1 << CGEventType.leftMouseDown.rawValue) |
     (1 << CGEventType.rightMouseDown.rawValue) |
     (1 << CGEventType.mouseMoved.rawValue) |
-    (1 << CGEventType.leftMouseDragged.rawValue)
+    (1 << CGEventType.leftMouseDragged.rawValue) |
+    (1 << CGEventType.otherMouseDown.rawValue) |
+    (1 << CGEventType.otherMouseUp.rawValue) |
+    (1 << CGEventType.otherMouseDragged.rawValue)
 
 guard let tap = CGEvent.tapCreate(
     tap: .cgSessionEventTap,

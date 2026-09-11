@@ -21,6 +21,25 @@ func arg(_ name: String) -> String? {
     return args[i + 1]
 }
 
+/// Like `arg(_:)` but collects the value following EVERY occurrence of
+/// `name`, for flags meant to be repeated (currently just
+/// `--exclude-window`, one per Loupe overlay window that must not appear in
+/// the recording).
+func args(_ name: String) -> [String] {
+    let argv = CommandLine.arguments
+    var out: [String] = []
+    var i = 0
+    while i < argv.count {
+        if argv[i] == name, i + 1 < argv.count {
+            out.append(argv[i + 1])
+            i += 2
+        } else {
+            i += 1
+        }
+    }
+    return out
+}
+
 /// Holds the mutable capture state (first-frame PTS, frame count, and the
 /// wall-clock bounds of the recording) that is written from the
 /// ScreenCaptureKit sample callback and the microphone sample callback, and
@@ -421,18 +440,26 @@ struct CaptureTool {
 
         guard let sourceId = arg("--source"), let out = arg("--out") else {
             fail("usage: capture --source <id> --out <path> --mic <0|1> " +
-                 "[--exclude-window <id>] [--crop-x N --crop-y N --crop-w N --crop-h N]")
+                 "[--exclude-window <id>]... [--crop-x N --crop-y N --crop-w N --crop-h N]")
         }
         let withMic = arg("--mic") == "1"
-        let excludeWindowID = arg("--exclude-window").flatMap { UInt32($0) }
+        // The control-bar redesign puts TWO Loupe windows on screen while
+        // armed (the control bar itself, and the
+        // region outline) where the old HUD-only design only ever had one --
+        // `--exclude-window` is repeatable rather than switched to a
+        // comma-separated list, so every OTHER flag can keep using the
+        // existing single-value `arg()` helper unchanged. `args(_:)` collects
+        // every value that follows any occurrence of the given flag name.
+        let excludeWindowIDs = Set(args("--exclude-window").compactMap { UInt32($0) })
 
         // A region crop, if present: the four --crop-* args are all-or-nothing
         // (main.js's recorder.js only ever passes all four together), in
         // logical points, in the SAME global display coordinate space
         // bin/sources reports source x/y in -- not yet rebased against any
-        // particular display's origin. That rebasing happens below, once we
-        // know which display was requested, because SCStreamConfiguration's
-        // sourceRect is relative to the display's own origin, not global.
+        // particular display's or window's origin. That rebasing happens
+        // below, once we know which source was requested, because
+        // SCStreamConfiguration's sourceRect is relative to the captured
+        // content's own origin, not global.
         let crop: CGRect? = {
             guard let cx = arg("--crop-x").flatMap(Double.init),
                   let cy = arg("--crop-y").flatMap(Double.init),
@@ -448,14 +475,6 @@ struct CaptureTool {
             let parts = sourceId.split(separator: ":")
             guard parts.count == 2 else { fail("bad source id: \(sourceId)") }
 
-            // Region cropping is scoped to display sources: a window's own
-            // frame already IS the "crop" a user would draw against a window,
-            // and SCStreamConfiguration's sourceRect is documented against a
-            // display's coordinate space, not a window's.
-            if crop != nil, parts[0] != "display" {
-                fail("region crop is only supported for display sources")
-            }
-
             var filter: SCContentFilter
             var width = 0
             var height = 0
@@ -465,7 +484,7 @@ struct CaptureTool {
                 guard let id = UInt32(parts[1]),
                       let display = content.displays.first(where: { $0.displayID == id })
                 else { fail("display not found: \(sourceId)") }
-                let excluded = content.windows.filter { $0.windowID == excludeWindowID }
+                let excluded = content.windows.filter { excludeWindowIDs.contains($0.windowID) }
                 filter = SCContentFilter(display: display, excludingWindows: excluded)
                 if let crop {
                     // Rebase the crop's global-space origin against this
@@ -487,8 +506,22 @@ struct CaptureTool {
                       let window = content.windows.first(where: { $0.windowID == id })
                 else { fail("window not found: \(sourceId)") }
                 filter = SCContentFilter(desktopIndependentWindow: window)
-                width = Int(window.frame.width)
-                height = Int(window.frame.height)
+                if let crop {
+                    // Same rebasing as the display branch, but against the
+                    // window's own origin: a desktop-independent window
+                    // filter's content space starts at the window's top-left,
+                    // so the crop follows the window if it is moved mid-take
+                    // (e.g. "this window minus its toolbar").
+                    let origin = window.frame.origin
+                    sourceRect = CGRect(x: crop.origin.x - origin.x,
+                                         y: crop.origin.y - origin.y,
+                                         width: crop.width, height: crop.height)
+                    width = Int(crop.width)
+                    height = Int(crop.height)
+                } else {
+                    width = Int(window.frame.width)
+                    height = Int(window.frame.height)
+                }
             }
 
             let scale = filter.pointPixelScale

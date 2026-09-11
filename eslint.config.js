@@ -10,7 +10,7 @@ module.exports = [
                  console: 'readonly', __dirname: 'readonly', Buffer: 'readonly',
                  setTimeout: 'readonly', clearTimeout: 'readonly',
                  setInterval: 'readonly', clearInterval: 'readonly',
-                 setImmediate: 'readonly' }
+                 setImmediate: 'readonly', fetch: 'readonly' }
     },
     rules: {
       'no-unused-vars': 'error',
@@ -37,7 +37,7 @@ module.exports = [
         cancelAnimationFrame: 'readonly', setTimeout: 'readonly',
         clearTimeout: 'readonly', setInterval: 'readonly',
         clearInterval: 'readonly', fetch: 'readonly', URL: 'readonly',
-        localStorage: 'readonly', sessionStorage: 'readonly'
+        localStorage: 'readonly', sessionStorage: 'readonly', Path2D: 'readonly'
       }
     },
     rules: {

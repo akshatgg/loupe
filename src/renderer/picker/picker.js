@@ -3,12 +3,6 @@ let selected = null;
 let latestPermissions = null;
 let allSources = [];
 let activeTab = 'display';
-// The confirmed crop, in global screen points (the same space bin/sources
-// reports source x/y in) -- or null to record the whole selected source.
-// Region capture is scoped to display sources (see main.js's
-// validateStartOptions and Capture.swift's own guard), so this is always
-// cleared when the selection moves away from a display.
-let region = null;
 
 const BROWSERS = ['Chrome', 'Chromium', 'Edge', 'Brave', 'Arc', 'Safari'];
 
@@ -40,8 +34,14 @@ async function refreshPermissions() {
     banner.hidden = true;
   }
   // canRecord depends on Screen Recording alone (PRD FR-14): a missing
-  // Accessibility grant must never disable the Start button, only zoom.
-  document.getElementById('record').disabled = !p.canRecord || !selected;
+  // Accessibility grant must never disable the Continue button, only zoom.
+  const recordButton = document.getElementById('record');
+  recordButton.disabled = !p.canRecord || !selected;
+  // Backing out of the control bar shows this window again (see bar:back /
+  // stopRecording in main.js) without ever reloading it, so a stale
+  // "Continuing…" label from the last attempt has to be reset here rather
+  // than only ever being set once at load.
+  recordButton.textContent = 'Continue';
   return p;
 }
 
@@ -65,14 +65,12 @@ function renderTabs() {
       if (activeTab === tab.kind) return;
       activeTab = tab.kind;
       // Switching tabs clears the selection: leaving a source selected while
-      // it is hidden under another tab makes the enabled Start button look as
-      // though it belongs to whatever is on screen now.
+      // it is hidden under another tab makes the enabled Continue button look
+      // as though it belongs to whatever is on screen now.
       selected = null;
-      region = null;
       renderTabs();
       renderList();
       renderPreview();
-      renderRegionRow();
       renderHint();
       refreshPermissions();
     };
@@ -113,13 +111,9 @@ function renderList() {
     li.appendChild(label);
 
     li.onclick = () => {
-      // A region drawn against one source has no meaning against another --
-      // clear it whenever the selection changes, same as switching tabs.
-      if (selected?.id !== source.id) region = null;
       selected = source;
       renderList();
       renderPreview();
-      renderRegionRow();
       refreshPermissions();
     };
     list.appendChild(li);
@@ -170,39 +164,14 @@ function renderPreview() {
     pane.appendChild(hint);
   }
 
-  // Make clear that only the cropped rectangle -- not the whole source --
-  // will end up in the recording, per the region-capture brief.
-  if (region && selected.kind === 'display') {
-    const note = document.createElement('div');
-    note.className = 'region';
-    note.textContent = `Only the ${Math.round(region.width)} × ${Math.round(region.height)} pt ` +
-      `region you selected will be recorded, not the full ${selected.width} × ${selected.height} pt display.`;
-    pane.appendChild(note);
-  }
-}
-
-// Region capture is scoped to display sources (see main.js's
-// validateStartOptions / Capture.swift's own guard) -- the row that offers
-// it is hidden entirely for a window selection rather than shown disabled,
-// since there is nothing a window crop would even mean here.
-function renderRegionRow() {
-  const row = document.getElementById('regionRow');
-  const label = document.getElementById('regionLabel');
-  const pickBtn = document.getElementById('pickRegion');
-  const clearBtn = document.getElementById('clearRegion');
-  if (!selected || selected.kind !== 'display') {
-    row.hidden = true;
-    return;
-  }
-  row.hidden = false;
-  if (region) {
-    label.textContent = `Recording a ${Math.round(region.width)} × ${Math.round(region.height)} pt region`;
-    pickBtn.textContent = 'Adjust region…';
-    clearBtn.hidden = false;
-  } else {
-    label.textContent = 'Recording the whole source';
-    pickBtn.textContent = 'Record a region…';
-    clearBtn.hidden = true;
+  // Area selection (whole source, a rectangle, or freehand) now lives on the
+  // control bar that appears after Continue, not here -- the picker is only
+  // "what am I recording".
+  if (selected.kind === 'display') {
+    const hint = document.createElement('div');
+    hint.className = 'tabhint';
+    hint.textContent = 'Choose a recording area on the next screen.';
+    pane.appendChild(hint);
   }
 }
 
@@ -229,7 +198,6 @@ async function load() {
   }
   renderPreview();
   renderHint();
-  renderRegionRow();
   await refreshPermissions();
 }
 
@@ -242,48 +210,11 @@ refreshButton.onclick = async () => {
   const previousId = selected?.id;
   await load();
   selected = allSources.find((s) => s.id === previousId) ?? null;
-  // A refreshed source list can report a moved/resized display, which would
-  // make a previously-drawn region stale (wrong bounds, or no longer inside
-  // the display at all) -- clearing it is safer than silently carrying a
-  // crop that may no longer make sense.
-  if (!selected) region = null;
   renderList();
   renderPreview();
-  renderRegionRow();
   await refreshPermissions();
   refreshButton.textContent = 'Refresh';
   refreshButton.disabled = false;
-};
-
-const pickRegionButton = document.getElementById('pickRegion');
-pickRegionButton.onclick = async () => {
-  if (!selected || selected.kind !== 'display') return;
-  pickRegionButton.disabled = true;
-  try {
-    const windows = allSources.filter((s) => s.kind === 'window');
-    const result = await window.loupe.pickRegion({
-      target: { x: selected.x ?? 0, y: selected.y ?? 0, width: selected.width, height: selected.height },
-      windows
-    });
-    // A null result means the overlay was cancelled (Escape, or closed some
-    // other way) -- leave whatever region was already chosen (if any)
-    // untouched rather than clearing it out from under the user.
-    if (result) region = result;
-  } catch (err) {
-    const banner = document.getElementById('banner');
-    banner.hidden = false;
-    banner.textContent = `Could not open the region picker: ${err.message}`;
-  } finally {
-    pickRegionButton.disabled = false;
-    renderRegionRow();
-    renderPreview();
-  }
-};
-
-document.getElementById('clearRegion').onclick = () => {
-  region = null;
-  renderRegionRow();
-  renderPreview();
 };
 
 const recordButton = document.getElementById('record');
@@ -291,42 +222,192 @@ const recordButton = document.getElementById('record');
 recordButton.onclick = async () => {
   if (!selected) return;
   recordButton.disabled = true;
-  recordButton.textContent = 'Starting…';
+  recordButton.textContent = 'Continuing…';
   try {
     // width/height/title/x/y come straight from the bin/sources entry the
     // user picked, in logical points — the camera solver and recorder both
     // expect points, converting to pixels only at render time. x/y are the
     // source's global-space origin; `?? 0` covers a stale/older bin/sources
-    // build whose entries don't carry it yet.
-    const result = await window.loupe.startRecording({
+    // build whose entries don't carry it yet. This only ARMS the control
+    // bar -- recording begins when Start is pressed there, not here.
+    await window.loupe.armRecording({
       source: selected.id,
       width: selected.width,
       height: selected.height,
       x: selected.x ?? 0,
       y: selected.y ?? 0,
       title: selected.title,
-      mic: document.getElementById('mic').checked,
-      // Only a display selection can carry a region (see renderRegionRow),
-      // but guard here too: switching to a window after drawing a region
-      // must not leave a stale region attached to it.
-      region: (region && selected.kind === 'display') ? region : undefined
+      mic: document.getElementById('mic').checked
     });
-    // Microphone was requested but denied: main.js already fell back to
-    // recording without it rather than failing the whole session outright.
-    // The user asked for audio and silently not getting it would confuse.
-    if (result?.micRequested && !result.mic) {
-      const banner = document.getElementById('banner');
-      banner.hidden = false;
-      banner.textContent = 'Recording started without audio: microphone permission was denied.';
-    }
   } catch (err) {
-    recordButton.textContent = 'Start recording';
+    recordButton.textContent = 'Continue';
     recordButton.disabled = !latestPermissions?.canRecord || !selected;
     const banner = document.getElementById('banner');
     banner.hidden = false;
-    banner.textContent = `Could not start recording: ${err.message}`;
+    banner.textContent = `Could not continue: ${err.message}`;
   }
 };
+
+// ---- zoom shortcuts ---------------------------------------------------------
+// Two slots, each set by clicking it and then pressing the button you want.
+// Saved in main.js (settings.js) and handed to bin/inputtap at record time.
+// Only buttons you can HOLD while scrolling without side effects are taken:
+// modifier keys and the middle/side mouse buttons. A letter key would type
+// into whatever is being recorded; left/right click are needed for the demo.
+
+const TRIGGERS = {
+  option: { label: '⌥ Option', key: '⌥' },
+  control: { label: '⌃ Control', key: '⌃' },
+  command: { label: '⌘ Command', key: '⌘' },
+  shift: { label: '⇧ Shift', key: '⇧' },
+  'mouse-side': { label: '🖱 Mouse side button', words: 'a mouse side button' },
+  'mouse-middle': { label: '🖱 Middle mouse button', words: 'the middle mouse button' }
+};
+const KEY_TRIGGERS = { Alt: 'option', Control: 'control', Meta: 'command', Shift: 'shift' };
+// MouseEvent.button: 1 middle, 3 back, 4 forward (0/2 are left/right).
+const MOUSE_TRIGGERS = { 1: 'mouse-middle', 3: 'mouse-side', 4: 'mouse-side' };
+
+const PROMPT = 'Press a key or mouse button…';
+const captureEls = [...document.querySelectorAll('.capture')];
+const clearEls = [...document.querySelectorAll('.clear')];
+
+let zoomTriggers = [null, null];
+let capturing = null; // slot index being set, or null
+let refusedTimer = null;
+
+// The header line spells out whatever is currently set. Built with DOM nodes
+// rather than innerHTML, like the rest of this window.
+function renderZoomHelp() {
+  const help = document.getElementById('zoomHelp');
+  help.textContent = '';
+  const set = zoomTriggers.filter(Boolean);
+  if (set.length === 0) {
+    help.textContent = 'Zoom is off — set a zoom shortcut below to turn it on.';
+    return;
+  }
+  help.append('Hold ');
+  set.forEach((t, i) => {
+    if (i > 0) help.append(' or ');
+    if (TRIGGERS[t].key) {
+      const kbd = document.createElement('kbd');
+      kbd.textContent = TRIGGERS[t].key;
+      help.append(kbd);
+    } else {
+      help.append(TRIGGERS[t].words);
+    }
+  });
+  help.append(' and scroll while recording: scroll up to zoom in, back down to zoom out.');
+}
+
+function renderShortcuts() {
+  captureEls.forEach((el, slot) => {
+    const t = zoomTriggers[slot];
+    el.classList.toggle('capturing', capturing === slot);
+    el.classList.remove('refused');
+    el.classList.toggle('empty', !t && capturing !== slot);
+    el.textContent = capturing === slot ? PROMPT : (t ? TRIGGERS[t].label : 'Click to set');
+    clearEls[slot].hidden = !t || capturing === slot;
+  });
+  renderZoomHelp();
+}
+
+function stopCapture() {
+  clearTimeout(refusedTimer);
+  capturing = null;
+  renderShortcuts();
+}
+
+// Says why a button wasn't taken, in the field itself, then goes back to
+// waiting for another press.
+function refuse(message) {
+  const el = captureEls[capturing];
+  clearTimeout(refusedTimer);
+  el.classList.add('refused');
+  el.textContent = message;
+  refusedTimer = setTimeout(() => {
+    if (capturing === null) return;
+    el.classList.remove('refused');
+    el.textContent = PROMPT;
+  }, 1600);
+}
+
+async function saveTriggers(next) {
+  try {
+    ({ zoomTriggers } = await window.loupe.setSettings({ zoomTriggers: next }));
+  } catch (err) {
+    const banner = document.getElementById('banner');
+    banner.hidden = false;
+    banner.textContent = `Could not save the zoom shortcut: ${err.message}`;
+  }
+  renderShortcuts();
+}
+
+function commit(trigger) {
+  const slot = capturing;
+  if (zoomTriggers[1 - slot] === trigger) {
+    refuse('Already your other shortcut');
+    return;
+  }
+  const next = [...zoomTriggers];
+  next[slot] = trigger;
+  capturing = null;
+  clearTimeout(refusedTimer);
+  saveTriggers(next);
+}
+
+captureEls.forEach((el, slot) => {
+  el.addEventListener('click', () => {
+    capturing = slot;
+    renderShortcuts();
+  });
+});
+clearEls.forEach((el, slot) => {
+  el.addEventListener('click', () => {
+    const next = [...zoomTriggers];
+    next[slot] = null;
+    saveTriggers(next);
+  });
+});
+
+// Capture phase, so nothing else in the window reacts to the press being
+// recorded (e.g. Space/Enter re-"clicking" the focused field).
+document.addEventListener('keydown', (e) => {
+  if (capturing === null) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.key === 'Escape') { stopCapture(); return; }
+  const trigger = KEY_TRIGGERS[e.key];
+  if (trigger) commit(trigger);
+  else refuse('Use ⌥ ⌃ ⌘ ⇧ or a mouse button');
+}, true);
+
+document.addEventListener('mousedown', (e) => {
+  if (capturing === null) return;
+  const trigger = MOUSE_TRIGGERS[e.button];
+  if (trigger) {
+    e.preventDefault();
+    e.stopPropagation();
+    commit(trigger);
+  } else if (e.button === 2) {
+    e.preventDefault();
+    refuse('Use a side or middle mouse button');
+  } else if (e.target !== captureEls[capturing]) {
+    stopCapture(); // an ordinary click elsewhere just cancels
+  }
+}, true);
+
+// A side button's release would otherwise also count as browser Back/Forward.
+for (const type of ['mouseup', 'auxclick']) {
+  document.addEventListener(type, (e) => {
+    if (e.button === 3 || e.button === 4) e.preventDefault();
+  }, true);
+}
+window.addEventListener('blur', () => { if (capturing !== null) stopCapture(); });
+
+window.loupe.getSettings().then((s) => {
+  zoomTriggers = s.zoomTriggers;
+  renderShortcuts();
+});
 
 window.addEventListener('focus', refreshPermissions);
 load();
