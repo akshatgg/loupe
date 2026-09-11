@@ -5,3 +5,5 @@ dist/
 *.mov
 *.m4a
 .build-native/
+.vercel
+.env*

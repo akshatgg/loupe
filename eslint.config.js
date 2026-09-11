@@ -60,7 +60,8 @@ module.exports = [
         setInterval: 'readonly', clearInterval: 'readonly',
         requestAnimationFrame: 'readonly', cancelAnimationFrame: 'readonly',
         matchMedia: 'readonly', IntersectionObserver: 'readonly',
-        getComputedStyle: 'readonly', performance: 'readonly', location: 'readonly'
+        getComputedStyle: 'readonly', performance: 'readonly', location: 'readonly',
+        AbortController: 'readonly'
       }
     },
     rules: {
