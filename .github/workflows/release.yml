@@ -1,0 +1,273 @@
+name: Release
+
+# Builds the macOS installers (Apple Silicon + Intel DMGs), publishes them as
+# a GitHub Release, and points the Homebrew cask at them. This is the APP
+# release only -- the website (web/) deploys separately, on every push to
+# master, and needs no change per release: its download buttons use
+# /releases/latest/download/Loupe-<arch>.dmg, which always serves the newest.
+#
+# Two ways to cut one, and you pick the version either way:
+#
+#   From your machine   npm run release:patch      (or :minor / :major)
+#                       bumps package.json, tags, pushes, and this runs.
+#
+#   From GitHub         Actions -> Release -> Run workflow, and type a version
+#                       such as 0.2.1. Leave it blank to build the DMGs
+#                       without publishing anything.
+#
+# Either way the version comes from one place per run and package.json is
+# brought into line with it, so a release can't claim one version and ship
+# another.
+#
+# Optional secrets:
+#   HOMEBREW_TAP_TOKEN   a token that can push to akshatgg/homebrew-tap; with
+#                        it the cask updates itself, without it the job
+#                        attaches loupe.rb to the run for a manual copy.
+#   CSC_LINK, CSC_KEY_PASSWORD, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD,
+#   APPLE_TEAM_ID        Developer ID signing + notarization (see
+#                        electron-builder.config.js). Without them the app is
+#                        ad-hoc signed, which Homebrew installs cleanly.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. 0.2.1 — leave blank to build without publishing'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.decide.outputs.version }}
+      publish: ${{ steps.decide.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: decide
+        name: Decide the version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          pkg="$(node -p "require('./package.json').version")"
+
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            # Tag push: the tag is authoritative, and package.json must agree.
+            version="${GITHUB_REF_NAME#v}"
+            publish=true
+            if [ "$version" != "$pkg" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME does not match package.json ($pkg)."
+              echo "::error::Run: npm version $version --no-git-tag-version, commit, then re-tag."
+              exit 1
+            fi
+          elif [ -n "$INPUT_VERSION" ]; then
+            version="$INPUT_VERSION"            # manual run, version given
+            publish=true
+          else
+            version="$pkg"                      # manual run, build only
+            publish=false
+          fi
+
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$version' is not a version number. Use 0.2.1, not v0.2.1."
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "version $version, publish $publish"
+
+      - name: Refuse a version that already exists
+        if: steps.decide.outputs.publish == 'true' && github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${{ steps.decide.outputs.version }}" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::v${{ steps.decide.outputs.version }} already exists. Choose a higher version."
+            exit 1
+          fi
+
+  macos:
+    needs: [prepare]
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Installer metadata comes from package.json, so align it with the
+      # version this run decided before anything is built.
+      - name: Set version to ${{ needs.prepare.outputs.version }}
+        run: npm version "${{ needs.prepare.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - run: npm ci
+
+      - name: Build native helpers (arm64 + x86_64)
+        run: npm run build:native
+
+      - name: Verify every helper is universal
+        run: |
+          for h in sources capture inputtap render; do
+            archs="$(lipo -archs "bin/$h")"
+            echo "$h: $archs"
+            [[ "$archs" == *arm64* && "$archs" == *x86_64* ]] || { echo "::error::bin/$h is not universal"; exit 1; }
+          done
+
+      - run: npm test
+
+      - name: Build DMGs
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: npx electron-builder --mac --config electron-builder.config.js --publish never
+
+      - name: Verify the DMGs
+        run: |
+          set -euo pipefail
+          for dmg in dist/Loupe-arm64.dmg dist/Loupe-x64.dmg; do
+            test -f "$dmg" || { echo "::error::$dmg was not produced"; exit 1; }
+            ls -lh "$dmg"
+            # Mount it and check the app inside is signed consistently -- an
+            # inconsistent seal is what macOS reports as "damaged".
+            mnt="$(mktemp -d)"
+            hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg" >/dev/null
+            codesign --verify --strict --deep "$mnt/Loupe.app"
+            lipo -archs "$mnt/Loupe.app/Contents/Resources/bin/capture"
+            hdiutil detach "$mnt" >/dev/null
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  release:
+    needs: [prepare, macos]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+
+      - name: Verify artifacts arrived
+        run: |
+          find artifacts -type f -name '*.dmg' -print
+          count=$(find artifacts -type f -name '*.dmg' | wc -l)
+          test "$count" -eq 2 || { echo "::error::expected 2 DMGs, found $count"; exit 1; }
+
+      # A manual run chose the version, so write it back to the repository and
+      # create the tag. Pushes made with GITHUB_TOKEN do not trigger workflows,
+      # so this cannot start a second release run.
+      - name: Record the version in the repository
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          v="${{ needs.prepare.outputs.version }}"
+          if [ "$(node -p "require('./package.json').version")" != "$v" ]; then
+            git config user.name  "akshatgg"
+            git config user.email "akshatgg@users.noreply.github.com"
+            npm version "$v" --no-git-tag-version
+            git commit -am "Release $v"
+            git push origin master
+          fi
+          git tag -f "v$v"
+          git push -f origin "v$v"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.prepare.outputs.version }}
+          name: Loupe ${{ needs.prepare.outputs.version }}
+          files: artifacts/**/*.dmg
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            ## Install
+
+            **macOS 14 Sonoma or later** — with [Homebrew](https://brew.sh):
+
+            ```
+            brew install --cask akshatgg/tap/loupe
+            ```
+
+            No Homebrew yet? Install it first:
+
+            ```
+            /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            ```
+
+            Homebrew installs and opens it with nothing to click through. The
+            DMGs below work too — **Loupe-arm64.dmg** for Apple Silicon,
+            **Loupe-x64.dmg** for Intel — but the app is not notarized yet, so a
+            downloaded copy is refused until you approve it once in System
+            Settings → Privacy & Security → **Open Anyway**.
+
+            On first launch, grant **Screen Recording** (required) and
+            **Accessibility** (for the zoom gesture).
+
+            Website: https://loupeapp.vercel.app
+
+  homebrew:
+    needs: [prepare, release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+
+      # Hashed from the exact files just released, not re-downloaded.
+      - name: Generate the cask
+        run: node packaging/update-cask.js --version "${{ needs.prepare.outputs.version }}" --dmg-dir artifacts --out dist/loupe.rb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: homebrew-cask
+          path: dist/loupe.rb
+
+      - name: Update akshatgg/homebrew-tap
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "::warning::HOMEBREW_TAP_TOKEN is not set, so the tap was not updated. Copy the homebrew-cask artifact to Casks/loupe.rb in akshatgg/homebrew-tap, or run: npm run cask:update"
+            exit 0
+          fi
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/akshatgg/homebrew-tap.git" tap
+          mkdir -p tap/Casks
+          cp dist/loupe.rb tap/Casks/loupe.rb
+          cd tap
+          if git diff --quiet -- Casks/loupe.rb && ! git ls-files --others --exclude-standard | grep -q .; then
+            echo "cask already current"
+            exit 0
+          fi
+          git config user.name  "akshatgg"
+          git config user.email "akshatgg@users.noreply.github.com"
+          git add Casks/loupe.rb
+          git commit -m "loupe ${{ needs.prepare.outputs.version }}"
+          git push origin HEAD

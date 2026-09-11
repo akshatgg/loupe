@@ -1,0 +1,34 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Loupe Control Bar</title>
+<link rel="stylesheet" href="bar.css">
+<body>
+  <div id="armed">
+    <div class="row">
+      <span class="dot idle"></span>
+      <span id="sourceLabel" class="source"></span>
+    </div>
+    <div class="row">
+      <div id="areaModes" class="modes"></div>
+      <span class="spacer"></span>
+      <button id="back" class="ghost" type="button">Back</button>
+      <button id="start" class="icon" type="button" title="Start recording" aria-label="Start recording">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div id="recording" hidden>
+    <span class="dot rec"></span>
+    <span class="time" id="time">0:00</span>
+    <span class="zoom" id="zoom">1.0&times;</span>
+    <span class="mic" id="mic"></span>
+    <span class="warn" id="warn"></span>
+    <span class="error" id="error"></span>
+    <button id="stop" class="icon" type="button" title="Stop recording" aria-label="Stop recording">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>
+    </button>
+  </div>
+
+  <script src="bar.js"></script>
+</body>

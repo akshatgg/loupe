@@ -4,12 +4,24 @@ const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
 const { execFile } = require('node:child_process');
+const { performance } = require('node:perf_hooks');
 const { createPermissions } = require('./permissions');
 const { createRecorder } = require('./recorder');
 const { spawnHelper, stopHelper } = require('./helpers');
 const { solveCamera } = require('./camera');
-const { zoomSegments, deleteSegment, validateSegment } = require('./segments');
+const {
+  zoomSegments, validateSegment, removeZoom, undoRemoveZoom, restoreAllZooms
+} = require('./segments');
 const { loadProject, saveProject, readCursorTrack, writeCameraTrack } = require('./project');
+const { validateRegion, clampRegionToBounds } = require('./region');
+const { transition } = require('./bar-state');
+const { createLiveCamera, stepLiveCamera } = require('./live-camera');
+const { loadSettings, saveSettings, applySettingsPatch, inputTapArgs } = require('./settings');
+const { validateSpeedPaint, paintSpeed, retimePlan, outputDuration } = require('./speed');
+
+const rampMsOf = (project) => project.settings?.rampMs ?? 200;
+const outputDurationOf = (project) =>
+  outputDuration(project.speedSegments ?? [], project.capture.duration, rampMsOf(project));
 
 const BIN_DIR = app.isPackaged
   ? path.join(process.resourcesPath, 'bin')
@@ -19,13 +31,13 @@ const permissions = createPermissions({ systemPreferences, shell });
 // Surface a helper failure to the user -- but only capture's failure means
 // the recording itself is gone. Losing inputtap (the zoom/click/cursor
 // gesture hook) is a degradation, not a fatal error: capture keeps writing
-// raw.mov, so tearing down the HUD and reopening the picker here would
+// raw.mov, so tearing down the bar and reopening the picker here would
 // actually cause the data loss the dialog falsely claims already happened --
-// stopRecording() bails out once hudWindow is null, so every later Stop
+// stopRecording() bails out once barWindow is null, so every later Stop
 // press or app quit would become a no-op and the recording would run forever
 // with no way to finalize it. recorder.js already keeps `recording` true and
 // records the error in state() for exactly this case (see recorder.test.js);
-// the HUD's 200ms poll already surfaces it via hud.js's `error`/`warn`
+// the bar's 200ms poll already surfaces it via bar.js's `error`/`warn`
 // spans, so nothing further is needed here.
 function onRecorderError(err) {
   if (err.source === 'inputtap') return;
@@ -55,87 +67,317 @@ function createPickerWindow() {
     width: 940, height: 660, title: 'Loupe',
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
   });
+  // Only windows on the active Space are listed, so choosing a window that
+  // lives on another desktop means switching to it. A picker pinned to its own
+  // Space would be left behind at exactly that moment, so it follows instead --
+  // switch desktops, hit Refresh, and the window is there to pick.
+  pickerWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   pickerWindow.loadFile(path.join(__dirname, '..', 'renderer', 'picker', 'index.html'));
   return pickerWindow;
 }
 
-let hudWindow = null;
-let hudTimer = null;
-let startedAt = 0;
-
-// Single teardown path for the HUD window + its poll timer. Every call site
-// that used to null hudWindow/clear hudTimer by hand (stopRecording,
-// onRecorderError, the record:start catch block, and now the window's own
-// 'closed' event and app 'will-quit') funnels through here instead, so the
-// two pieces of state are always retired together.
+// ---------------------------------------------------------------------------
+// The control bar. Pressing "Continue" in the picker ARMS the bar (opens it,
+// shows the chosen source and its area controls) but does
+// NOT start recording -- bin/capture is only spawned once the user presses
+// Start on the bar itself (bar:start below). The same bar window then
+// switches to showing elapsed time/zoom/mic/Stop once recording begins; it
+// is one persistent window across both states, not two windows.
 //
-// Idempotent by construction: hudWindow is read into a local and nulled
-// before anything else runs, so a second/concurrent call sees hudWindow
-// already null and does nothing. Closing an already-destroyed BrowserWindow
-// would throw, hence the isDestroyed() guard -- that is exactly the case
-// that used to crash the process when the OS destroyed the HUD out from
-// under us (e.g. Cmd+Q) and the next 200ms timer tick called
-// webContents.send() on the dangling reference.
-function teardownHud() {
-  if (hudTimer) { clearInterval(hudTimer); hudTimer = null; }
-  const win = hudWindow;
-  hudWindow = null;
+// barPhase is the pure state src/main/bar-state.js's transition() governs:
+// 'armed' -> 'recording' -> gone. Every IPC handler that moves the bar
+// between states runs its action through transition() so an invalid call
+// (e.g. a second Start while already recording) is rejected by the same
+// logic test/bar-state.test.js exercises directly, not by ad hoc checks
+// scattered across each handler.
+let barWindow = null;
+let barTimer = null;
+let startedAt = 0;
+let barPhase = null; // null (no bar open) | 'armed' | 'recording'
+
+// The source the user picked in the picker, validated once at arm time
+// (see bar:arm) and reused, unmodified, by bar:start -- the picker itself
+// never starts a recording, it only supplies what to record.
+let armedSource = null;
+
+// The region-selection overlay, and the area the bar has picked so far.
+// 'full' means no crop (record the whole source); 'rect'/'draw' both mean
+// the overlay is showing a rectangle, with `currentAreaRect` (GLOBAL screen
+// points, the same space bin/sources reports source x/y in) holding the
+// live result of whatever the user last dragged. For a window source the
+// overlay covers just that window, so the crop can trim e.g. a browser's
+// toolbar -- see validateStartOptions's region handling below.
+let overlayWindow = null;
+let overlayInitData = null; // {target, mode, rect} the overlay pulls once on load
+let areaMode = 'full';
+let currentAreaRect = null;
+
+// Single teardown path for the bar window + its poll timer. Idempotent by
+// construction: barWindow is read into a local and nulled before anything
+// else runs, so a second/concurrent call sees barWindow already null and
+// does nothing. Closing an already-destroyed BrowserWindow would throw,
+// hence the isDestroyed() guard -- the same case that used to crash the
+// process when the OS destroyed the old HUD out from under us (e.g. Cmd+Q)
+// and the next 200ms timer tick called webContents.send() on the dangling
+// reference.
+function teardownBar() {
+  if (barTimer) { clearInterval(barTimer); barTimer = null; }
+  const win = barWindow;
+  barWindow = null;
   if (win && !win.isDestroyed()) win.close();
 }
 
-// The floating recording overlay. Its BrowserWindow media-source id is
-// passed to `bin/capture --exclude-window` (see record:start below) so
-// ScreenCaptureKit excludes it from the recording -- verified end to end,
-// see task-14-report.md.
-function createHudWindow() {
+// While the region overlay is up it covers the whole target above every
+// other window, so Escape must always get the user out -- it does exactly
+// what the bar's Back does. Held as a global shortcut, and only while the
+// overlay is showing: neither the overlay (shown inactive) nor the bar
+// (focusable:false) ever has keyboard focus to hear a plain keydown, and
+// holding Escape any longer would steal it from the app being demoed.
+let escapeHeld = false;
+
+function holdEscapeForBack(hold) {
+  if (hold === escapeHeld) return;
+  if (hold) {
+    escapeHeld = globalShortcut.register('Escape', () => {
+      stopRecording().catch((e) => console.error('Loupe: Escape/Back failed:', e));
+    });
+    if (!escapeHeld) console.warn('Loupe: could not register Escape to dismiss the area overlay');
+  } else {
+    globalShortcut.unregister('Escape');
+    escapeHeld = false;
+  }
+}
+
+function closeOverlayWindow() {
+  holdEscapeForBack(false);
+  const win = overlayWindow;
+  overlayWindow = null;
+  overlayInitData = null;
+  if (win && !win.isDestroyed()) win.close();
+}
+
+// Tears down everything an armed (or recording) session owns and resets the
+// pure state back to "nothing armed". Used by both a clean Back/Stop and by
+// the window being destroyed out from under us (Cmd+Q mid-arm, etc.).
+// The "what's in shot" frame: while recording, outlines on screen the part
+// of the recorded area the video will show at the current zoom, with the
+// zoom level on it. A transparent, click-through window over exactly the
+// recorded area, stepped by live-camera.js (the renderer's own camera math)
+// at ~60fps. Excluded from the capture like the bar -- and, like the bar, it
+// must already be on screen when bin/capture starts, since ScreenCaptureKit
+// only resolves --exclude-window ids among the windows on screen right then.
+let shotWindow = null;
+let shotTimer = null;
+
+function createShotWindow(area) {
   const win = new BrowserWindow({
-    width: 260, height: 56, x: 40, y: 60,
+    x: Math.round(area.x), y: Math.round(area.y),
+    width: Math.round(area.width), height: Math.round(area.height),
+    frame: false, transparent: true, hasShadow: false,
+    resizable: false, movable: false, skipTaskbar: true, focusable: false,
+    fullscreenable: false, show: false, backgroundColor: '#00000000',
+    webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
+  });
+  shotWindow = win;
+  win.setIgnoreMouseEvents(true);
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.loadFile(path.join(__dirname, '..', 'renderer', 'shot', 'index.html'));
+  win.showInactive();
+  win.once('closed', () => { if (shotWindow === win) shotWindow = null; });
+  return win;
+}
+
+function startShotFrame(area) {
+  const live = createLiveCamera(area);
+  let last = performance.now();
+  let lastSent = '';
+  shotTimer = setInterval(() => {
+    const now = performance.now();
+    // Capped so a stalled main process doesn't jump the spring in one go.
+    const dt = Math.min((now - last) / 1000, 0.25);
+    last = now;
+    const s = recorder.state();
+    const view = stepLiveCamera(live, { target: s.zoom, cursor: s.cursorTrack.at(-1) ?? null, dt });
+    const { zoom, rect } = view;
+    // At rest this settles to identical values -- don't re-send those 60x/s.
+    const key = [zoom.toFixed(3), rect.x.toFixed(1), rect.y.toFixed(1)].join();
+    if (key === lastSent || !shotWindow || shotWindow.isDestroyed()) return;
+    lastSent = key;
+    shotWindow.webContents.send('shot:update', { zoom, rect });
+  }, 16);
+}
+
+function closeShotWindow() {
+  if (shotTimer) { clearInterval(shotTimer); shotTimer = null; }
+  const win = shotWindow;
+  shotWindow = null;
+  if (win && !win.isDestroyed()) win.close();
+}
+
+function teardownArmedState() {
+  teardownBar();
+  closeOverlayWindow();
+  closeShotWindow();
+  armedSource = null;
+  areaMode = 'full';
+  currentAreaRect = null;
+  barPhase = null;
+}
+
+// The floating control bar. Its BrowserWindow media-source id is passed to
+// `bin/capture --exclude-window` (see bar:start below, and recorder.js/
+// exclude-args.js) so ScreenCaptureKit excludes it from the recording --
+// verified end to end, see control-bar-report.md.
+function createBarWindow() {
+  const win = new BrowserWindow({
+    width: 420, height: 96, x: 40, y: 60,
     frame: false, transparent: true, alwaysOnTop: true,
     resizable: false, movable: true, skipTaskbar: true,
-    // focusable:false + showInactive() below keep the HUD from stealing
+    // focusable:false + showInactive() below keep the bar from stealing
     // focus/activation from whatever app is being demoed underneath it.
     focusable: false, show: false,
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
   });
-  hudWindow = win;
+  barWindow = win;
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  win.loadFile(path.join(__dirname, '..', 'renderer', 'hud', 'index.html'));
-  win.once('ready-to-show', () => win?.showInactive());
+  // One level above the region overlay ('screen-saver', see
+  // createOverlayWindow): the overlay covers the whole target, and the bar
+  // usually sits inside it -- at the same level or below, every click on
+  // Start/Back/the area buttons would land on the overlay instead.
+  win.setAlwaysOnTop(true, 'screen-saver', 1);
+  win.loadFile(path.join(__dirname, '..', 'renderer', 'bar', 'index.html'));
+  win.once('ready-to-show', () => {
+    win?.showInactive();
+    win?.webContents.send('bar:update', barPayload());
+  });
   // Covers every way the window can go away that does NOT run through
-  // teardownHud() first -- most importantly Electron destroying it on its
-  // own when the app quits mid-recording (Cmd+Q, dock "Quit"). When
-  // teardownHud() itself calls win.close(), this handler fires again
-  // afterwards, but hudWindow is already null by then so it is a no-op.
-  win.once('closed', () => teardownHud());
-
-  hudTimer = setInterval(() => {
-    const s = recorder.state();
-    if (!win.isDestroyed()) {
-      win.webContents.send('hud:update', {
-        zoom: s.zoom, duration: s.duration, zoomEnabled: s.zoomEnabled,
-        tapReenables: s.tapReenables, hasMic: s.hasMic,
-        error: s.error,
-        elapsed: (Date.now() - startedAt) / 1000
-      });
-    }
-  }, 200);
-
+  // teardownArmedState() first -- most importantly Electron destroying it on
+  // its own when the app quits mid-session (Cmd+Q, dock "Quit").
+  // teardownArmedState() itself nulls barWindow before calling win.close(),
+  // so this handler firing afterward is a harmless no-op.
+  win.once('closed', () => teardownArmedState());
   return win;
 }
 
-// Both the Stop button (via ipcMain.handle('record:stop', ...)) and the
-// global shortcut call this one function directly. ipcMain.emit() would NOT
-// trigger an ipcMain.handle() handler, so the shortcut must not re-emit the
-// channel -- it must call stopRecording() itself.
+// The region-selection overlay: a transparent, frameless, always-on-top
+// window covering exactly the target display or window, positioned at its
+// own global-space x/y/width/height (the same numbers bin/sources reports,
+// in points) so the overlay's own local coordinate space lines up 1:1 with
+// that global space. Reused from the original region-capture work almost
+// unchanged (region.js/region-geometry.js's pure math is untouched) -- what
+// changed is who drives it: the bar's Full/Rectangle/Draw buttons
+// (via setAreaMode below), not a modal confirm/cancel dialog of its own.
+function createOverlayWindow(target) {
+  const win = new BrowserWindow({
+    x: Math.round(target.x), y: Math.round(target.y),
+    width: Math.round(target.width), height: Math.round(target.height),
+    frame: false, transparent: true, hasShadow: false,
+    resizable: false, movable: false, skipTaskbar: true,
+    fullscreenable: false, show: false, backgroundColor: '#00000000',
+    // Shown inactive (showInactive in setAreaMode), so without this macOS
+    // spends the first click just activating the window, not starting a drag.
+    acceptFirstMouse: true,
+    webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
+  });
+  overlayWindow = win;
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // 'screen-saver' puts the overlay above whatever else is on screen; the
+  // bar sits one level higher still (createBarWindow) so it stays clickable.
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.loadFile(path.join(__dirname, '..', 'renderer', 'region', 'index.html'));
+  // Unlike the bar, nothing is pushed here on 'ready-to-show': the overlay
+  // PULLS its initial {target, mode, rect} via region:init once its own
+  // renderer has loaded (see setAreaMode below) -- avoiding a race where a
+  // command sent immediately after `new BrowserWindow(...)` arrives before
+  // the renderer has registered a listener for it.
+  win.once('closed', () => {
+    if (overlayWindow === win) {
+      overlayWindow = null;
+      overlayInitData = null;
+      holdEscapeForBack(false);
+    }
+  });
+  return win;
+}
+
+function armedTarget() {
+  return { x: armedSource.x, y: armedSource.y, width: armedSource.width, height: armedSource.height };
+}
+
+function localFromGlobal(rect, target) {
+  if (!rect) return null;
+  return { x: rect.x - target.x, y: rect.y - target.y, width: rect.width, height: rect.height };
+}
+
+// Switches the bar's area mode ('full' | 'rect' | 'draw'), driving the
+// overlay window rather than duplicating its rectangle UI on the bar itself.
+// 'full' just hides the overlay (no crop, nothing to show); 'rect'/'draw'
+// show it, either with the last rect the user drew (mode 'rect', so
+// switching away and back doesn't lose it) or with no rect at all (mode
+// 'draw', so the next drag anywhere free-draws a fresh one).
+function setAreaMode(mode) {
+  areaMode = mode;
+  const target = armedTarget();
+  if (mode === 'full') {
+    if (overlayWindow && !overlayWindow.isDestroyed()) overlayWindow.hide();
+    holdEscapeForBack(false);
+    currentAreaRect = null;
+  } else {
+    const localRect = mode === 'draw' ? null : localFromGlobal(currentAreaRect, target);
+    if (!overlayWindow || overlayWindow.isDestroyed()) {
+      overlayInitData = { target, mode, rect: localRect };
+      createOverlayWindow(target);
+    } else {
+      overlayWindow.webContents.send('region:command', { mode, rect: localRect });
+    }
+    overlayWindow.showInactive();
+    holdEscapeForBack(true);
+  }
+  barWindow?.webContents.send('bar:update', barPayload());
+}
+
+function barPayload() {
+  return {
+    state: barPhase,
+    sourceLabel: armedSource?.title || armedSource?.source || '',
+    canPickArea: Boolean(armedSource),
+    sourceKind: armedSource?.source.startsWith('window:') ? 'window' : 'display',
+    areaMode
+  };
+}
+
+function recordingPayload() {
+  const s = recorder.state();
+  return {
+    state: 'recording',
+    zoom: s.zoom, duration: s.duration, zoomEnabled: s.zoomEnabled,
+    tapReenables: s.tapReenables, hasMic: s.hasMic, micRequested: Boolean(armedSource?.mic),
+    error: s.error,
+    elapsed: (Date.now() - startedAt) / 1000
+  };
+}
+
+// Both the Back button (armed) and the Stop button (recording) resolve to
+// this one function -- see preload.js's stopRecording, which both map to.
+// "Back" while armed is exactly "stop a recording that was never started":
+// recorder.stop() resolves to null when source is still null (start() was
+// never called), so no project is saved, no editor opens, and no helper
+// process was ever spawned to leak -- teardownArmedState() below is the only
+// cleanup either path actually needs. The global Control+Shift+S shortcut
+// and app quit call this same function directly (ipcMain.emit() would NOT
+// trigger an ipcMain.handle() handler, so they can't just re-emit the
+// channel).
 async function stopRecording() {
-  if (!hudWindow) return null;
-  teardownHud();
-  // recorder.stop() resolves to null when there is nothing to stop (e.g. a
-  // second call racing the first); that is a valid, falsy result and must
-  // not be dereferenced. A rejection, though, must not strand the user with
-  // no window at all: the picker has to come back regardless of how
-  // stop() ends, so the recovery runs in `finally` and the failure is
-  // re-thrown afterward rather than swallowed.
+  if (!barWindow) return null;
+  barPhase = transition(barPhase, barPhase === 'armed' ? 'back' : 'stop');
+  teardownArmedState();
+  // recorder.stop() resolves to null when there is nothing to stop (e.g. the
+  // bar was only ever armed, or a second call races the first); that is a
+  // valid, falsy result and must not be dereferenced. A rejection, though,
+  // must not strand the user with no window at all: the picker has to come
+  // back regardless of how stop() ends, so the recovery runs in `finally`
+  // and the failure is re-thrown afterward rather than swallowed.
   try {
     const result = await recorder.stop();
     if (result?.dir) openEditorWindow(result.dir);
@@ -155,6 +397,26 @@ ipcMain.handle('sources:list', () =>
       });
   }));
 
+ipcMain.handle('region:init', () => overlayInitData);
+
+// The overlay reports its rect on every drag/resize/draw change, not just
+// once at the end, so the bar's Start button always has a current rect to
+// hand to recorder.start(). The overlay renderer is not a trust boundary any
+// more than the picker is -- validateRegion enforces the same finite/
+// minimum-size shape record:start's validateStartOptions does, and
+// clampRegionToBounds pulls it back inside the target display in case
+// anything upstream (a stale drag, a rounding edge) let it slip past the
+// edge. A malformed update is simply ignored -- the last good rect stays in
+// effect rather than corrupting state or crashing the main process.
+ipcMain.handle('region:live', (_e, rawRegion) => {
+  if (!overlayInitData) return;
+  try {
+    currentAreaRect = clampRegionToBounds(validateRegion(rawRegion), overlayInitData.target);
+  } catch {
+    // ignore malformed live updates
+  }
+});
+
 ipcMain.handle('permissions:status', () => ({
   screenRecording: permissions.screenRecording(),
   accessibility: permissions.accessibility(),
@@ -169,6 +431,24 @@ ipcMain.handle('permissions:status', () => ({
 
 ipcMain.handle('permissions:open', (_e, pane) => permissions.openPane(pane));
 
+// User settings (settings.js), loaded lazily on first use and kept in memory.
+let settings = null;
+const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
+
+function currentSettings() {
+  if (!settings) settings = loadSettings(settingsFile());
+  return settings;
+}
+
+ipcMain.handle('settings:get', () => currentSettings());
+
+// The picker renderer is no more a trust boundary here than anywhere else:
+// applySettingsPatch refuses unknown keys and invalid values outright.
+ipcMain.handle('settings:set', (_e, patch) => {
+  settings = saveSettings(settingsFile(), applySettingsPatch(currentSettings(), patch));
+  return settings;
+});
+
 // The main process is the actual trust boundary here, not the picker
 // renderer: a compromised or hostile renderer can invoke this handler with
 // whatever it likes, so every field is checked against the shape the app
@@ -178,7 +458,9 @@ ipcMain.handle('permissions:open', (_e, pane) => permissions.openPane(pane));
 // geometry maths rather than at an obvious boundary. `source` is not
 // checked against a live source list on purpose: the window list can
 // change between listing and recording, and re-verifying here would just
-// introduce a race that rejects legitimate recordings.
+// introduce a race that rejects legitimate recordings. Used both by
+// bar:arm (region always undefined -- the picker no longer offers one) and
+// by bar:start (region resolved from whatever the overlay last reported).
 const SOURCE_ID_RE = /^(display|window):\d+$/;
 
 // x/y are the source's global-space origin in points (Sources.swift's
@@ -187,7 +469,7 @@ const SOURCE_ID_RE = /^(display|window):\d+$/;
 // only for being finite numbers, never for being positive. Optional (default
 // 0) so a picker/source list from before this field existed still works.
 function validateStartOptions(opts) {
-  const { source, width, height, title, mic, x, y } = opts ?? {};
+  const { source, width, height, title, mic, x, y, region } = opts ?? {};
   if (typeof source !== 'string' || !SOURCE_ID_RE.test(source)) {
     throw new Error(`Invalid source id: ${JSON.stringify(source)}`);
   }
@@ -208,36 +490,63 @@ function validateStartOptions(opts) {
   if (title !== undefined && typeof title !== 'string') {
     throw new Error(`Invalid title: ${JSON.stringify(title)}`);
   }
+  // A region crop works for display and window sources alike (Capture.swift
+  // rebases it against whichever one was picked). Validated the same way
+  // width/height/x/y are: finite numbers, positive size at or above a
+  // sensible minimum, via validateRegion (shared with the region:live
+  // handler above).
+  const validatedRegion = region === undefined ? undefined : validateRegion(region);
   return {
     source, width, height, x: ox, y: oy,
-    title: typeof title === 'string' ? title : '', mic: Boolean(mic)
+    title: typeof title === 'string' ? title : '', mic: Boolean(mic),
+    region: validatedRegion
   };
 }
 
-// Guards the async gap between a record:start call being accepted and
-// hudWindow actually existing. The picker renderer is hidden, not
-// destroyed, while a recording is in progress (see pickerWindow?.hide()
-// below), so it is still live and can invoke this channel again -- and
-// `await permissions.requestMicrophone()` below means that gap is real, not
-// just a single microtask: a second call could reach here while the first
-// is still sitting at the OS mic-permission prompt, well before hudWindow is
-// assigned. Once a session is actually running, hudWindow itself is the
-// guard; `starting` only needs to cover the window before it exists.
+// Guards the async gap between a bar:arm/bar:start call being accepted and
+// the corresponding window/recorder state actually existing -- the picker
+// renderer is hidden, not destroyed, while armed/recording, and
+// `await permissions.requestMicrophone()` in bar:start means that gap is
+// real, not just a single microtask.
 let starting = false;
 
-ipcMain.handle('record:start', async (_e, rawOpts) => {
-  // Without this, a second invocation would call createHudWindow() again,
-  // which assigns hudTimer = setInterval(...) over the still-live handle
-  // from the first session -- leaking that interval forever, since nothing
-  // will ever clear it again -- and recorder.start() would null out the
-  // first session's captureChild/inputChild without stopping them,
-  // orphaning a capture helper that still holds raw.mov open.
-  if (starting || hudWindow) {
-    throw new Error('A recording is already in progress.');
+// Picker "Continue": arms the bar with the chosen source, but does not
+// record anything yet. `region` is deliberately never part of rawOpts here
+// -- the picker no longer offers area selection (see the region-capture
+// UI removed from picker.js); the bar decides that afterward.
+ipcMain.handle('bar:arm', (_e, rawOpts) => {
+  if (starting || barWindow) {
+    throw new Error('A recording bar is already open.');
+  }
+  const opts = validateStartOptions(rawOpts);
+  if (!permissions.canRecord()) throw new Error('Screen Recording permission is required');
+  armedSource = opts;
+  areaMode = 'full';
+  currentAreaRect = null;
+  barPhase = 'armed';
+  createBarWindow();
+  pickerWindow?.hide();
+});
+
+ipcMain.handle('bar:setAreaMode', (_e, mode) => {
+  if (mode !== 'full' && mode !== 'rect' && mode !== 'draw') {
+    throw new Error(`Invalid area mode: ${JSON.stringify(mode)}`);
+  }
+  if (barPhase !== 'armed' || !armedSource) {
+    throw new Error('The area can only be changed before recording starts.');
+  }
+  setAreaMode(mode);
+});
+
+// The bar's Start button: this is the only place bin/capture is ever
+// spawned now -- pressing Continue in the picker no longer starts anything.
+ipcMain.handle('bar:start', async () => {
+  if (starting || barPhase !== 'armed' || !armedSource) {
+    throw new Error('Cannot start recording right now.');
   }
   starting = true;
   try {
-    const { source, width, height, x, y, title, mic } = validateStartOptions(rawOpts);
+    barPhase = transition(barPhase, 'start');
     if (!permissions.canRecord()) throw new Error('Screen Recording permission is required');
 
     // A denied mic prompt used to be discarded entirely: bin/capture was
@@ -246,14 +555,9 @@ ipcMain.handle('record:start', async (_e, rawOpts) => {
     // over a permission the user may not even have cared about (the
     // checkbox may just be left on from a previous session). Falling back to
     // recording without audio, rather than refusing to start, keeps the
-    // failure proportional to what was actually lost: someone who pressed
-    // Record wants the screen recording above all; losing the mic track is
-    // recoverable/acceptable, losing the whole session to a permission
-    // dialog they may have dismissed by reflex is not. The picker is told
-    // via the resolved `mic` field so it can tell the user why there's no
-    // audio.
-    let recordMic = mic;
-    if (mic) {
+    // failure proportional to what was actually lost.
+    let recordMic = armedSource.mic;
+    if (armedSource.mic) {
       const granted = await permissions.requestMicrophone();
       if (!granted) recordMic = false;
     }
@@ -261,24 +565,62 @@ ipcMain.handle('record:start', async (_e, rawOpts) => {
     const dir = path.join(os.homedir(), 'Movies', 'Loupe', String(Date.now()));
     fs.mkdirSync(dir, { recursive: true });
 
+    // Every Loupe-owned window that could be on screen right now -- the bar
+    // itself (always) and, with the outline still open, the
+    // region overlay -- must never appear in the recording.
+    // getMediaSourceId() returns "window:<CGWindowID>:0" on macOS; the
+    // middle segment is the same windowID `bin/sources` reports as
+    // "window:<n>" and that SCContentFilter(excludingWindows:) matches
+    // against -- verified empirically, see control-bar-report.md.
+    const excludeWindowIds = [barWindow.getMediaSourceId().split(':')[1]];
+    if (overlayWindow && !overlayWindow.isDestroyed()) {
+      excludeWindowIds.push(overlayWindow.getMediaSourceId().split(':')[1]);
+    }
+    // "The area outline goes away once recording starts" -- closed here,
+    // before capture spawns, rather than merely hidden, since it would only
+    // be clutter from this point on. This close is NOT relied on as the only
+    // protection against it appearing on screen: bin/capture is ALSO told
+    // its window id above, so a race between "Electron finished closing the
+    // window" and "ScreenCaptureKit's stream actually started rendering
+    // frames" can never let it slip into a frame either way.
+    closeOverlayWindow();
+
+    const region = areaMode === 'full' ? undefined : currentAreaRect;
+    const validated = validateStartOptions({ ...armedSource, region });
+
+    // Only when zoom can actually happen -- otherwise there's never a frame.
+    const zoomEnabled = permissions.canZoom();
+    const area = validated.region
+      ?? { x: validated.x, y: validated.y, width: validated.width, height: validated.height };
+    if (zoomEnabled) {
+      excludeWindowIds.push(createShotWindow(area).getMediaSourceId().split(':')[1]);
+    }
+
     startedAt = Date.now();
-    const hud = createHudWindow();
     try {
       await recorder.start({
-        source, width, height, x, y, title, mic: recordMic, dir,
-        // getMediaSourceId() returns "window:<CGWindowID>:0" on macOS; the
-        // middle segment is the same windowID `bin/sources` reports as
-        // "window:<n>" and that SCContentFilter(excludingWindows:) matches
-        // against -- verified empirically, see task-14-report.md.
-        hudWindowId: hud.getMediaSourceId().split(':')[1],
-        zoomEnabled: permissions.canZoom()
+        source: validated.source, width: validated.width, height: validated.height,
+        x: validated.x, y: validated.y, title: validated.title, mic: recordMic, dir,
+        region: validated.region,
+        excludeWindowIds,
+        zoomEnabled,
+        inputTapArgs: inputTapArgs(currentSettings())
       });
     } catch (err) {
-      teardownHud();
+      closeShotWindow();
+      barPhase = 'armed';
       throw err;
     }
-    pickerWindow?.hide();
-    return { dir, zoomEnabled: permissions.canZoom(), mic: recordMic, micRequested: mic };
+    if (zoomEnabled) startShotFrame(area);
+
+    barTimer = setInterval(() => {
+      if (barWindow && !barWindow.isDestroyed()) {
+        barWindow.webContents.send('bar:update', recordingPayload());
+      }
+    }, 200);
+    barWindow.webContents.send('bar:update', recordingPayload());
+
+    return { dir, zoomEnabled: permissions.canZoom(), mic: recordMic, micRequested: armedSource.mic };
   } finally {
     starting = false;
   }
@@ -292,11 +634,10 @@ ipcMain.handle('record:stop', stopRecording);
 // previously silent: the user presses the shortcut mid-recording, nothing
 // happens, and there is no error anywhere to explain why. Logged clearly
 // below rather than surfaced as a startup dialog -- a modal here would
-// interrupt every recording session over a shortcut collision that the HUD
-// Stop button already works around. Indicating this in the HUD itself would
-// need a renderer change (a new field on 'hud:update' plus UI to render it),
-// which is out of scope for this main-process-only fix -- see
-// task-14-report.md.
+// interrupt every recording session over a shortcut collision that the bar's
+// Stop button already works around. Indicating this in the bar itself would
+// need a renderer change (a new field on 'bar:update' plus UI to render it),
+// which is out of scope for this fix -- see control-bar-report.md.
 let stopShortcutRegistered = false;
 
 app.whenReady().then(() => {
@@ -314,7 +655,7 @@ app.whenReady().then(() => {
   if (!stopShortcutRegistered) {
     console.error(
       'Loupe: could not register the Control+Shift+S stop-recording shortcut ' +
-      '(another application likely already holds it). The HUD Stop button ' +
+      '(another application likely already holds it). The bar\'s Stop button ' +
       'still works.'
     );
   }
@@ -346,13 +687,36 @@ let exportOutPath = null;
 // need every handler (project:load, deleteZoom, export:start) rewritten to
 // look up its caller's own state instead of a shared global -- a bigger,
 // riskier change for a capability nothing asks for.
+// Chrome below the preview: timeline plus the export row.
+const EDITOR_CHROME_HEIGHT = 150;
+
+function editorWindowSize(dir) {
+  const fallback = { width: 1080, height: 720 };
+  try {
+    const { source } = loadProject(dir);
+    if (!Number.isFinite(source?.width) || !Number.isFinite(source?.height)
+        || source.width <= 0 || source.height <= 0) return fallback;
+    const width = 1080;
+    const height = Math.round(width * (source.height / source.width)) + EDITOR_CHROME_HEIGHT;
+    return { width, height };
+  } catch {
+    // A project that cannot be read is the editor's problem to report, not a
+    // reason to fail before the window even opens.
+    return fallback;
+  }
+}
+
 function openEditorWindow(dir) {
   const prevWin = editorWindow;
   if (prevWin && !prevWin.isDestroyed()) prevWin.close();
 
   editorDir = dir;
+  // Size the editor to the recording's own aspect ratio so the preview fills
+  // it. A fixed 16:9 window against a 1.54 display leaves bars either side
+  // that look like a capture defect but are only unused window.
+  const { width: winW, height: winH } = editorWindowSize(dir);
   const win = new BrowserWindow({
-    width: 1080, height: 720, title: 'Loupe — Edit',
+    width: winW, height: winH, title: 'Loupe — Edit',
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
   });
   editorWindow = win;
@@ -443,8 +807,36 @@ ipcMain.handle('project:load', () => {
     project,
     video: path.join(editorDir, 'raw.mov'),
     segments: zoomSegments(project.zoomKeyframes, project.capture.duration),
-    camera: cameraFor(editorDir)
+    camera: cameraFor(editorDir),
+    // For the preview to draw the cursor the export will draw (the capture
+    // itself never contains it). Shape isn't drawn yet, so it isn't sent.
+    cursor: readCursorTrack(editorDir).map(({ t, x, y }) => ({ t, x, y })),
+    outputDuration: outputDurationOf(project)
   };
+});
+
+// The editor's speed track: set a stretch of the recording to a speed (1x
+// puts it back to normal). Validated here -- the renderer isn't a trust
+// boundary -- and stored in recording time, so zooms stay glued to their
+// frames whatever the speed around them (PRD FR-24).
+ipcMain.handle('project:paintSpeed', (_e, rawPaint) => {
+  const project = loadProject(editorDir);
+  const paint = validateSpeedPaint(rawPaint, project.capture.duration);
+  project.speedSegments = paintSpeed(project.speedSegments ?? [], paint);
+  saveProject(editorDir, project);
+  return { project, outputDuration: outputDurationOf(project) };
+});
+
+// The editor's "Show cursor" switch. Persisted in project.json, which is
+// what Render.swift reads at export -- so preview and export always agree.
+ipcMain.handle('project:setShowCursor', (_e, show) => {
+  if (typeof show !== 'boolean') {
+    throw new Error(`Invalid showCursor: ${JSON.stringify(show)}`);
+  }
+  const project = loadProject(editorDir);
+  project.settings = { ...project.settings, showCursor: show };
+  saveProject(editorDir, project);
+  return { project };
 });
 
 ipcMain.handle('project:deleteZoom', (_e, rawSegment) => {
@@ -453,15 +845,23 @@ ipcMain.handle('project:deleteZoom', (_e, rawSegment) => {
   // payload like {start: -Infinity, end: Infinity} would wipe every
   // keyframe and persist it via saveProject below.
   const segment = validateSegment(rawSegment);
-  const project = loadProject(editorDir);
-  project.zoomKeyframes = deleteSegment(project.zoomKeyframes, segment);
+  return updateZooms((project) => removeZoom(project, segment));
+});
+
+// Zoom removal is non-destructive (segments.js removeZoom), so the editor
+// can take any of it back: the last removal, or all of them.
+ipcMain.handle('project:undoZoomDelete', () => updateZooms(undoRemoveZoom));
+ipcMain.handle('project:restoreZooms', () => updateZooms(restoreAllZooms));
+
+function updateZooms(change) {
+  const project = change(loadProject(editorDir));
   saveProject(editorDir, project);
   return {
     project,
     segments: zoomSegments(project.zoomKeyframes, project.capture.duration),
     camera: cameraFor(editorDir)
   };
-});
+}
 
 ipcMain.handle('export:start', async (_e, { preset, codec }) => {
   // Nothing else guards against two exports running at once: the output
@@ -487,6 +887,14 @@ ipcMain.handle('export:start', async (_e, { preset, codec }) => {
   // otherwise a deleted zoom would still show up in the exported file even
   // though the preview no longer shows it.
   writeCameraTrack(editorDir, cameraFor(editorDir));
+  // Which moment of the recording each exported frame shows, and how to
+  // stretch the audio to match -- speed.js computes it, bin/render follows
+  // it. Always written, even with no speed stretches: the plan is then just
+  // the recording at a steady 60fps.
+  const plan = retimePlan(project.speedSegments ?? [], project.capture.duration, rampMsOf(project));
+  fs.writeFileSync(path.join(editorDir, 'retime.json'), JSON.stringify({
+    ...plan, preservePitch: project.settings?.preserveVoicePitch !== false
+  }));
   const out = path.join(editorDir, `export-${width}x${height}.mp4`);
   exportOutPath = out;
   return new Promise((resolve, reject) => {
@@ -544,18 +952,19 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 // than hanging on Cmd+Q forever.
 let quitting = false;
 app.on('before-quit', (event) => {
-  // Originally only ever considered hudWindow, so quitting mid-export (no
-  // recording in progress, but bin/render still running) skipped this
-  // whole block and fell straight to will-quit's synchronous teardownHud --
-  // which knows nothing about exports -- orphaning bin/render holding its
-  // output file open. exportChild is the same in-flight-export signal
-  // export:start already uses to refuse a second concurrent export, so it
-  // is checked here the same way hudWindow is.
-  if (quitting || (!hudWindow && !exportChild)) return;
+  // Originally only ever considered barWindow (the bar covers both "armed"
+  // and "recording", including a session that never got past arming), so
+  // quitting mid-export (no bar open, but bin/render still running) skipped
+  // this whole block and fell straight to will-quit's synchronous
+  // teardownArmedState -- which knows nothing about exports -- orphaning
+  // bin/render holding its output file open. exportChild is the same
+  // in-flight-export signal export:start already uses to refuse a second
+  // concurrent export, so it is checked here the same way barWindow is.
+  if (quitting || (!barWindow && !exportChild)) return;
   event.preventDefault();
   quitting = true;
   const tasks = [];
-  if (hudWindow) {
+  if (barWindow) {
     tasks.push(stopRecording().catch((err) => {
       console.error('Loupe: failed to stop recording cleanly while quitting:', err);
     }));
@@ -586,10 +995,10 @@ app.on('will-quit', () => {
   // Final synchronous safety net: if some path reached actual quit without
   // going through stopRecording()/onRecorderError (e.g. before-quit's
   // timeout fired, or a future quit path we haven't accounted for), this
-  // guarantees hudTimer is cleared before the process goes down rather than
-  // relying on the window's own 'closed' event, which may not have fired
-  // yet at this point in shutdown.
-  teardownHud();
+  // guarantees barTimer is cleared and the overlay is closed before the
+  // process goes down rather than relying on the windows' own 'closed'
+  // events, which may not have fired yet at this point in shutdown.
+  teardownArmedState();
 });
 
 module.exports = {
@@ -601,6 +1010,7 @@ module.exports = {
   __test__: {
     openEditorWindow,
     editorState: () => ({ editorDir, editorWindow, exportChild, exportOutPath }),
-    setExportState: (child, outPath) => { exportChild = child; exportOutPath = outPath; }
+    setExportState: (child, outPath) => { exportChild = child; exportOutPath = outPath; },
+    validateStartOptions
   }
 };

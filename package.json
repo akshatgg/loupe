@@ -11,9 +11,15 @@
     "dev": "electron . --enable-logging",
     "lint": "eslint .",
     "test": "eslint . && node --test 'test/**/*.test.js'",
-    "build:native": "mkdir -p bin && swiftc -O -parse-as-library src/native/Sources.swift -o bin/sources && swiftc -O -parse-as-library src/native/Capture.swift -o bin/capture && swiftc -O src/native/InputTap.swift -o bin/inputtap && swiftc -O -parse-as-library src/native/Render.swift -o bin/render",
-    "dist:mac": "npm run build:native && electron-builder --mac --config electron-builder.config.js --publish never"
+    "build:native": "bash packaging/build-native.sh",
+    "dist:mac": "npm run build:native && electron-builder --mac --config electron-builder.config.js --publish never",
+    "release:patch": "npm version patch && git push --follow-tags",
+    "release:minor": "npm version minor && git push --follow-tags",
+    "release:major": "npm version major && git push --follow-tags",
+    "cask:update": "node packaging/update-cask.js"
   },
+  "homepage": "https://loupeapp.vercel.app",
+  "repository": { "type": "git", "url": "https://github.com/akshatgg/loupe.git" },
   "devDependencies": {
     "@electron/notarize": "^2.5.0",
     "electron": "^44.2.0",
