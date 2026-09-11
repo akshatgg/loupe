@@ -30,6 +30,10 @@ test('a new project defaults to preserving voice pitch', () => {
   assert.strictEqual(createProject(SOURCE, CAPTURE).settings.preserveVoicePitch, true);
 });
 
+test('a new project shows the cursor by default', () => {
+  assert.strictEqual(createProject(SOURCE, CAPTURE).settings.showCursor, true);
+});
+
 test('save then load round-trips', () => {
   const dir = tempDir();
   const p = createProject(SOURCE, CAPTURE);

@@ -3,6 +3,7 @@
 const path = require('node:path');
 const { createZoomState, applyScroll } = require('./zoom');
 const { createProject, saveProject, writeCursorTrack } = require('./project');
+const { buildExcludeWindowArgs } = require('./exclude-args');
 
 function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
   let captureChild = null;
@@ -186,7 +187,14 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
 
     const args = ['--source', source, '--out', path.join(dir, 'raw.mov'),
                   '--mic', hasMic ? '1' : '0'];
-    if (opts.hudWindowId) args.push('--exclude-window', String(opts.hudWindowId));
+    // Every Loupe-owned overlay window that could be on screen when capture
+    // starts -- the control bar (always) and, with the outline still
+    // open, the region-selection overlay -- must be excluded.
+    // Hiding/closing those windows on the Electron side is not relied on as
+    // the only protection (see main.js's bar:start): bin/capture is always
+    // told about every id that COULD be on screen, whether or not it still
+    // is by the time this spawns.
+    args.push(...buildExcludeWindowArgs(opts.excludeWindowIds));
     // region.x/y are passed through untouched (global points, same as
     // --exclude-window's coordinate-free id) -- Capture.swift is what
     // rebases them against the target display's own origin, since it's the
@@ -205,7 +213,9 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
     });
 
     if (zoomEnabled) {
-      inputChild = spawnHelper(path.join(binDir, 'inputtap'), [], {
+      // How zooming is triggered (modifier key / mouse side button) --
+      // settings.js's inputTapArgs, from the user's saved choice.
+      inputChild = spawnHelper(path.join(binDir, 'inputtap'), opts.inputTapArgs ?? [], {
         onMessage: (msg) => { if (gen === generation) onInput(msg); },
         onMalformed: (l) => console.error('inputtap malformed:', l),
         // A non-zero exit here (e.g. Accessibility revoked mid-recording,
@@ -270,6 +280,10 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
       { file: 'raw.mov', fps: 60, duration, hasMicTrack: hasMic }
     );
     project.zoomKeyframes = zoomState.keyframes;
+    // The editor's zoom removal is non-destructive (segments.js removeZoom):
+    // this copy is never edited, so any removed zoom can be restored.
+    project.recordedZoomKeyframes = zoomState.keyframes.map((kf) => ({ ...kf }));
+    project.removedZooms = [];
     project.clicks = clicks;
 
     saveProject(dir, project);

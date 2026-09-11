@@ -47,17 +47,32 @@ nav button[aria-selected="true"] { color: #8ab4f8; border-bottom-color: #8ab4f8;
                 text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 #preview .tabhint { color: #9ab4d8; font-size: 11px; line-height: 1.4; }
 
+.options { margin: 14px 24px 0; background: #3c3d40; border-radius: 10px; }
 .optionrow { display: flex; align-items: center; justify-content: space-between;
-             margin: 14px 24px 0; padding: 12px 14px;
-             background: #3c3d40; border-radius: 10px; }
+             gap: 12px; padding: 10px 14px; }
+.optionrow + .optionrow { border-top: 1px solid rgba(255,255,255,.07); }
 .optionrow label { display: flex; align-items: center; gap: 11px; cursor: pointer; }
+.rowlabel { display: flex; align-items: center; gap: 11px; }
+
+/* Shortcut fields: click one, then press the button you want. */
+.shortcuts { display: flex; gap: 10px; }
+.shortcut { display: flex; align-items: center; gap: 2px; }
+.capture { appearance: none; font: inherit; color: #e8eaed; background: #2a2b2e;
+           border: 1px solid rgba(255,255,255,.18); border-radius: 6px;
+           padding: 5px 10px; width: 232px; text-align: left; cursor: pointer;
+           /* Fixed width: the prompt/warning text mustn't shift the row. */
+           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.capture:hover { border-color: rgba(255,255,255,.32); }
+.capture.empty { color: #9aa0a6; }
+.capture.capturing { color: #8ab4f8; border-color: #8ab4f8;
+                     box-shadow: 0 0 0 2px rgba(138,180,248,.3); }
+.capture.refused { color: #fbbf24; border-color: #fbbf24; }
+.clear { appearance: none; background: none; border: 0; color: #9aa0a6;
+         font-size: 16px; line-height: 1; padding: 2px 5px; cursor: pointer;
+         border-radius: 4px; }
+.clear:hover { color: #e8eaed; background: rgba(255,255,255,.08); }
+.clear[hidden] { display: block; visibility: hidden; } /* keep its space */
 .glyph { opacity: .85; }
-
-.regioninfo { display: flex; align-items: center; gap: 11px; color: #c8ccd0; }
-.regionactions { display: flex; gap: 8px; }
-.regionactions .ghost { padding: 6px 14px; font-size: 12px; }
-
-#preview .region { color: #9ab4d8; font-size: 11px; line-height: 1.4; }
 
 /* Pill switch, in place of a bare checkbox. */
 .switch { appearance: none; width: 38px; height: 21px; border-radius: 11px;

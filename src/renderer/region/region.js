@@ -10,14 +10,6 @@ const MIN_REGION_SIZE = 40;
 
 function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 
-function clampRect(rect, bounds) {
-  const width = clamp(rect.width, 0, bounds.width);
-  const height = clamp(rect.height, 0, bounds.height);
-  const x = clamp(rect.x, 0, bounds.width - width);
-  const y = clamp(rect.y, 0, bounds.height - height);
-  return { x, y, width, height };
-}
-
 function moveRect(rect, dx, dy, bounds) {
   const x = clamp(rect.x + dx, 0, bounds.width - rect.width);
   const y = clamp(rect.y + dy, 0, bounds.height - rect.height);
@@ -52,26 +44,22 @@ function drawRect(anchor, point, bounds, minSize = MIN_REGION_SIZE) {
   return { x, y, width: Math.abs(x1 - anchor.x), height: Math.abs(y1 - anchor.y) };
 }
 
-function windowFitRect(win, target, bounds) {
-  const rect = { x: win.x - target.x, y: win.y - target.y, width: win.width, height: win.height };
-  return clampRect(rect, bounds);
-}
-
 // ---- DOM wiring ---------------------------------------------------------
+//
+// This overlay is driven entirely by the control bar, via main.js: there is
+// no confirm/cancel/preset UI of its own any more -- Start/Back live on the
+// bar (src/renderer/bar/), and "Full screen"/"Rectangle"/"Draw" are buttons
+// there too. This window's only jobs are (1) show the live dashed outline +
+// handles for whatever rect main.js last told it to show, and (2) report
+// every drag/resize/draw change back to main.js as it happens, so the bar's
+// Start button always has the current rectangle to hand to recorder.start().
 
 const rectEl = document.getElementById('rect');
 const readoutEl = document.getElementById('readout');
-const confirmBtn = document.getElementById('confirm');
-const cancelBtn = document.getElementById('cancel');
-const presetFullBtn = document.getElementById('presetFull');
-const presetWindowBtn = document.getElementById('presetWindow');
-const presetDrawBtn = document.getElementById('presetDraw');
-const windowMenu = document.getElementById('windowMenu');
 
 let target = null;      // the display's own global-space {x,y,width,height}
 let bounds = null;      // {x:0, y:0, width, height} -- the overlay's own local bounds
-let windows = [];        // window sources, for the "Fit a window" preset
-let rect = null;         // the current selection, in overlay-local points, or null
+let rect = null;        // the current selection, in overlay-local points, or null
 
 // Drag state. Only one of these is active at a time; `dragMode` is null
 // between gestures.
@@ -98,7 +86,6 @@ function pointInRect(p, r) {
 function render() {
   if (!rect) {
     rectEl.hidden = true;
-    confirmBtn.disabled = true;
     return;
   }
   rectEl.hidden = false;
@@ -107,80 +94,28 @@ function render() {
   rectEl.style.width = `${rect.width}px`;
   rectEl.style.height = `${rect.height}px`;
   readoutEl.textContent = `${Math.round(rect.width)} × ${Math.round(rect.height)} pt`;
-  confirmBtn.disabled = rect.width < MIN_REGION_SIZE || rect.height < MIN_REGION_SIZE;
 }
 
-function setRect(next) {
-  rect = next;
-  render();
-}
-
-async function confirm() {
-  if (!rect || confirmBtn.disabled) return;
-  const globalRegion = {
+// Reports the current rect back to main.js, in the SAME global screen-point
+// space bin/sources reports source x/y in (the overlay's local space is
+// target-relative). A one-way `send`, not `invoke`: main.js has nothing to
+// hand back, and this fires on every pointermove of a drag.
+function reportLive() {
+  if (!rect || rect.width < MIN_REGION_SIZE || rect.height < MIN_REGION_SIZE) return;
+  window.loupe.reportAreaLive({
     x: target.x + rect.x, y: target.y + rect.y,
     width: rect.width, height: rect.height
-  };
-  await window.loupe.regionConfirm(globalRegion);
+  });
 }
 
-async function cancel() {
-  await window.loupe.regionCancel();
+function setRect(next, { silent = false } = {}) {
+  rect = next;
+  render();
+  if (!silent) reportLive();
 }
-
-// Window titles are the OS's own, and any process picks its own -- built
-// with textContent, never innerHTML, the same rule the picker's source list
-// already follows.
-function buildWindowMenu() {
-  windowMenu.textContent = '';
-  if (windows.length === 0) {
-    const none = document.createElement('div');
-    none.className = 'none';
-    none.textContent = 'No open windows found.';
-    windowMenu.appendChild(none);
-    return;
-  }
-  for (const win of windows) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.setAttribute('role', 'menuitem');
-    btn.textContent = win.app ? `${win.app} — ${win.title}` : win.title;
-    btn.onclick = () => {
-      setRect(windowFitRect(win, target, bounds));
-      windowMenu.hidden = true;
-      presetWindowBtn.setAttribute('aria-pressed', 'false');
-    };
-    windowMenu.appendChild(btn);
-  }
-}
-
-presetFullBtn.onclick = () => {
-  windowMenu.hidden = true;
-  setRect({ x: 0, y: 0, width: bounds.width, height: bounds.height });
-};
-
-presetWindowBtn.onclick = () => {
-  const opening = windowMenu.hidden;
-  windowMenu.hidden = !opening;
-  presetWindowBtn.setAttribute('aria-pressed', String(opening));
-};
-
-presetDrawBtn.onclick = () => {
-  windowMenu.hidden = true;
-  // Clears the rectangle entirely -- the next pointerdown on empty space
-  // (anywhere, now that nothing is selected) starts a fresh free-draw drag.
-  setRect(null);
-};
-
-confirmBtn.onclick = () => { confirm(); };
-cancelBtn.onclick = () => { cancel(); };
 
 document.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
-  if (e.target.closest('#toolbar') || e.target.closest('#windowMenu')) return;
-  windowMenu.hidden = true;
-  presetWindowBtn.setAttribute('aria-pressed', 'false');
-
   const p = toLocal(e);
   const handle = e.target.dataset ? e.target.dataset.handle : undefined;
   if (handle && rect) {
@@ -195,7 +130,7 @@ document.addEventListener('pointerdown', (e) => {
   } else {
     dragMode = 'draw';
     drawAnchor = p;
-    setRect({ x: p.x, y: p.y, width: 0, height: 0 });
+    setRect({ x: p.x, y: p.y, width: 0, height: 0 }, { silent: true });
   }
   e.preventDefault();
 });
@@ -219,23 +154,30 @@ document.addEventListener('pointerup', () => {
   drawAnchor = null;
 });
 
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    e.preventDefault();
-    cancel();
-  } else if (e.key === 'Enter') {
-    e.preventDefault();
-    confirm();
+// Applies a {mode, rect} command from main.js: 'full' is never sent here
+// (main.js hides this whole window instead -- see setAreaMode in main.js),
+// 'draw' clears the rect so the next drag anywhere free-draws a fresh one,
+// and 'rect' shows either the rect main.js already knew about (the user's
+// last-drawn one) or, the first time, a centered default.
+function applyCommand({ mode, rect: nextRect }) {
+  if (mode === 'draw') {
+    setRect(null, { silent: true });
+  } else {
+    setRect(nextRect ?? defaultRect(bounds), { silent: true });
   }
-});
+}
+
+window.loupe.onRegionCommand(applyCommand);
+
+// Escape (= the bar's Back) is a global shortcut main.js holds while this
+// window is up -- not a keydown here, since this window is shown inactive
+// and so wouldn't hear the key until it had been clicked.
 
 async function init() {
   const data = await window.loupe.regionInit();
   target = data.target;
-  windows = (data.windows || []).filter((s) => s.kind === 'window');
   bounds = { x: 0, y: 0, width: target.width, height: target.height };
-  buildWindowMenu();
-  setRect(defaultRect(bounds));
+  applyCommand({ mode: data.mode, rect: data.rect });
 }
 
 init();

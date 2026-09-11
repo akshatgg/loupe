@@ -540,3 +540,31 @@ test('an optional onError callback fires immediately, without waiting for a stat
   assert.strictEqual(seen.length, 1);
   assert.strictEqual(seen[0].source, 'inputtap');
 });
+
+test('the zoom-trigger flags reach inputtap, and inputtap only', async () => {
+  const argsFor = {};
+  const spawnHelper = (bin, args) => {
+    argsFor[bin.endsWith('capture') ? 'capture' : 'inputtap'] = args;
+    return { kill() {}, exitCode: null, signalCode: null, once() {} };
+  };
+  const rec = createRecorder({ binDir: '/fake', spawnHelper, stopHelper: async () => 0 });
+  const inputTapArgs = ['--zoom-triggers', 'control,mouse-side'];
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x', inputTapArgs });
+
+  assert.deepStrictEqual(argsFor.inputtap, inputTapArgs);
+  assert.ok(!argsFor.capture.includes('--zoom-triggers'));
+});
+
+test('stop() keeps an untouched copy of the recorded zooms for the editor to restore from', async () => {
+  const { rec, sinks } = harness();
+  await rec.start({ source: 'display:1', mic: false, dir: '/tmp/x', width: 1000, height: 800 });
+  sinks.capture({ type: 'started', clock: 0 });
+  sinks.inputtap({ type: 'zoom', clock: 1, dy: 40, x: 100, y: 100 });
+  sinks.capture({ type: 'stopped', duration: 5 });
+
+  const { project } = await rec.stop();
+  assert.strictEqual(project.zoomKeyframes.length, 1);
+  assert.deepStrictEqual(project.recordedZoomKeyframes, project.zoomKeyframes);
+  assert.notStrictEqual(project.recordedZoomKeyframes, project.zoomKeyframes, 'a copy, not the same array');
+  assert.deepStrictEqual(project.removedZooms, []);
+});

@@ -20,12 +20,21 @@ function sampleCount(duration, sampleRate) {
   return Math.max(1, Math.round(duration * sampleRate) + 1);
 }
 
+// One step of the zoom spring, mutating `spring` ({position, velocity}).
+// Shared by easeZoom below and by live-camera.js, so the on-screen zoom
+// frame during recording eases exactly the way the rendered video will.
+function springStep(spring, target, dt) {
+  // Semi-implicit Euler: update velocity first, then position with it.
+  const accel = (target - spring.position) / (TAU * TAU) - (2 * spring.velocity) / TAU;
+  spring.velocity += accel * dt;
+  spring.position += spring.velocity * dt;
+}
+
 function easeZoom(keyframes, duration, sampleRate = SAMPLE_RATE) {
   const n = sampleCount(duration, sampleRate);
   const dt = 1 / sampleRate;
   const out = new Float64Array(n);
-  let position = ZOOM_MIN;
-  let velocity = 0;
+  const spring = { position: ZOOM_MIN, velocity: 0 };
   let target = ZOOM_MIN;
   let next = 0;
 
@@ -35,11 +44,8 @@ function easeZoom(keyframes, duration, sampleRate = SAMPLE_RATE) {
       target = keyframes[next].zoom;
       next++;
     }
-    // Semi-implicit Euler: update velocity first, then position with it.
-    const accel = (target - position) / (TAU * TAU) - (2 * velocity) / TAU;
-    velocity += accel * dt;
-    position += velocity * dt;
-    out[i] = position;
+    springStep(spring, target, dt);
+    out[i] = spring.position;
   }
   return out;
 }
@@ -72,32 +78,33 @@ function resampleCursor(track, duration, sampleRate = SAMPLE_RATE) {
 // The camera moves the MINIMUM distance that puts the cursor back on the
 // dead-zone boundary, and never more. That is what makes typing produce
 // exactly zero movement.
-function solvePath(zoomSamples, cursor, { width, height }) {
+// One step of that dead-zone follow, mutating `cam` ({x, y}) for zoom `z`
+// and cursor (mx, my). Shared with live-camera.js, like springStep.
+function followStep(cam, z, mx, my, { width, height }) {
+  const vw = width / z;
+  const vh = height / z;
+  const dw = vw * DEAD_ZONE_FRACTION;
+  const dh = vh * DEAD_ZONE_FRACTION;
+
+  if (mx < cam.x - dw / 2) cam.x = mx + dw / 2;
+  else if (mx > cam.x + dw / 2) cam.x = mx - dw / 2;
+  if (my < cam.y - dh / 2) cam.y = my + dh / 2;
+  else if (my > cam.y + dh / 2) cam.y = my - dh / 2;
+
+  cam.x = clamp(cam.x, vw / 2, width - vw / 2);
+  cam.y = clamp(cam.y, vh / 2, height - vh / 2);
+}
+
+function solvePath(zoomSamples, cursor, bounds) {
   const n = zoomSamples.length;
   const cx = new Float64Array(n);
   const cy = new Float64Array(n);
-  let camX = width / 2;
-  let camY = height / 2;
+  const cam = { x: bounds.width / 2, y: bounds.height / 2 };
 
   for (let i = 0; i < n; i++) {
-    const z = zoomSamples[i];
-    const vw = width / z;
-    const vh = height / z;
-    const dw = vw * DEAD_ZONE_FRACTION;
-    const dh = vh * DEAD_ZONE_FRACTION;
-    const mx = cursor.xs[i];
-    const my = cursor.ys[i];
-
-    if (mx < camX - dw / 2) camX = mx + dw / 2;
-    else if (mx > camX + dw / 2) camX = mx - dw / 2;
-    if (my < camY - dh / 2) camY = my + dh / 2;
-    else if (my > camY + dh / 2) camY = my - dh / 2;
-
-    camX = clamp(camX, vw / 2, width - vw / 2);
-    camY = clamp(camY, vh / 2, height - vh / 2);
-
-    cx[i] = camX;
-    cy[i] = camY;
+    followStep(cam, zoomSamples[i], cursor.xs[i], cursor.ys[i], bounds);
+    cx[i] = cam.x;
+    cy[i] = cam.y;
   }
   return { cx, cy };
 }
@@ -158,6 +165,7 @@ function solveCamera({ keyframes, cursorTrack, duration, width, height, sampleRa
 
 module.exports = {
   easeZoom, resampleCursor, solvePath, smoothPath, alphaFor, solveCamera,
+  springStep, followStep,
   clamp, sampleCount,
   SAMPLE_RATE, TAU, DEAD_ZONE_FRACTION, SMOOTH_CUTOFF_HZ
 };
