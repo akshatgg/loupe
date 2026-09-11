@@ -1,0 +1,38 @@
+name: CI
+
+# Every push and pull request: build the universal Swift helpers (a compile
+# break there would otherwise only surface at release time) and run the lint
+# + test suite. Releases are a separate workflow (release.yml).
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build native helpers (arm64 + x86_64)
+        run: npm run build:native
+
+      - name: Verify every helper is universal
+        run: |
+          for h in sources capture inputtap render; do
+            archs="$(lipo -archs "bin/$h")"
+            echo "$h: $archs"
+            [[ "$archs" == *arm64* && "$archs" == *x86_64* ]] || { echo "::error::bin/$h is not universal"; exit 1; }
+          done
+
+      - run: npm test
