@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://loupeapp.vercel.app/sitemap.xml
