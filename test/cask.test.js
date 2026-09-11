@@ -16,7 +16,7 @@ test('the cask points each architecture at its own DMG for that version', () => 
 
 test('the cask requires Sonoma (the capture helper does) and clears quarantine', () => {
   const rb = renderCask({ version: '0.2.0', armSha: ARM, intelSha: INTEL });
-  assert.match(rb, /depends_on macos: ">= :sonoma"/);
+  assert.match(rb, /depends_on macos: :sonoma$/m);
   assert.match(rb, /xattr",\s+args: \["-dr", "com\.apple\.quarantine", "#\{appdir\}\/Loupe\.app"\]/);
   assert.match(rb, /uninstall quit: "tech\.markai\.loupe"/);
 });
