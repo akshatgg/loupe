@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The platform-independent parts of loupe-native (picture and sound
+       processing), tested on any OS with: dotnet run project native-win/tests -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../Compositor.cs" Link="Compositor.cs" />
+    <Compile Include="../AudioStretch.cs" Link="AudioStretch.cs" />
+  </ItemGroup>
+</Project>

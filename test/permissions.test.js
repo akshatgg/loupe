@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { createPermissions, PANES } = require('../src/main/permissions');
+const { createPermissions, PANES, WINDOWS_PANES } = require('../src/main/permissions');
 
 function fake({ screen = 'granted', mic = 'granted', ax = true } = {}) {
   const opened = [];
@@ -11,7 +11,8 @@ function fake({ screen = 'granted', mic = 'granted', ax = true } = {}) {
       isTrustedAccessibilityClient: () => ax,
       askForMediaAccess: async () => true
     },
-    shell: { openExternal: (url) => opened.push(url) }
+    shell: { openExternal: (url) => opened.push(url) },
+    platform: 'darwin'
   });
   return { perms, opened };
 }
@@ -44,4 +45,34 @@ test('openPane opens the matching settings URL', () => {
 
 test('openPane rejects an unknown pane name', () => {
   assert.throws(() => fake().perms.openPane('nope'), /unknown settings pane: nope/);
+});
+
+function fakeWindows({ mic = 'granted' } = {}) {
+  const opened = [];
+  const perms = createPermissions({
+    systemPreferences: { getMediaAccessStatus: () => mic },
+    shell: { openExternal: (url) => opened.push(url) },
+    platform: 'win32'
+  });
+  return { perms, opened };
+}
+
+test('on Windows recording and zoom need no grant', () => {
+  const { perms } = fakeWindows();
+  assert.strictEqual(perms.canRecord(), true);
+  assert.strictEqual(perms.canZoom(), true);
+});
+
+test('on Windows the microphone follows the privacy switch', async () => {
+  assert.strictEqual(fakeWindows({ mic: 'granted' }).perms.microphone(), true);
+  assert.strictEqual(fakeWindows({ mic: 'unknown' }).perms.microphone(), true);
+  const denied = fakeWindows({ mic: 'denied' }).perms;
+  assert.strictEqual(denied.microphone(), false);
+  assert.strictEqual(await denied.requestMicrophone(), false);
+});
+
+test('on Windows the microphone pane opens privacy settings', () => {
+  const { perms, opened } = fakeWindows();
+  perms.openPane('microphone');
+  assert.deepStrictEqual(opened, [WINDOWS_PANES.microphone]);
 });
