@@ -2,6 +2,8 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('loupe', {
+  // 'darwin' or 'win32': the picker and editor name keys the way the OS does.
+  platform: process.platform,
   listSources: () => ipcRenderer.invoke('sources:list'),
   permissions: () => ipcRenderer.invoke('permissions:status'),
   openPane: (pane) => ipcRenderer.invoke('permissions:open', pane),

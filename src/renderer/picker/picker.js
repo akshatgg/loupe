@@ -255,7 +255,17 @@ recordButton.onclick = async () => {
 // modifier keys and the middle/side mouse buttons. A letter key would type
 // into whatever is being recorded; left/right click are needed for the demo.
 
-const TRIGGERS = {
+// The saved names are the same on both systems (settings.js); Windows just
+// calls the keys Alt, Ctrl and the Windows key.
+const IS_WINDOWS = window.loupe.platform === 'win32';
+const TRIGGERS = IS_WINDOWS ? {
+  option: { label: 'Alt', key: 'Alt' },
+  control: { label: 'Ctrl', key: 'Ctrl' },
+  command: { label: '⊞ Windows key', key: '⊞ Win' },
+  shift: { label: '⇧ Shift', key: 'Shift' },
+  'mouse-side': { label: '🖱 Mouse side button', words: 'a mouse side button' },
+  'mouse-middle': { label: '🖱 Middle mouse button', words: 'the middle mouse button' }
+} : {
   option: { label: '⌥ Option', key: '⌥' },
   control: { label: '⌃ Control', key: '⌃' },
   command: { label: '⌘ Command', key: '⌘' },
@@ -378,7 +388,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { stopCapture(); return; }
   const trigger = KEY_TRIGGERS[e.key];
   if (trigger) commit(trigger);
-  else refuse('Use ⌥ ⌃ ⌘ ⇧ or a mouse button');
+  else refuse(IS_WINDOWS ? 'Use Alt, Ctrl, Shift, Win or a mouse button' : 'Use ⌥ ⌃ ⌘ ⇧ or a mouse button');
 }, true);
 
 document.addEventListener('mousedown', (e) => {
