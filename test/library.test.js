@@ -286,3 +286,28 @@ test('IPC: open, reveal and trash go through the checked path; trash asks first'
   assert.strictEqual(listed.root, root);
   fs.rmSync(base, { recursive: true, force: true });
 });
+
+test('renaming or duplicating the recording open in the editor goes through the editor first', async () => {
+  const { root } = setup();
+  const dir = fs.realpathSync(v1(root, 'open'));
+  const handlers = {};
+  const calls = [];
+  const library = createLibrary({ root: () => root, locale: 'en-GB' });
+  registerLibraryIpc({
+    ipcMain: { handle: (c, fn) => { handlers[c] = fn; } },
+    electron: { shell: {}, dialog: {}, BrowserWindow: {} }, library,
+    openEditor: () => {}, showPicker: () => {}, editorDir: () => dir,
+    beforeEditorChange: (d) => calls.push(['flush', d]),
+    editorRenamed: (d, title) => calls.push(['renamed', d, title])
+  });
+  const entry = await handlers['library:rename']({}, 'open', 'Product tour');
+  assert.strictEqual(entry.title, 'Product tour');
+  assert.deepStrictEqual(calls.splice(0), [['flush', dir], ['renamed', dir, 'Product tour']]);
+  await handlers['library:duplicate']({}, 'open');
+  assert.deepStrictEqual(calls.splice(0), [['flush', dir]]);
+
+  // Another recording: the editor isn't involved.
+  v1(root, 'other');
+  await handlers['library:rename']({}, 'other', 'Something else');
+  assert.deepStrictEqual(calls, []);
+});

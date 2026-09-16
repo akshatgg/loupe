@@ -564,6 +564,11 @@ const appShell = createAppShell({
     if (barWindow) return 'Finish or cancel the recording first, then open this one.';
     if (exporter.busy()) return 'An export is still running. Open this recording when it has finished.';
     return null;
+  },
+  beforeEditorChange: () => flushProject(),
+  editorRenamed: (dir, title) => {
+    projects.retitle(dir, title);
+    sendToEditor('project:renamed', title);
   }
 });
 appShell.start();
@@ -841,9 +846,14 @@ const exporter = createExportRunner({
 // The editor's project.json: loaded (v1 migrated) and saved through
 // ipc/project.js, which debounces the writes. Export and closing the editor
 // flush a save still waiting, so neither ever works from a stale file.
+// A write that fails is also reported to the editor (ipc/project.js).
 const projects = createProjectStore({
   onError: (err) => console.error('Loupe: could not save the project:', err)
 });
+
+function sendToEditor(channel, data) {
+  if (editorWindow && !editorWindow.isDestroyed()) editorWindow.webContents.send(channel, data);
+}
 registerProjectIpc({ ipcMain, store: projects, projectDir: () => editorDir });
 registerExportIpc({
   ipcMain, runner: exporter, projectDir: () => editorDir, shell,

@@ -358,3 +358,36 @@ test('every edit result is still a valid project', () => {
   p = P.setStyle(p, { aspect: '9:16' });
   assert.deepStrictEqual(P.validateProject(JSON.parse(JSON.stringify(p))), JSON.parse(JSON.stringify(p)));
 });
+
+test('a huge title in a project file is cut down to a name', () => {
+  const p = P.validateProject({ ...fresh(), title: 'x'.repeat(15_000_000) });
+  assert.strictEqual(p.title.length, 200);
+});
+
+test('cutting out of the middle of a clip keeps its transition at the old join', () => {
+  let p = fresh();
+  p = P.splitAt(p, 5);
+  const [first] = p.clips;
+  p = P.setTransition(p, first.id, 'crossfade', 1);
+  const joinBefore = buildTimeline(p).clipBounds()[0].outEnd;
+  near(joinBefore, 5);
+  p = P.cutRange(p, 2, 3);
+  const tl = buildTimeline(p);
+  assert.strictEqual(p.clips.length, 3);
+  assert.strictEqual(p.transitions.length, 1);
+  const after = p.clips.findIndex((c) => c.id === p.transitions[0].after);
+  assert.strictEqual(after, 1, 'the transition follows the piece that ends at the join');
+  near(tl.clipBounds()[after].outEnd, 4);
+});
+
+test('a cut never leaves a clip too short to grab', () => {
+  const p = P.cutRange(fresh(), 0.03, 10);
+  assert.strictEqual(p.clips.length, 1);
+  assert.ok(buildTimeline(p).duration >= P.MIN_CLIP_SECONDS, 'the sliver before the cut goes too');
+  near(p.clips[0].start, 10);
+  for (let k = 0; k < 200; k++) {
+    const a = Math.random() * 19;
+    const q = P.cutRange(fresh(), a, a + Math.random() * 0.5 + 0.001);
+    for (const c of q.clips) assert.ok(c.end - c.start >= P.MIN_CLIP_SECONDS - 1e-9);
+  }
+});

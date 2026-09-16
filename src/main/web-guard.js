@@ -12,8 +12,8 @@
 // The same document (a #hash change) is still allowed: it never leaves the page.
 function sameDocument(currentUrl, nextUrl) {
   try {
-    const a = new URL(currentUrl);
-    const b = new URL(nextUrl);
+    const a = new globalThis.URL(currentUrl);
+    const b = new globalThis.URL(nextUrl);
     a.hash = '';
     b.hash = '';
     return a.href === b.href;

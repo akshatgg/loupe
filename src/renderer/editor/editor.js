@@ -47,15 +47,19 @@ function setSaveState(text, bad = false) {
 }
 
 // Sends every change; main debounces the writes. Only the newest project
-// matters, so one in flight is followed by at most one more.
+// matters, so one in flight is followed by at most one more. Main answers a
+// save once it has checked it and writes it a moment later, reporting each
+// write as project:written -- so "All changes saved" waits for the disk, and a
+// write that failed (the folder was deleted, the disk is full) says so.
 function createSaver() {
   let inFlight = null;
   let queued = null;
+  let failed = false;
   async function send(project) {
     setSaveState('Saving…');
     try {
       await loupe.saveProject(project);
-      setSaveState('All changes saved');
+      if (!loupe.onProjectWritten) setSaveState('All changes saved');
     } catch (err) {
       setSaveState('Couldn’t save', true);
       toast(`Your changes couldn’t be saved: ${plainError(err)}`);
@@ -68,7 +72,18 @@ function createSaver() {
       if (queued) { const q = queued; queued = null; save(q); }
     });
   }
-  return { save, flush: async () => { while (inFlight) await inFlight; } };
+  loupe.onProjectWritten?.((result) => {
+    if (result?.ok) {
+      failed = false;
+      if (!inFlight && !queued) setSaveState('All changes saved');
+      return;
+    }
+    setSaveState('Couldn’t save', true);
+    // Once per run of failures, not for every edit after it.
+    if (!failed) toast(result?.message || 'Your changes couldn’t be saved.');
+    failed = true;
+  });
+  return { save, flush: async () => { while (inFlight) await inFlight; }, get failed() { return failed; } };
 }
 
 function showFatal(heading, message) {
@@ -358,7 +373,14 @@ async function start() {
   });
   refresh('load');
   player.seek(0);
-  setSaveState(loaded.migrated ? 'Opened from an older version' : 'All changes saved');
+  setSaveState('All changes saved');
+  // Renamed in the Library while open here: the name becomes an edit, so the
+  // next save keeps it (main holds it until then) and undo can take it back.
+  loupe.onProjectRenamed?.((name) => {
+    if (typeof name === 'string' && name.trim() && name !== store.project.title) {
+      store.apply((p) => P.setTitle(p, name));
+    }
+  });
 
   // For the end-to-end tests (test/e2e/editor.js), which drive this page.
   window.__editor = {

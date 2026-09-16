@@ -116,3 +116,71 @@ test('project:load and project:save act on the open recording', async () => {
   assert.strictEqual(readJson(dir).title, 'Demo');
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('a write that fails after project:save answered is reported to the editor, and kept to try again', async () => {
+  const dir = v1Dir('gone');
+  const store = createProjectStore({ delayMs: 5, onError: () => {} });
+  const handlers = {};
+  registerProjectIpc({ ipcMain: { handle: (ch, fn) => { handlers[ch] = fn; } }, store, projectDir: () => dir });
+  const sent = [];
+  const sender = { send: (ch, d) => sent.push([ch, d]), isDestroyed: () => false };
+  const { project } = handlers['project:load']({ sender });
+
+  assert.deepStrictEqual(handlers['project:save']({ sender }, { ...project, title: 'Kept' }), { saved: true });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.deepStrictEqual(sent.splice(0), [['project:written', { ok: true }]]);
+
+  // The recording's folder is deleted while the editor is open.
+  fs.rmSync(dir, { recursive: true, force: true });
+  assert.deepStrictEqual(handlers['project:save']({ sender }, { ...project, title: 'Lost?' }), { saved: true });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.strictEqual(sent.length, 1);
+  assert.strictEqual(sent[0][0], 'project:written');
+  assert.strictEqual(sent[0][1].ok, false);
+  assert.match(sent[0][1].message, /folder is gone/);
+  assert.strictEqual(store.pending(), true, 'kept, so closing the editor tries again');
+
+  // The folder comes back (say a drive is reconnected): the next write lands.
+  fs.mkdirSync(dir);
+  store.flush();
+  assert.strictEqual(readJson(dir).title, 'Lost?');
+  assert.deepStrictEqual(sent.at(-1), ['project:written', { ok: true }]);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('a failed save of one recording does not stop another from opening', () => {
+  const gone = v1Dir('gone-a');
+  const other = v1Dir('other-b');
+  const store = createProjectStore({ delayMs: 10000, onError: () => {} });
+  const { project } = store.load(gone);
+  store.save(gone, { ...project, title: 'x' });
+  fs.rmSync(gone, { recursive: true, force: true });
+  assert.strictEqual(store.load(other).project.version, 2);
+  assert.strictEqual(store.pending(), false);
+  fs.rmSync(other, { recursive: true, force: true });
+});
+
+test('saveErrorMessage says what went wrong in plain words', () => {
+  const { saveErrorMessage } = require('../src/main/ipc/project');
+  assert.match(saveErrorMessage({ code: 'ENOSPC' }), /disk is full/);
+  assert.match(saveErrorMessage({ code: 'EACCES' }), /isn’t allowed/);
+  assert.match(saveErrorMessage({ code: 'EIO', message: 'i/o error' }), /i\/o error/);
+});
+
+test('a rename from the Library survives a save the editor sent before it heard', () => {
+  const dir = v1Dir('retitle');
+  const store = createProjectStore({ delayMs: 10000 });
+  const { project } = store.load(dir);
+  store.save(dir, { ...project, title: 'Old name' });
+  store.retitle(dir, 'From the Library');
+  // An edit made before the editor heard about the new name.
+  store.save(dir, { ...project, title: 'Old name', zooms: [] });
+  store.flush();
+  assert.strictEqual(readJson(dir).title, 'From the Library');
+  // The editor applies the name; after that its own renames count again.
+  store.save(dir, { ...project, title: 'From the Library' });
+  store.save(dir, { ...project, title: 'Renamed in the editor' });
+  store.flush();
+  assert.strictEqual(readJson(dir).title, 'Renamed in the editor');
+  fs.rmSync(dir, { recursive: true, force: true });
+});

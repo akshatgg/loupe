@@ -283,10 +283,15 @@ function displayPath(p, home = os.homedir(), platform = process.platform) {
 // `editorDir()` is the folder open in the editor right now, or null;
 // `focusEditor()` brings that editor to the front; `openBlocked()` is a
 // plain-words reason another recording can't be opened right now (a
-// recording or an export in progress), or null.
+// recording or an export in progress), or null. `beforeEditorChange(dir)`
+// and `editorRenamed(dir, title)` run around a rename of the recording open
+// in the editor: the editor's own save waiting to be written goes first, and
+// the editor is then told the new name, so its next save doesn't put the
+// old one back.
 function registerLibraryIpc({
   ipcMain, electron, library, openEditor, showPicker, editorDir = () => null,
-  focusEditor = () => {}, openBlocked = () => null
+  focusEditor = () => {}, openBlocked = () => null,
+  beforeEditorChange = () => {}, editorRenamed = () => {}
 }) {
   const { shell, dialog, BrowserWindow } = electron;
 
@@ -317,8 +322,21 @@ function registerLibraryIpc({
     if (blocked) throw new Error(blocked);
     openEditor(dir);
   });
-  ipcMain.handle('library:rename', (_e, id, title) => library.rename(id, title));
-  ipcMain.handle('library:duplicate', (_e, id) => library.duplicate(id));
+  ipcMain.handle('library:rename', (_e, id, title) => {
+    const dir = library.resolve(id);
+    const open = editorDir();
+    const inEditor = Boolean(open && sameFolder(open, dir));
+    if (inEditor) beforeEditorChange(open);
+    const renamed = library.rename(id, title);
+    if (inEditor) editorRenamed(open, renamed.title);
+    return renamed;
+  });
+  // A copy of the open recording includes the edits still waiting to be written.
+  ipcMain.handle('library:duplicate', (_e, id) => {
+    const open = editorDir();
+    if (open && sameFolder(open, library.resolve(id))) beforeEditorChange(open);
+    return library.duplicate(id);
+  });
   ipcMain.handle('library:reveal', (_e, id) => { shell.showItemInFolder(library.resolve(id)); });
   ipcMain.handle('library:revealRoot', () => shell.openPath(library.root()));
   ipcMain.handle('library:newRecording', () => { showPicker(); });

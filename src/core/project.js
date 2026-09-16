@@ -19,8 +19,6 @@ export const ZOOM_LEVEL_MAX = 8;
 // the timeline (and a clip that short is a single frame or two anyway).
 export const MIN_CLIP_SECONDS = 0.1;
 export const MIN_RANGE_SECONDS = 0.1;
-// A cut that leaves less than this of a clip takes the rest with it.
-const MIN_KEEP_SECONDS = 0.01;
 // v1 recorded a zoom keyframe on every scroll tick; a stretch whose zoom
 // never got past this was a nudge of the wheel, not a zoom anyone meant.
 export const RECORDED_ZOOM_THRESHOLD = 1.05;
@@ -28,6 +26,7 @@ export const RECORDED_ZOOM_THRESHOLD = 1.05;
 export const ASPECTS = ['source', '16:9', '9:16', '1:1', '4:5'];
 export const BACKGROUND_TYPES = ['none', 'color', 'gradient', 'image'];
 export const HIGHLIGHTS = ['none', 'spotlight', 'ring'];
+const MAX_TITLE = 200;
 export const ANNOTATION_TYPES = ['text', 'title', 'arrow', 'box', 'blur'];
 export const TRANSITION_TYPES = ['fade', 'crossfade', 'dip'];
 export const EXPORT_FORMATS = ['mp4', 'webm', 'gif'];
@@ -556,7 +555,9 @@ export function validateProject(p) {
   }
   const out = {
     ...p,
-    title: typeof p.title === 'string' ? p.title : 'Recording',
+    // Names are short (setTitle allows 200); a hand-edited or hostile file's
+    // megabytes of title would otherwise be read and sent on every listing.
+    title: typeof p.title === 'string' ? p.title.slice(0, MAX_TITLE) : 'Recording',
     createdAt: isNum(p.createdAt) ? p.createdAt : null,
     sources,
     speed: p.speed ?? [],
@@ -662,22 +663,30 @@ export function cutRange(project, outStart, outEnd) {
   const bounds = tl.clipBounds();
   const clips = [];
   const ids = project.clips.slice();
+  let transitions = project.transitions;
   project.clips.forEach((clip, i) => {
     const { outStart: cs, outEnd: ce } = bounds[i];
     if (ce <= a + 1e-9 || cs >= b - 1e-9) { clips.push(clip); return; }
     // Output times strictly inside this clip map back into it (the timeline
     // is half-open), so a and b give the exact source moments of the cut.
-    const keepBefore = a - cs >= MIN_KEEP_SECONDS;
-    const keepAfter = ce - b >= MIN_KEEP_SECONDS;
-    if (keepBefore) clips.push({ ...clip, end: tl.toSource(a).t });
+    // A piece shorter than a split or trim could leave takes the rest with
+    // it: a sliver can't be grabbed and shows no frame.
+    const cutFrom = a > cs + 1e-9 ? tl.toSource(a).t : clip.start;
+    const cutTo = b < ce - 1e-9 ? tl.toSource(b).t : clip.end;
+    const keepBefore = cutFrom - clip.start >= MIN_CLIP_SECONDS;
+    const keepAfter = clip.end - cutTo >= MIN_CLIP_SECONDS;
+    if (keepBefore) clips.push({ ...clip, end: cutFrom });
     if (keepAfter) {
-      const piece = { ...clip, start: tl.toSource(b).t, id: keepBefore ? nextId('c', ids) : clip.id };
+      const piece = { ...clip, start: cutTo, id: keepBefore ? nextId('c', ids) : clip.id };
       ids.push(piece);
       clips.push(piece);
+      // Cut out of the middle: the clip's transition stays at its end, which
+      // is now the second piece's end (as splitAt does).
+      if (keepBefore) transitions = transitions.map((t) => (t.after === clip.id ? { ...t, after: piece.id } : t));
     }
   });
   if (!clips.length) fail('Can\u2019t cut the whole video');
-  return withClips(project, clips);
+  return withClips({ ...project, transitions }, clips);
 }
 
 export function moveClip(project, from, to) {
@@ -854,7 +863,7 @@ export function setStyle(project, patch) {
 }
 
 export function setTitle(project, title) {
-  const t = str(typeof title === 'string' ? title.trim() : title, 'Title', { max: 200 });
+  const t = str(typeof title === 'string' ? title.trim() : title, 'Title', { max: MAX_TITLE });
   return { ...project, title: t };
 }
 

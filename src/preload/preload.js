@@ -50,6 +50,10 @@ contextBridge.exposeInMainWorld('loupe', {
   // which main checks and saves shortly after.
   loadProject: () => ipcRenderer.invoke('project:load'),
   saveProject: (project) => ipcRenderer.invoke('project:save', project),
+  // After each write to disk: { ok } or { ok: false, message } in plain words.
+  onProjectWritten: (cb) => ipcRenderer.on('project:written', (_e, r) => cb(r)),
+  // The Library renamed the open recording: the new name.
+  onProjectRenamed: (cb) => ipcRenderer.on('project:renamed', (_e, name) => cb(name)),
   // Add recording (src/main/ipc/append-recording.js): the Library's other
   // recordings, their pictures, and adding one after this recording.
   listRecordings: () => ipcRenderer.invoke('project:recordings'),
