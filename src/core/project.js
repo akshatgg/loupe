@@ -296,8 +296,29 @@ export function migrate(v1, { createdAt = null } = {}) {
 export function loadProjectData(raw, options) {
   if (!isObj(raw)) fail('project.json is not a project');
   if (raw.version === 1) return migrate(raw, options);
-  if (raw.version === VERSION) return validateProject(raw);
+  if (raw.version === VERSION) return removeRecordedPauses(validateProject(raw));
   fail(`This project was made by a newer version of Loupe (format ${JSON.stringify(raw.version)})`);
+}
+
+// A recording made with pauses whose clips still run straight through them
+// (written before the recorder cut them out, or by hand) gets its paused
+// stretches removed when it is opened -- nobody wants to see the "paused"
+// minutes. Only an untouched recording is changed: one clip over the whole
+// of it. Once someone has edited the clips, what they chose stays.
+export function removeRecordedPauses(project) {
+  let clips = project.clips;
+  for (const [key, source] of Object.entries(project.sources)) {
+    if (!source.pauses?.length) continue;
+    const own = clips.filter((c) => c.source === key);
+    if (own.length !== 1 || own[0].start > 1e-3 || own[0].end < source.duration - 1e-3) continue;
+    const at = clips.indexOf(own[0]);
+    const pieces = clipsAround(source, key, clips);
+    // The last piece keeps the clip's id, so a transition after it stays there.
+    pieces[pieces.length - 1] = { ...pieces[pieces.length - 1], id: own[0].id };
+    if (pieces.length === 1) continue;
+    clips = [...clips.slice(0, at), ...pieces, ...clips.slice(at + 1)];
+  }
+  return clips === project.clips ? project : validateProject({ ...project, clips });
 }
 
 // ---------------------------------------------------------------- validation

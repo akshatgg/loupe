@@ -153,7 +153,8 @@ module.exports = [
         VideoDecoder: 'readonly', VideoEncoder: 'readonly', VideoFrame: 'readonly',
         AudioDecoder: 'readonly', AudioEncoder: 'readonly', AudioData: 'readonly',
         EncodedVideoChunk: 'readonly', EncodedAudioChunk: 'readonly', Blob: 'readonly',
-        MediaRecorder: 'readonly'
+        MediaRecorder: 'readonly',
+        OfflineAudioContext: 'readonly'
       }
     },
     rules: {
@@ -191,6 +192,18 @@ module.exports = [
       sourceType: 'commonjs',
       globals: { require: 'readonly', module: 'writable', process: 'readonly',
                  Buffer: 'readonly', globalThis: 'readonly' }
+    }
+  },
+  // The editor's sound (audio-preview.js and its module worker, the
+  // voiceover recorder): Web Audio, workers and WebCodecs on top of the
+  // editor block above.
+  {
+    files: ['src/renderer/editor/**/*.js'],
+    languageOptions: {
+      globals: {
+        AudioContext: 'readonly', Worker: 'readonly', self: 'readonly',
+        setInterval: 'readonly', clearInterval: 'readonly'
+      }
     }
   },
   // Local git worktrees of this repo are checked out under it; each lints itself.

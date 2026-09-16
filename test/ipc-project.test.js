@@ -33,6 +33,7 @@ test('load migrates a v1 project in memory and leaves the file alone', () => {
   assert.match(loaded.sources.main.cursor, /cursor\.bin$/);
   assert.strictEqual(loaded.sources.main.systemAudio, null);
   assert.strictEqual(loaded.sources.main.missing, false);
+  assert.strictEqual(loaded.folder, `${require('node:url').pathToFileURL(dir).href}/`);
   assert.strictEqual(readJson(dir).version, 1, 'opening does not rewrite the file');
   fs.rmSync(dir, { recursive: true, force: true });
 });

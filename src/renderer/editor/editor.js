@@ -14,6 +14,7 @@ import { createExportDialog, plainError } from './export-dialog.js';
 import { createCheatSheet } from './cheat-sheet.js';
 import { commandFor } from './shortcuts.js';
 import { PANELS, panelById } from './panels/index.js';
+import { installMusicDrop } from './panels/audio.js';
 import { h, icon } from './ui.js';
 import { clipLayout, newZoomRange, formatTime } from './timeline-math.js';
 import { newAnnotation } from './annotation-math.js';
@@ -90,7 +91,7 @@ async function start() {
     save: (p) => saver.save(p),
     onError: (err) => toast(plainError(err))
   });
-  const player = createPlayer({ canvas: $('preview'), store, sources: loaded.sources });
+  const player = createPlayer({ canvas: $('preview'), store, sources: loaded.sources, folder: loaded.folder });
 
   const missing = Object.entries(loaded.sources).filter(([key, s]) => s.missing &&
     store.project.clips.some((c) => c.source === key));
@@ -183,6 +184,8 @@ async function start() {
     }, icon(panel.icon, { size: 20 }), h('span', {}, panel.title)));
   }
   showPanel('style');
+  // A song dropped anywhere on the window becomes the video's music.
+  installMusicDrop(editor);
 
   // ---- timeline, transport, top bar
 

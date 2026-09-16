@@ -20,12 +20,12 @@ const SEEK_DRIFT = 0.25;
 const RATE_MIN = 0.0625;
 const RATE_MAX = 16;
 
-export function createPlayer({ canvas, store, sources }) {
+export function createPlayer({ canvas, store, sources, folder = null }) {
   const ctx = canvas.getContext('2d', { alpha: false });
   const videos = {};
   const cursors = {};
   const listeners = new Set();
-  const audio = createAudioPreview({ sources });
+  const audio = createAudioPreview({ sources, folder });
   let outT = 0;
   let playing = false;
   let wallStart = 0;
@@ -134,7 +134,7 @@ export function createPlayer({ canvas, store, sources }) {
     lastClip = at.clipIndex;
     const rate = rateAt(p, layout, outT);
     syncVideo(at, rate, jumped);
-    audio.sync({ project: p, at, rate, playing, jumped });
+    audio.sync({ project: p, at, rate, playing, jumped, outT });
     const frames = visuals.sync({ project: p, tl, outT, at, rate, playing });
     const v = videos[at.source];
     if (v && v.readyState >= 2) frames[at.source] = v;

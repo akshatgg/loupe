@@ -84,6 +84,23 @@ export async function decodeAudioTrack(demuxed, label) {
   return { channels, sampleRate: rate };
 }
 
+// A whole audio file someone added (music: MP3, M4A, WAV, FLAC, Ogg...;
+// a voiceover take: WebM/Opus) -> { channels, sampleRate } at 48 kHz.
+// Chromium's own media decoders read all of these through decodeAudioData,
+// which WebCodecs can't (it has no demuxers). Only pages have it, not workers.
+export async function decodeAudioFile(bytes, label) {
+  const ctx = new OfflineAudioContext(1, 1, AUDIO_RATE);
+  let buffer;
+  try {
+    buffer = await ctx.decodeAudioData(bytes);
+  } catch {
+    throw new Error(`Couldn't read the sound in ${label}. The file may be damaged or in a format this computer can't play.`);
+  }
+  const channels = [];
+  for (let c = 0; c < Math.min(2, buffer.numberOfChannels); c++) channels.push(buffer.getChannelData(c));
+  return { channels, sampleRate: buffer.sampleRate };
+}
+
 // AAC encoders start with "priming" samples that decoders play back as
 // silence unless the file has an edit list to skip them, and mp4-muxer
 // writes none -- so without this the sound would come out late (2112
