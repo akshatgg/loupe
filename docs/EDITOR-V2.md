@@ -223,11 +223,12 @@ flushes a pending save first; closing the editor and quitting flush too.
   the page applies `appendRecording` (+ its zooms) as one undo step;
   `player.addSource(key, files)` loads it. `thumbnails.js` draws pictures
   along each clip (`timeline-math.js` `stripTiles`/`thumbStep`); `first-run.js`
-  shows a three-line card once (localStorage).
+  shows a three-line card once (localStorage). An added recording's sound
+  (`audio-preview.js` `sourcesChanged`), webcam and keys (`visual-media.js`
+  `addSource`) join the preview too.
 - `panels/index.js`: the sidebar, one module per panel exporting
-  `{ id, title, icon, mount(container, editor) -> { update(what) } }`.
-  Style, Zoom and Audio are real; `captions.js`, `annotations.js` are
-  placeholders their features replace.
+  `{ id, title, icon, mount(container, editor) -> { update(what) } }`, in
+  this order: Style, Zoom, Audio, Captions, Annotations, Webcam.
 - `shortcuts.js` (pure): Space, ←/→ (⇧ 1 s), Home/End, S, Z, Delete, ⌘/Ctrl+Z,
   ⇧⌘Z / Ctrl+Y, ⌘/Ctrl+E, ⌘/Ctrl+= / − / 0, ?; `export-dialog.js`.
 - `window.__editor` exposes the store, player and timeline for
