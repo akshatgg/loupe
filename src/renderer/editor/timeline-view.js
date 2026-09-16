@@ -119,7 +119,7 @@ export function createTimeline({ root, store, player, editor }) {
         title: `${s.rate}× speed — click to change`
       }, `${s.rate}×`);
     });
-    if (!pieces.length) els.push(h('div', { class: 'tl-hint' }, 'Drag across a part to speed it up or slow it down'));
+    if (!pieces.length && !speedPick) els.push(h('div', { class: 'tl-hint' }, 'Drag across a part to speed it up or slow it down'));
     speedTrack.replaceChildren(...els, h('div', { class: 'ghost speed-ghost', hidden: !speedPick }));
     if (speedPick) placeGhost(speedTrack.querySelector('.speed-ghost'), speedPick.outStart, speedPick.outEnd);
   }

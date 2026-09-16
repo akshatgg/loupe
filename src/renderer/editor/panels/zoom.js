@@ -7,7 +7,6 @@ import { updateZoom, removeZoom, ZOOM_LEVEL_MAX } from '../../../core/project.js
 import { viewSize } from '../../../core/camera.js';
 import { clipLayout, rangePieces, formatTime, newZoomRange, clamp } from '../timeline-math.js';
 
-const PICKER_WIDTH = 256;
 
 export default {
   id: 'zoom',
@@ -75,7 +74,7 @@ export default {
       if (!z || z.follow) return;
       const meta = store.project.sources[z.source];
       const dpr = window.devicePixelRatio || 1;
-      const w = PICKER_WIDTH;
+      const w = Math.max(120, Math.floor(spot.clientWidth || container.clientWidth || 236));
       const hgt = Math.round((w * meta.height) / meta.width);
       canvas.style.width = `${w}px`;
       canvas.style.height = `${hgt}px`;
@@ -85,6 +84,8 @@ export default {
       ctx.fillRect(0, 0, w, hgt);
       const v = player.videos[z.source];
       if (v && v.readyState >= 2) ctx.drawImage(v, 0, 0, w, hgt);
+      // Mid-seek the element still holds the old frame; draw again once it lands.
+      if (v && (v.seeking || v.readyState < 2)) v.addEventListener('seeked', drawPicker, { once: true });
       const k = w / meta.width;
       const { vw, vh } = viewSize(z.level, meta.width, meta.height, null);
       const cx = clamp(z.x, vw / 2, meta.width - vw / 2);
@@ -146,7 +147,7 @@ export default {
       }
       const p = store.project;
       const pieces = rangePieces(p, clipLayout(p, store.tl), z.source, z.start, z.end);
-      heading.textContent = z.recorded ? 'Zoom from your recording' : 'Zoom';
+      heading.textContent = z.recorded ? 'Zoom from your recording' : 'Selected zoom';
       when.textContent = pieces.length
         ? `${formatTime(pieces[0].outStart, { fraction: true })} – ${formatTime(pieces.at(-1).outEnd, { fraction: true })} · ${(z.end - z.start).toFixed(1)} s`
         : 'This part of the recording is cut from the video.';

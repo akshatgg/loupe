@@ -58,7 +58,13 @@ const CASES = [
     // Playing moves the clock and the picture.
     await seek(ed, 0.2);
     await ed.key('Space');
-    await sleep(1300);
+    await sleep(1000);
+    // The microphone plays along, on the same clock.
+    const sound = await ed.js(`(() => { const [mic] = window.__editor.player.audio.tracks.main;
+      return { paused: mic.el.paused, drift: mic.el.currentTime - window.__editor.store.tl.toSource(window.__editor.player.time).t }; })()`);
+    assert.strictEqual(sound.paused, false, 'the sound plays');
+    assert.ok(Math.abs(sound.drift) < 0.25, `the sound is ${sound.drift.toFixed(3)} s off the picture`);
+    await sleep(300);
     await ed.key('Space');
     const t = await ed.js('window.__editor.player.time');
     assert.ok(t > 1.1 && t < 1.9, `played to ${t}`);
@@ -317,7 +323,7 @@ async function errorStates(src) {
 
 async function runSuite() {
   for (const f of fs.existsSync(OUT) ? fs.readdirSync(OUT) : []) {
-    if (/^\d\d-.*\.png$/.test(f)) fs.rmSync(path.join(OUT, f));
+    if (/^(\d\d|fail)-.*\.png$/.test(f)) fs.rmSync(path.join(OUT, f));
   }
   const lab = await openLab();
   const src = await makeFixture(lab);

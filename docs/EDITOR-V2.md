@@ -186,6 +186,39 @@ camera pans. Sizes scale with the output's short side (reference 1080p) so 1080p
 alike. Layers live in `core/layers/*.js` and are registered in order in
 `compose.js`.
 
+### The editor window (wave 2)
+
+`src/renderer/editor/` (ES modules, sandboxed page). `editor.js` holds the
+project in `store.js` (core `history.js` undo; a drag passes a `gesture` key
+so it is one undo step) and sends every change to main with
+`window.loupe.saveProject(project)`. `src/main/ipc/project.js` replaces v1's
+per-action handlers with two calls: `project:load` (v1 migrated in memory;
+returns `{ project, sources: { [key]: { video, cursor, systemAudio, missing } }
+as file:// URLs, migrated }`) and `project:save` (validated, `sources` always
+kept as loaded so the page can't point the exporter at other files, written
+~400 ms later to a temporary file renamed over project.json). `export:start`
+flushes a pending save first; closing the editor and quitting flush too.
+`export:reveal` shows the last exported file only.
+
+- `player.js`: the output time is the clock; one muted `<video>` per source
+  kept at the right moment and `playbackRate` (nudged when it drifts, seeked
+  on a jump or when far off), each frame drawn with `drawFrame` on a HiDPI
+  canvas. `audio-preview.js` plays mic and system audio on the same clock
+  (`createAudioPreview({ sources }) -> { sync, stop }`; the audio work
+  replaces it behind that interface).
+- `timeline-view.js` + `timeline-math.js` (pure, unit-tested): clips, zoom
+  and speed tracks in output time; zooms and speed are drawn once per clip
+  they overlap. Drags edit from the project as it was when they began.
+- `panels/index.js`: the sidebar, one module per panel exporting
+  `{ id, title, icon, mount(container, editor) -> { update(what) } }`.
+  Style and Zoom are real; `audio.js`, `captions.js`, `annotations.js` are
+  placeholders their features replace.
+- `shortcuts.js` (pure): Space, ←/→ (⇧ 1 s), Home/End, S, Z, Delete, ⌘/Ctrl+Z,
+  ⇧⌘Z / Ctrl+Y, ⌘/Ctrl+E, ⌘/Ctrl+= / − / 0, ?; `export-dialog.js`.
+- `window.__editor` exposes the store, player and timeline for
+  `test/e2e/editor.js` (`npm run test:e2e:editor`), which drives the real
+  page with real mouse and key events.
+
 ## 6. Export (`src/renderer/exporter/`)
 
 A hidden BrowserWindow, opened per export, reports progress through main to the

@@ -176,6 +176,7 @@ export function createPlayer({ canvas, store, sources }) {
     get playing() { return playing; },
     get state() { return lastState; },
     get videos() { return videos; },
+    get audio() { return audio; },
     get cursors() { return cursors; },
     play: () => setPlaying(true),
     pause: () => setPlaying(false),
