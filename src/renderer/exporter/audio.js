@@ -78,9 +78,97 @@ export async function decodeAudioTrack(demuxed, label) {
   return { channels, sampleRate: rate };
 }
 
-// A mixTracks() result -> [{ chunk, meta }] AAC, timestamps from 0.
+// AAC encoders start with "priming" samples that decoders play back as
+// silence unless the file has an edit list to skip them, and mp4-muxer
+// writes none -- so without this the sound would come out late (2112
+// samples, 44ms, with the macOS encoder). How many there are depends on
+// the encoder, so it is measured once: a burst of noise goes through this
+// encoder and decoder and is lined up with the original.
+const NOISE_START = 9600;
+const NOISE_LENGTH = 9600;
+const MAX_DELAY = 4096;
+let delayMeasured = null;
+
+function noiseBurst() {
+  const out = new Float32Array(NOISE_START + NOISE_LENGTH + MAX_DELAY + 4800);
+  let seed = 12345;
+  for (let i = NOISE_START; i < NOISE_START + NOISE_LENGTH; i++) {
+    seed = (seed * 1103515245 + 12345) >>> 0;
+    out[i] = ((seed >>> 8) / 0x1000000 - 0.5) * 0.8;
+  }
+  return out;
+}
+
+async function roundTrip(samples, config) {
+  const chunks = [];
+  let error = null;
+  const encoder = new AudioEncoder({ output: (chunk, meta) => chunks.push({ chunk, meta }), error: (e) => { error = e; } });
+  encoder.configure(config);
+  const planar = new Float32Array(samples.length * 2);
+  planar.set(samples, 0);
+  planar.set(samples, samples.length);
+  const data = new AudioData({
+    format: 'f32-planar', sampleRate: config.sampleRate, numberOfFrames: samples.length,
+    numberOfChannels: 2, timestamp: 0, data: planar
+  });
+  encoder.encode(data);
+  data.close();
+  await encoder.flush();
+  encoder.close();
+  const description = chunks.find((c) => c.meta?.decoderConfig)?.meta.decoderConfig.description;
+  const decoded = [];
+  const decoder = new AudioDecoder({
+    output: (d) => {
+      const plane = new Float32Array(d.numberOfFrames);
+      d.copyTo(plane, { planeIndex: 0, format: 'f32-planar' });
+      decoded.push(plane);
+      d.close();
+    },
+    error: (e) => { error = e; }
+  });
+  decoder.configure({ codec: config.codec, sampleRate: config.sampleRate, numberOfChannels: 2, description });
+  for (const { chunk } of chunks) decoder.decode(chunk);
+  await decoder.flush();
+  decoder.close();
+  if (error) throw error;
+  const out = new Float32Array(decoded.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of decoded) { out.set(p, at); at += p.length; }
+  return out;
+}
+
+export function bestLag(reference, decoded, start, length, maxLag) {
+  let best = 0;
+  let bestScore = -Infinity;
+  for (let lag = 0; lag <= maxLag; lag++) {
+    let sum = 0;
+    for (let i = start; i < start + length; i++) sum += reference[i] * (decoded[i + lag] ?? 0);
+    if (sum > bestScore) { bestScore = sum; best = lag; }
+  }
+  return best;
+}
+
+export async function encoderDelay() {
+  if (delayMeasured === null) {
+    try {
+      const reference = noiseBurst();
+      const decoded = await roundTrip(reference, await chooseAudioConfig());
+      delayMeasured = bestLag(reference, decoded, NOISE_START, 2400, MAX_DELAY);
+    } catch {
+      // Unmeasurable. Guessing wrong would be as bad as not correcting, so
+      // the sound is left as it comes out.
+      delayMeasured = 0;
+    }
+  }
+  return delayMeasured;
+}
+
+// A mixTracks() result -> [{ chunk, meta }] AAC, timestamps from 0. The
+// first `encoderDelay()` samples of the mix are left out so that, after
+// the encoder's priming, the sound lines up with the picture again.
 export async function encodeAudio(mix, { signal } = {}) {
   const config = await chooseAudioConfig();
+  const skip = await encoderDelay();
   const out = [];
   let error = null;
   const encoder = new AudioEncoder({
@@ -91,7 +179,7 @@ export async function encodeAudio(mix, { signal } = {}) {
   const [left, right = left] = mix.channels;
   const frames = left.length;
   const block = 4096;
-  for (let at = 0; at < frames; at += block) {
+  for (let at = Math.min(skip, frames); at < frames; at += block) {
     if (error) break;
     if (signal?.aborted) throw signal.reason;
     const n = Math.min(block, frames - at);
@@ -100,7 +188,7 @@ export async function encodeAudio(mix, { signal } = {}) {
     planar.set(right.subarray(at, at + n), n);
     const data = new AudioData({
       format: 'f32-planar', sampleRate: AUDIO_RATE, numberOfFrames: n, numberOfChannels: 2,
-      timestamp: Math.round((at / AUDIO_RATE) * 1e6), data: planar
+      timestamp: Math.round(((at - skip) / AUDIO_RATE) * 1e6), data: planar
     });
     encoder.encode(data);
     data.close();

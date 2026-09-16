@@ -2,7 +2,7 @@
 module.exports = [
   {
     files: ['**/*.js'],
-    ignores: ['src/renderer/**', 'web/**', 'src/core/**'],
+    ignores: ['src/renderer/**', 'web/**', 'src/core/**', 'test/e2e/lab.js'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'commonjs',
@@ -90,9 +90,10 @@ module.exports = [
     }
   },
   // The exporter window (src/renderer/exporter) is ES modules running in a
-  // hidden, sandboxed page: browser and WebCodecs globals, no Node.
+  // hidden, sandboxed page: browser and WebCodecs globals, no Node. The e2e
+  // lab page is the same kind of page.
   {
-    files: ['src/renderer/exporter/**/*.js'],
+    files: ['src/renderer/exporter/**/*.js', 'test/e2e/lab.js'],
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: 'module',
