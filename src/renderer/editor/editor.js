@@ -263,6 +263,22 @@ async function start() {
     actions[command]();
   });
 
+  // Edit > Undo/Redo and Help > Keyboard shortcuts from the app menu, sent
+  // here while the editor is in front. In a text field undo means typing.
+  loupe.onAppCommand?.((command) => {
+    if (command === 'shortcuts') {
+      if (!cheat.open) cheat.toggle();
+      return;
+    }
+    if (command !== 'undo' && command !== 'redo') return;
+    if (document.activeElement?.closest?.('input[type="text"], input:not([type]), textarea')) {
+      document.execCommand(command);
+      return;
+    }
+    if (exportDialog.isOpen) return;
+    actions[command]();
+  });
+
   // ---- keeping everything in step
 
   const tlLabel = $('time');

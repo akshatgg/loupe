@@ -112,12 +112,31 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
     return settingsWindow;
   }
 
-  function showShortcuts() {
+  // The editor when it is the window in front, else null.
+  function focusedEditor() {
     const focused = BrowserWindow.getFocusedWindow();
     const editor = getEditorWindow?.();
+    return editor && !editor.isDestroyed() && focused === editor ? editor : null;
+  }
+
+  // Edit > Undo / Redo: the editor's own history when it is in front (the
+  // page decides: in its title field they undo typing); elsewhere, typing.
+  function editCommand(command) {
+    const editor = focusedEditor();
+    if (editor) {
+      editor.webContents.send('app:command', command);
+      return;
+    }
+    const focused = BrowserWindow.getFocusedWindow();
+    if (focused && !focused.isDestroyed()) focused.webContents[command]();
+  }
+
+  function showShortcuts() {
+    const focused = BrowserWindow.getFocusedWindow();
+    const editor = focusedEditor();
     // The editor has its own cheat sheet ("?"); let it show that.
-    if (editor && !editor.isDestroyed() && focused === editor) {
-      editor.webContents.send('app:showShortcuts');
+    if (editor) {
+      editor.webContents.send('app:command', 'shortcuts');
       return;
     }
     const lines = appShortcuts(process.platform).map(([what, keys]) => `${what}:  ${keys}`);
@@ -182,6 +201,8 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
         getUpdater().check();
       },
       showShortcuts,
+      undo: () => editCommand('undo'),
+      redo: () => editCommand('redo'),
       openWebsite: about.openWebsite,
       reportProblem: about.reportProblem,
       showLogs: about.showLogs

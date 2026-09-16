@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('loupe', {
   // App shell (src/main/app-shell.js): the Library and Settings windows.
   openLibrary: () => ipcRenderer.invoke('shell:openLibrary'),
   openSettings: (section) => ipcRenderer.invoke('shell:openSettings', section),
+  // App menu commands meant for the editor when it is in front:
+  // 'undo' | 'redo' | 'shortcuts' (src/main/app-shell.js).
+  onAppCommand: (cb) => ipcRenderer.on('app:command', (_e, command) => cb(command)),
   // Style presets, for the editor's Style panel (src/main/ipc/presets.js has
   // the full contract). apply(id) resolves to a copy of the preset's style.
   presets: {
