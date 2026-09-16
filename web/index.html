@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Loupe: a screen recorder for Mac and Windows that zooms while you record</title>
-<meta name="description" content="Loupe records your screen for demos and tutorials, on Mac and Windows. Hold a key and scroll to zoom in while you record, then edit the pace and export MP4 up to 4K. Free, with no account, no upload and no watermark.">
+<meta name="description" content="Loupe records your screen for demos and tutorials, on Mac and Windows. Zoom in while you record, then trim, add a background, captions and music, and export MP4, WebM or GIF up to 4K. Free, with no account and no watermark.">
 <link rel="canonical" href="https://loupeapp.vercel.app/">
 <meta name="theme-color" content="#1a1a1c">
 <meta name="color-scheme" content="dark">
@@ -18,14 +18,14 @@
 <meta property="og:site_name" content="Loupe">
 <meta property="og:url" content="https://loupeapp.vercel.app/">
 <meta property="og:title" content="Loupe: zoom in while you record">
-<meta property="og:description" content="A free screen recorder for Mac and Windows. Hold a key and scroll to zoom in while you record. Everything stays on your computer.">
+<meta property="og:description" content="A free screen recorder for Mac and Windows. Zoom in while you record, then edit, caption and export it, all on your computer.">
 <meta property="og:image" content="https://loupeapp.vercel.app/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta property="og:image:alt" content="Loupe: a screen with a blue frame and a 2.0× badge marking the zoomed-in area being recorded.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Loupe: zoom in while you record">
-<meta name="twitter:description" content="A free screen recorder for Mac and Windows. Hold a key and scroll to zoom in while you record. Everything stays on your computer.">
+<meta name="twitter:description" content="A free screen recorder for Mac and Windows. Zoom in while you record, then edit, caption and export it, all on your computer.">
 <meta name="twitter:image" content="https://loupeapp.vercel.app/og.png">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -39,11 +39,27 @@
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   "name": "Loupe",
-  "description": "A screen recorder for Mac and Windows that zooms in while you record.",
+  "description": "A screen recorder for Mac and Windows that zooms in while you record, with an editor for trimming, backgrounds, captions, sound and export.",
   "url": "https://loupeapp.vercel.app/",
   "applicationCategory": "MultimediaApplication",
   "operatingSystem": "macOS 14 or later, Windows 10 (version 2004) or later",
   "downloadUrl": "https://github.com/akshatgg/loupe/releases/latest",
+  "featureList": [
+    "Zoom in while you record by holding a key and scrolling",
+    "Trim, cut and split, with undo",
+    "Edit zooms and change the speed of any part",
+    "Backgrounds, padding, rounded corners and shadow",
+    "Wide, vertical, square and 4:5 videos",
+    "Cursor effects and keyboard shortcut badges",
+    "Webcam bubble",
+    "Text, arrows and blur",
+    "Transitions and presets",
+    "Computer sound, noise clean-up and even volume",
+    "Music that lowers when you talk, and voiceover",
+    "Captions made on your computer, with an editable transcript and .srt files",
+    "Export MP4, WebM or GIF from 720p to 4K, or to fit a size limit",
+    "Share links that expire after 7 days"
+  ],
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
 }
 </script>
@@ -60,6 +76,8 @@
     <nav class="top__nav" aria-label="Main">
       <a class="top__link" href="#zoom">How it works</a>
       <a class="top__link" href="#editor">Editor</a>
+      <a class="top__link top__link--wide" href="#captions">Captions</a>
+      <a class="top__link top__link--wide" href="#export">Export</a>
       <a class="top__link" href="#first-launch">First launch</a>
       <a class="top__link" href="https://github.com/akshatgg/loupe">GitHub</a>
       <a class="btn btn--small" href="#download">Download</a>
@@ -75,7 +93,7 @@
       <div class="hero__head">
         <h1 id="hero-h">Zoom in while you record.</h1>
         <div class="hero__aside">
-          <p class="lead">Loupe records your screen for demos and tutorials. Hold <kbd data-keyglyph="option">⌥</kbd><span data-key-name="option-after">&nbsp;Option</span> and scroll, and the video zooms in on your cursor, so whatever you’re talking about fills the frame.</p>
+          <p class="lead">Loupe records your screen for demos and tutorials. Hold <kbd data-keyglyph="option">⌥</kbd><span data-key-name="option-after">&nbsp;Option</span> and scroll, and the video zooms in on your cursor, so whatever you’re talking about fills the frame. Then trim it, give it a look, add captions and send it.</p>
           <div class="hero__actions">
             <a class="btn btn--primary" href="#download" data-os-cta>Download Loupe</a>
             <a class="btn" href="https://github.com/akshatgg/loupe">View the source</a>
@@ -318,9 +336,9 @@
   <section class="sec" id="editor" aria-labelledby="editor-h">
     <div class="wrap">
       <h2 id="editor-h" class="sec__h">Fix it afterwards, not with a retake</h2>
-      <p class="sec__lead">When you stop, Loupe opens your recording in an editor. Nothing is final until you export.</p>
+      <p class="sec__lead">When you stop, Loupe opens your recording in an editor. Nothing is final until you export, and your original recording is never changed.</p>
 
-      <div class="ed" role="img" aria-label="The Loupe editor: a video preview above a timeline. The timeline shows three zoom segments in blue, one of them selected, and a speed track with one stretch sped up to 4× in amber and one slowed to 0.5× in teal. Buttons along the bottom read Play, Undo, Restore all zooms, Show cursor, 1440p and Export MP4.">
+      <div class="ed" role="img" aria-label="The Loupe editor: a video preview above a timeline. The timeline shows the recording split into two clips with a fade between them, three zoom segments in blue, one of them selected, and a speed track with one stretch sped up to 4× in amber and one slowed to 0.5× in teal. Buttons along the bottom read Play, Undo, Split, Add zoom and Export.">
         <div class="ed__chrome"><span class="st-lights"><i></i><i></i><i></i></span><span class="ed__title">Loupe — Edit</span></div>
         <div class="ed__view">
           <div class="ed__frame">
@@ -335,6 +353,11 @@
         </div>
         <div class="ed__timeline">
           <div class="ed__ruler"><span style="left:0">0:00</span><span style="left:17.86%">0:15</span><span style="left:35.71%">0:30</span><span style="left:53.57%">0:45</span><span style="left:71.43%">1:00</span><span style="left:89.29%">1:15</span></div>
+          <div class="ed__clips">
+            <span class="ed__clip" style="left:0;width:59.4%">Clip 1</span>
+            <span class="ed__clip" style="left:60.2%;width:39.8%">Clip 2</span>
+            <i class="ed__fade" style="left:59.8%" title="Fade"></i>
+          </div>
           <div class="ed__track">
             <span class="ed__seg" style="left:6%;width:15%">2.4×</span>
             <span class="ed__seg ed__seg--sel" style="left:33%;width:17%">1.8×<i class="ed__del">×</i></span>
@@ -351,18 +374,21 @@
           <span class="ed__b">Play</span>
           <span class="ed__now">1.8×</span>
           <span class="ed__b">Undo</span>
-          <span class="ed__b">Restore all zooms</span>
-          <span class="ed__tog"><i></i>Show cursor</span>
+          <span class="ed__b">Split</span>
+          <span class="ed__b ed__b--opt">Add zoom</span>
           <span class="ed__spacer"></span>
-          <span class="ed__b ed__b--sel">1440p</span>
-          <span class="ed__b ed__b--go">Export MP4</span>
+          <span class="ed__b ed__b--go">Export</span>
         </div>
       </div>
 
       <div class="feats">
         <div class="feat">
-          <h3>Every zoom on the timeline</h3>
-          <p>Jump to any zoom, remove the ones you don’t want, and bring them back with Undo or Restore all.</p>
+          <h3>Trim, cut and split</h3>
+          <p>Drag the ends to trim, split at the playhead, and delete the parts you don’t need. You can add another recording to the end, too.</p>
+        </div>
+        <div class="feat">
+          <h3>Zooms you can change</h3>
+          <p>The zooms you made while recording are on the timeline. Move them, make them closer or wider, remove them, or add new ones anywhere.</p>
         </div>
         <div class="feat">
           <h3>Change the pace</h3>
@@ -373,12 +399,209 @@
           </div>
         </div>
         <div class="feat">
-          <h3>A crisp cursor</h3>
-          <p>Show or hide the cursor. It’s redrawn sharply at any zoom, so it never looks blown up, and each click gets a subtle ripple in the export.</p>
+          <h3>Undo anything</h3>
+          <p>Every change can be undone and redone, with the shortcuts you already know. Your original recording is never touched.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== Look ============================== -->
+  <section class="sec" id="look" aria-labelledby="look-h">
+    <div class="wrap">
+      <h2 id="look-h" class="sec__h">Make it look finished</h2>
+      <p class="sec__lead">A background, a shape that suits where you’re posting, and small touches that help people follow along. Pick a preset or make your own.</p>
+
+      <figure class="look" data-look data-aspect="16:9">
+        <div class="look__stage">
+          <div class="look__canvas" role="img" aria-label="A finished video: the recording of a team settings page sits on a blue gradient background with space around it, rounded corners and a soft shadow. An arrow points at the Send invite button, where the cursor has a ring around it, and the email addresses in the member list are blurred. A badge at the bottom shows the shortcut being pressed, a caption reads “Invite your team from Settings”, and a round webcam bubble sits in the corner.">
+            <div class="look__rec">
+              <div class="look__page">
+                <div class="lp-bar"><i></i><i></i><i></i><span>app.northwind.co/settings/team</span></div>
+                <div class="lp-body">
+                  <div class="lp-side"><b><i></i>Northwind</b><span>Overview</span><span>Projects</span><span class="on">Team</span><span>Settings</span></div>
+                  <div class="lp-main">
+                    <p class="lp-h">Team</p>
+                    <p class="lp-s">Invite people to work on Northwind with you.</p>
+                    <div class="lp-row"><span class="lp-in">maya@northwind.co</span><span class="lp-btn">Send invite<svg class="lp-arrow" viewBox="0 0 100 60" aria-hidden="true"><path d="M8 52C30 50 56 40 80 14" fill="none" stroke="#ff5a4e" stroke-width="5" stroke-linecap="round"/><path d="M66 12l16-2-3 16" fill="none" stroke="#ff5a4e" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lp-ring"></span><svg class="lp-cursor" viewBox="0 0 14 21" aria-hidden="true"><path d="M1 1v15.6l3.8-3.6 2.5 5.9 2.6-1.1-2.5-5.8h5.3z" fill="#111" stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/></svg></span></div>
+                    <ul class="lp-list">
+                      <li><i style="background:#c7d7f5"></i><b>Jonas Weber</b><span>jonas@northwind.co</span></li>
+                      <li><i style="background:#f6d6c3"></i><b>Priya Raman</b><span>priya@northwind.co</span></li>
+                      <li><i style="background:#cfe9d9"></i><b>Sam Okafor</b><span>sam@northwind.co</span></li>
+                      <li class="lp-blur" aria-hidden="true"></li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <p class="look__keys" aria-hidden="true"><kbd data-mod>⌘</kbd><kbd>K</kbd></p>
+            <p class="look__cap" aria-hidden="true">Invite your team from Settings</p>
+            <span class="look__cam" aria-hidden="true">
+              <svg viewBox="0 0 40 40"><rect width="40" height="40" fill="#51607a"/><circle cx="20" cy="16" r="7.5" fill="#e3c3a8"/><path d="M6 40c1-9 7-14 14-14s13 5 14 14z" fill="#2f3a4d"/><path d="M12.5 15c0-6 3.5-9 7.5-9s7.5 3 7.5 8c-2-3-5-4-7.5-4s-5.5 1.5-7.5 5z" fill="#3b2a22"/></svg>
+            </span>
+          </div>
+        </div>
+        <figcaption class="look__foot">
+          <div class="aspects" role="group" aria-label="Try a video shape" data-aspects hidden>
+            <button type="button" class="aspect" data-aspect-value="16:9" aria-pressed="true"><i style="--w:16;--h:9"></i>Wide <span>16:9</span></button>
+            <button type="button" class="aspect" data-aspect-value="9:16" aria-pressed="false"><i style="--w:9;--h:16"></i>Vertical <span>9:16</span></button>
+            <button type="button" class="aspect" data-aspect-value="1:1" aria-pressed="false"><i style="--w:12;--h:12"></i>Square <span>1:1</span></button>
+            <button type="button" class="aspect" data-aspect-value="4:5" aria-pressed="false"><i style="--w:11;--h:13.75"></i>Portrait <span>4:5</span></button>
+          </div>
+          <p>Choose wide, vertical, square or 4:5, and the shot keeps the action in view.</p>
+        </figcaption>
+      </figure>
+
+      <div class="feats feats--look">
+        <div class="feat">
+          <h3>Background and frame</h3>
+          <p>A colour, a gradient or a picture behind your recording, with space around it, rounded corners and a soft shadow.</p>
         </div>
         <div class="feat">
-          <h3>Export MP4</h3>
-          <p>At 1080p, 1440p or 4K, at 60 frames per second.</p>
+          <h3>Cursor and clicks</h3>
+          <p>Make the cursor bigger, smooth out its path, hide it when it’s still, and add a spotlight or ring. Clicks get a ripple.</p>
+        </div>
+        <div class="feat">
+          <h3>Keyboard shortcuts on screen</h3>
+          <p>Shortcuts you press show up as a badge. Ordinary typing never does, so passwords stay out of the video.</p>
+        </div>
+        <div class="feat">
+          <h3>Your webcam in a bubble</h3>
+          <p>Record your camera alongside the screen. Pick a circle or a rounded square, its size and its corner.</p>
+        </div>
+        <div class="feat">
+          <h3>Text, arrows and blur</h3>
+          <p>Add a title or a label, point at what matters, and blur anything private, like an email address.</p>
+        </div>
+        <div class="feat">
+          <h3>Transitions and presets</h3>
+          <p>Fade between the parts you cut. Save a look as a preset and make it the one new recordings start with.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== Sound ============================== -->
+  <section class="sec" id="sound" aria-labelledby="sound-h">
+    <div class="wrap split">
+      <div class="split__a">
+        <h2 id="sound-h">Sound that’s easy to listen to</h2>
+        <h3>Your voice and your computer’s sound</h3>
+        <p>Record your microphone and the sound playing on your computer, each with its own volume.</p>
+        <h3>Cleaner and more even</h3>
+        <p>Clean up background noise like hum, fans and keyboard clicks, and even out your volume so quiet and loud moments sound alike.</p>
+        <h3>Music that makes room for you</h3>
+        <p>Add a music track and Loupe lowers it whenever you talk, then brings it back up.</p>
+        <h3>Voiceover</h3>
+        <p>Rather talk afterwards? Record a voiceover while the video plays, after a 3, 2, 1 count-in.</p>
+      </div>
+
+      <figure class="split__b mix">
+        <svg class="mix__svg" viewBox="0 0 560 300" role="img" aria-labelledby="mix-t mix-d">
+          <title id="mix-t">How the sound fits together</title>
+          <desc id="mix-d">Four tracks over time: your voice in two stretches, your computer’s sound throughout, a voiceover near the end, and music. The music is loud in the pauses and drops low wherever someone is talking.</desc>
+          <g class="mix__rows">
+            <rect x="112" y="40" width="440" height="48" rx="6"/>
+            <rect x="112" y="100" width="440" height="48" rx="6"/>
+            <rect x="112" y="160" width="440" height="48" rx="6"/>
+            <rect x="112" y="220" width="440" height="48" rx="6"/>
+          </g>
+          <g class="mix__labels">
+            <text x="0" y="69">Your voice</text>
+            <text x="0" y="129">Computer</text>
+            <text x="0" y="189">Voiceover</text>
+            <text x="0" y="249">Music</text>
+          </g>
+          <path class="mix__voice" d="M160 62.5v3.0M165 57.9v12.2M170 57.1v13.8M175 55.2v17.5M180 49.2v29.7M185 51.5v25.1M190 53.8v20.3M195 48.9v30.2M200 48.9v30.3M205 51.3v25.3M210 49.7v28.6M215 50.3v27.5M220 48.1v31.7M225 54.9v18.3M230 53.3v21.4M235 49.4v29.2M240 49.5v28.9M245 58.8v10.4M250 56.8v14.3M255 61.1v5.9M260 62.5v3.0M330 62.5v3.0M335 61.2v5.5M340 55.2v17.6M345 46.9v34.2M350 49.6v28.7M355 50.2v27.7M360 50.9v26.1M365 47.0v33.9M370 47.1v33.9M375 53.3v21.3M380 53.8v20.4M385 47.9v32.2M390 53.8v20.4M395 57.9v12.1M400 59.1v9.8M405 61.2v5.7M410 62.5v3.0"/>
+          <path class="mix__sys" d="M120 122.5v3.0M126 122.2v3.7M132 119.8v8.5M138 118.5v11.0M144 121.7v4.7M150 120.8v6.3M156 119.7v8.6M162 119.9v8.2M168 120.3v7.5M174 121.1v5.7M180 118.4v11.3M186 121.7v4.6M192 120.5v7.1M198 120.6v6.9M204 119.3v9.4M210 118.3v11.4M216 119.9v8.2M222 121.3v5.5M228 120.3v7.4M234 120.8v6.4M240 120.5v7.0M246 120.2v7.5M252 120.6v6.8M258 119.8v8.3M264 119.5v9.0M270 121.0v6.0M276 118.4v11.3M282 120.1v7.8M288 118.5v10.9M294 119.4v9.2M300 119.4v9.1M306 119.9v8.2M312 119.9v8.1M318 119.2v9.6M324 118.2v11.5M330 120.4v7.3M336 119.1v9.7M342 120.9v6.2M348 119.6v8.8M354 120.5v6.9M360 120.6v6.8M366 120.4v7.3M372 118.8v10.4M378 118.5v11.0M384 121.5v5.1M390 118.7v10.6M396 121.6v4.8M402 120.3v7.4M408 121.3v5.4M414 121.6v4.8M420 118.0v12.0M426 121.0v5.9M432 119.4v9.1M438 121.3v5.3M444 120.1v7.8M450 119.6v8.8M456 121.4v5.3M462 118.3v11.4M468 118.5v11.1M474 118.4v11.1M480 118.4v11.1M486 118.4v11.3M492 118.9v10.1M498 120.8v6.3M504 121.9v4.3M510 120.9v6.1M516 121.6v4.8M522 122.1v3.8M528 121.3v5.4M534 122.5v3.0M540 122.5v3.0"/>
+          <rect class="mix__take" x="458" y="166" width="82" height="36" rx="5"/>
+          <path class="mix__voice" d="M466 182.5v3.0M471 179.4v9.1M476 178.2v11.5M481 169.2v29.5M486 176.0v16.1M491 174.5v19.0M496 169.1v29.8M501 177.2v13.7M506 173.3v21.4M511 178.7v10.7M516 173.4v21.1M521 178.5v11.0M526 181.0v6.1"/>
+          <path class="mix__music" d="M120 229.0L124 228.2L128 228.0L132 228.4L136 229.4L140 230.7L144 233.8L148 236.3L152 238.3L156 239.8L160 241.0L164 240.7L168 240.3L172 239.9L176 239.5L180 239.3L184 239.2L188 239.3L192 239.6L196 240.0L200 240.4L204 240.8L208 241.0L212 241.1L216 241.0L220 240.8L224 240.4L228 240.0L232 239.6L236 239.3L240 239.2L244 239.3L248 239.5L252 239.9L256 240.3L260 240.7L264 239.6L268 238.4L272 236.9L276 234.9L280 232.2L284 230.8L288 229.4L292 228.5L296 228.0L300 228.2L304 229.0L308 230.1L312 232.4L316 235.2L320 237.4L324 239.1L328 240.4L332 240.9L336 240.5L340 240.1L344 239.7L348 239.4L352 239.2L356 239.2L360 239.4L364 239.8L368 240.2L372 240.6L376 240.9L380 241.1L384 241.1L388 240.9L392 240.6L396 240.1L400 239.7L404 239.4L408 239.2L412 238.1L416 236.2L420 234.8L424 233.9L428 233.3L432 233.7L436 234.3L440 234.3L444 233.8L448 233.5L452 234.0L456 234.9L460 236.3L464 238.1L468 239.2L472 239.4L476 239.7L480 240.1L484 240.5L488 240.9L492 241.1L496 241.1L500 241.0L504 240.7L508 240.3L512 239.8L516 239.5L520 239.3L524 239.2L528 239.3L532 238.6L536 237.3L540 236.3L540 251.7L536 250.7L532 249.4L528 248.7L524 248.8L520 248.7L516 248.5L512 248.2L508 247.7L504 247.3L500 247.0L496 246.9L492 246.9L488 247.1L484 247.5L480 247.9L476 248.3L472 248.6L468 248.8L464 249.9L460 251.7L456 253.1L452 254.0L448 254.5L444 254.2L440 253.7L436 253.7L432 254.3L428 254.7L424 254.1L420 253.2L416 251.8L412 249.9L408 248.8L404 248.6L400 248.3L396 247.9L392 247.4L388 247.1L384 246.9L380 246.9L376 247.1L372 247.4L368 247.8L364 248.2L360 248.6L356 248.8L352 248.8L348 248.6L344 248.3L340 247.9L336 247.5L332 247.1L328 247.6L324 248.9L320 250.6L316 252.8L312 255.6L308 257.9L304 259.0L300 259.8L296 260.0L292 259.5L288 258.6L284 257.2L280 255.8L276 253.1L272 251.1L268 249.6L264 248.4L260 247.3L256 247.7L252 248.1L248 248.5L244 248.7L240 248.8L236 248.7L232 248.4L228 248.0L224 247.6L220 247.2L216 247.0L212 246.9L208 247.0L204 247.2L200 247.6L196 248.0L192 248.4L188 248.7L184 248.8L180 248.7L176 248.5L172 248.1L168 247.7L164 247.3L160 247.0L156 248.2L152 249.7L148 251.7L144 254.2L140 257.3L136 258.6L132 259.6L128 260.0L124 259.8L120 259.0Z"/>
+          <text class="mix__note" x="332" y="294" text-anchor="middle">Music drops while anyone talks</text>
+          <text class="mix__axis" x="552" y="22" text-anchor="end">time →</text>
+        </svg>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ============================== Captions ============================== -->
+  <section class="sec" id="captions" aria-labelledby="captions-h">
+    <div class="wrap split split--flip">
+      <div class="split__a">
+        <h2 id="captions-h">Captions, written on your computer</h2>
+        <p>Press Generate captions and Loupe listens to your recording and writes them out. It works on your computer, so your recording isn’t sent anywhere. The first time, it downloads its speech model, once.</p>
+        <h3>Fix any word</h3>
+        <p>Captions come with a transcript you can edit. Click a time to jump to that moment, then correct names and terms.</p>
+        <h3>On the video, or as a file</h3>
+        <p>Show them on the video, with the size and position you like, or save an <b>.srt</b> file for YouTube and other players.</p>
+      </div>
+
+      <div class="split__b cap" role="img" aria-label="Loupe’s Captions panel. A switch reads Show captions on the video and is turned on. Below it, a transcript lists lines with their times; one line, “Open Team settings from the sidebar”, is being edited. A button at the bottom reads Save .srt.">
+        <div class="cap__head"><b>Captions</b><span class="cap__lang">English</span></div>
+        <div class="cap__tog"><i></i>Show captions on the video</div>
+        <ol class="cap__list">
+          <li><span>0:02</span><p>Here’s how to add someone to your team.</p></li>
+          <li class="cap__edit"><span>0:05</span><p>Open Team settings from the sidebar.<i class="cap__caret"></i></p></li>
+          <li><span>0:09</span><p>Type their email address and press Send invite.</p></li>
+          <li><span>0:14</span><p>They show up as invited until they accept.</p></li>
+        </ol>
+        <div class="cap__foot"><span class="cap__btn">Save .srt</span><span class="cap__hint">Click a time to jump there</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== Export ============================== -->
+  <section class="sec" id="export" aria-labelledby="export-h">
+    <div class="wrap split">
+      <div class="split__a">
+        <h2 id="export-h">Export it, then send it anywhere</h2>
+        <h3>MP4, WebM or GIF</h3>
+        <p>MP4 plays everywhere. WebM is smaller for websites. A GIF plays on its own in chats and docs. Videos go from 720p up to 4K.</p>
+        <h3>Fit a size limit</h3>
+        <p>Sending it on Slack or by email? Pick 25&nbsp;MB, 10&nbsp;MB or your own limit, and Loupe makes the file fit.</p>
+        <h3>Copy it, or drag it</h3>
+        <p>Copy the finished file and paste it into any app, or drag it straight out of Loupe into a message.</p>
+        <h3>A link that expires</h3>
+        <p>Make a share link and anyone with it can watch in their browser. It stops working after 7 days.</p>
+      </div>
+
+      <div class="split__b xp" role="img" aria-label="Loupe’s Export window. Format is set to MP4, with WebM and GIF as the other choices. Size is 1080p, with 720p, 1440p and 4K. Fit a size limit is on, set to 25 MB. Below, a finished export shows buttons for Copy, Show in Finder and Share link, and a share link with the note: Anyone with the link can watch. It stops working after 7 days.">
+        <div class="xp__card">
+          <p class="xp__title">Export</p>
+          <div class="xp__field"><span class="xp__lab">Format</span><span class="xp__seg"><b class="on">MP4</b><b>WebM</b><b>GIF</b></span></div>
+          <div class="xp__field"><span class="xp__lab">Size</span><span class="xp__seg"><b>720p</b><b class="on">1080p</b><b>1440p</b><b>4K</b></span></div>
+          <div class="xp__field"><span class="xp__lab"><i class="xp__sw"></i>Fit a size limit</span><span class="xp__seg"><b class="on">25 MB</b><b>10 MB</b><b>Other</b></span></div>
+          <div class="xp__acts"><span class="xp__b">Cancel</span><span class="xp__b xp__b--go">Export</span></div>
+        </div>
+        <div class="xp__card xp__card--done">
+          <p class="xp__file"><i class="xp__thumb"></i><span><b>export-1920x1080.mp4</b><em>Ready</em></span></p>
+          <div class="xp__acts xp__acts--left"><span class="xp__b">Copy</span><span class="xp__b" data-reveal-label>Show in Finder</span><span class="xp__b xp__b--on">Share link</span></div>
+          <div class="xp__link"><span>loupeapp.vercel.app/v/…</span><b>Copy link</b></div>
+          <p class="xp__hint">Anyone with the link can watch. It stops working after 7 days.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================== App ============================== -->
+  <section class="sec" id="app" aria-labelledby="app-h">
+    <div class="wrap">
+      <h2 id="app-h" class="sec__h">Everything else you’d expect</h2>
+      <div class="feats feats--app">
+        <div class="feat">
+          <svg class="feat__icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="8" height="6" rx="1.5"/><rect x="13" y="4" width="8" height="6" rx="1.5"/><rect x="3" y="14" width="8" height="6" rx="1.5"/><rect x="13" y="14" width="8" height="6" rx="1.5"/></svg>
+          <h3>A library of your recordings</h3>
+          <p>Every recording in one window, with a preview, its length and date. Open, rename, duplicate or delete one, or start a new recording.</p>
+        </div>
+        <div class="feat">
+          <svg class="feat__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
+          <h3>Settings in plain words</h3>
+          <p>Choose the zoom key, your microphone and camera, a countdown, where recordings go, and how exports start out.</p>
+        </div>
+        <div class="feat">
+          <svg class="feat__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v4.5h-4.5"/></svg>
+          <h3>Updates</h3>
+          <p>On Windows, updates download by themselves and install when you quit. On a Mac, Loupe tells you when a new version is out and how to get it.</p>
         </div>
       </div>
     </div>
@@ -388,7 +611,7 @@
   <section class="sec private" aria-labelledby="private-h">
     <div class="wrap private__in">
       <h2 id="private-h" class="private__h">Everything stays on your computer.</h2>
-      <p class="private__p">Recording, editing and export all happen on your computer. There’s no account to make, nothing is uploaded, and there’s no watermark on your videos. Loupe is free.</p>
+      <p class="private__p">Recording, editing, captions and export all happen on your computer. There’s no account to make and no watermark on your videos. Nothing is uploaded unless you make a share link, and that link expires after 7 days. Loupe is free.</p>
     </div>
   </section>
 
@@ -534,7 +757,15 @@
           </div>
           <div>
             <dt>Does anything leave my computer?</dt>
-            <dd>No. Recording, editing and export all happen on your computer, and there’s no account.</dd>
+            <dd>Not unless you make a share link. Recording, editing, captions and export all happen on your computer, and there’s no account.</dd>
+          </div>
+          <div>
+            <dt>Are my captions made online?</dt>
+            <dd>No. Loupe writes captions on your computer. The first time, it downloads its speech model; after that it doesn’t need the internet, and your recording is never sent anywhere.</dd>
+          </div>
+          <div>
+            <dt>What happens when I make a share link?</dt>
+            <dd>That’s the only time Loupe uploads anything: the video you exported, so people can watch it in a browser. Anyone with the link can see it, and it stops working after 7 days.</dd>
           </div>
         </dl>
       </div>
@@ -548,7 +779,7 @@
       <img src="icon.svg" alt="" width="26" height="26">
       <span>Loupe</span>
     </a>
-    <p class="foot__p">A free screen recorder for Mac and Windows that zooms while you record.</p>
+    <p class="foot__p">A free screen recorder for Mac and Windows that zooms while you record, with an editor for everything after.</p>
     <nav class="foot__nav" aria-label="Footer">
       <a href="#download">Download</a>
       <a href="https://github.com/akshatgg/loupe/releases">Releases</a>
