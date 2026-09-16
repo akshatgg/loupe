@@ -10,7 +10,8 @@ module.exports = [
                  console: 'readonly', __dirname: 'readonly', Buffer: 'readonly',
                  setTimeout: 'readonly', clearTimeout: 'readonly',
                  setInterval: 'readonly', clearInterval: 'readonly',
-                 setImmediate: 'readonly', fetch: 'readonly' }
+                 setImmediate: 'readonly', fetch: 'readonly',
+                 AbortController: 'readonly' }
     },
     rules: {
       'no-unused-vars': 'error',

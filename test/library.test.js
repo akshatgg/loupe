@@ -151,6 +151,28 @@ test('duplicate copies the folder (not its exports) under a new name next to the
   fs.rmSync(base, { recursive: true, force: true });
 });
 
+test('two duplicates at once make two complete copies, and a copy in progress is never listed', async () => {
+  const { base, root } = setup();
+  v1(root, '1788954728479', { title: 'Demo' });
+  const lib = createLibrary({ root: () => root, now: () => 1790000000000 });
+  const [a, b] = await Promise.all([lib.duplicate('1788954728479'), lib.duplicate('1788954728479')]);
+  assert.notStrictEqual(a.id, b.id);
+  for (const copy of [a, b]) {
+    assert.deepStrictEqual(fs.readdirSync(path.join(root, copy.id)).sort(), ['project.json', 'raw.mov']);
+  }
+  assert.deepStrictEqual(lib.list().map((r) => r.title).sort(), ['Demo', 'Demo copy', 'Demo copy']);
+  // No hidden work folders are left behind.
+  assert.deepStrictEqual(fs.readdirSync(root).filter((n) => n.startsWith('.')), []);
+
+  // While copying, the Library doesn't show the half-made copy.
+  const slow = createLibrary({ root: () => root, now: () => 1791000000000 });
+  const pending = slow.duplicate('1788954728479');
+  assert.strictEqual(slow.list().length, 3);
+  await pending;
+  assert.strictEqual(slow.list().length, 4);
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
 test('thumbnails are made once, cached as thumb.jpg, and skipped without a video', async () => {
   const { base, root } = setup();
   v1(root, 'a');
@@ -206,6 +228,21 @@ test('IPC: open, reveal and trash go through the checked path; trash asks first'
   assert.deepStrictEqual(calls[1], ['trash', dir]);
 
   await assert.rejects(async () => handlers['library:trash']({ sender: {} }, '..'), /could not be found/);
+
+  // A recording open in the editor isn't trashed from under it.
+  const busy = fs.realpathSync(v1(root, 'busy'));
+  let openDir = path.join(root, 'busy');
+  const guarded = {};
+  registerLibraryIpc({
+    ipcMain: { handle: (c, fn) => { guarded[c] = fn; } }, electron, library,
+    openEditor: () => {}, showPicker: () => {}, editorDir: () => openDir
+  });
+  calls.length = 0;
+  await assert.rejects(async () => guarded['library:trash']({ sender: {} }, 'busy'), /open in the editor/);
+  assert.deepStrictEqual(calls, []);
+  openDir = null;
+  assert.deepStrictEqual(await guarded['library:trash']({ sender: {} }, 'busy'), { trashed: true });
+  assert.deepStrictEqual(calls[1], ['trash', busy]);
   await assert.rejects(async () => handlers['library:open']({}, '../x'), /could not be found/);
   const listed = await handlers['library:list']();
   assert.strictEqual(listed.root, root);

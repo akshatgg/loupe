@@ -73,9 +73,23 @@ function readLogTail(dir, count = 40) {
 }
 
 // Home folder paths often carry the user's name; the report doesn't need it.
+// A Windows path can also appear with its backslashes doubled (a string
+// inside a logged object, or JSON) or turned into forward slashes (a file://
+// URL), and a drive letter in either case.
 function redact(text, homedir) {
   if (!homedir) return text;
-  return text.split(homedir).join('~');
+  const forms = new Set([homedir]);
+  if (homedir.includes('\\')) {
+    forms.add(homedir.replaceAll('\\', '\\\\'));
+    forms.add(homedir.replaceAll('\\', '/'));
+  }
+  let out = text;
+  // Longest first, so the doubled form isn't half-replaced by the plain one.
+  for (const form of [...forms].sort((a, b) => b.length - a.length)) {
+    const escaped = form.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    out = out.replace(new RegExp(escaped, /^[A-Za-z]:/.test(form) ? 'gi' : 'g'), '~');
+  }
+  return out;
 }
 
 // A GitHub "new issue" URL with the environment and recent log lines filled

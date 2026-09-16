@@ -41,7 +41,16 @@ const plain = (err) => String(err?.message ?? err).replace(/^Error invoking remo
 
 // ---- loading ----------------------------------------------------------------
 
+// A refresh redraws every card, which would throw away a name being typed
+// (the window regaining focus refreshes), so it waits for the rename to end.
+let refreshWaiting = false;
+
 async function refresh() {
+  if (renamingId) {
+    refreshWaiting = true;
+    return;
+  }
+  refreshWaiting = false;
   try {
     ({ recordings, displayRoot } = await api.list());
     loadError = null;
@@ -191,6 +200,7 @@ function renameField(rec) {
     }
     render();
     document.querySelector(`.card[data-id="${CSS.escape(rec.id)}"]`)?.focus();
+    if (refreshWaiting) refresh();
   };
   input.addEventListener('keydown', (e) => {
     e.stopPropagation();
@@ -247,9 +257,15 @@ function select(id) {
 
 // ---- actions ----------------------------------------------------------------
 
+// Pressing ⌘D or Delete twice quickly shouldn't make two copies or ask twice.
+const inFlight = new Set();
+
 async function run(action, id) {
   const rec = recordings.find((r) => r.id === id);
   if (!rec) return;
+  const key = `${action}:${id}`;
+  if (inFlight.has(key)) return;
+  inFlight.add(key);
   try {
     switch (action) {
       case 'open':
@@ -282,6 +298,8 @@ async function run(action, id) {
   } catch (err) {
     toast(plain(err), { error: true });
     refresh();
+  } finally {
+    inFlight.delete(key);
   }
 }
 

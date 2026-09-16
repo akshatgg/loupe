@@ -53,6 +53,10 @@ test('Report a problem: a prefilled GitHub issue with version, OS, arch and the 
   assert.match(body, /could not open ~\/Movies\/Loupe\/1\/raw\.mov/);
   assert.ok(!body.includes('/Users/alex'));
   assert.strictEqual(redact('C:\\Users\\alex\\x', 'C:\\Users\\alex'), '~\\x');
+  // As util.inspect and JSON write it, as a file URL, and with a lower-case drive.
+  assert.strictEqual(redact("{ path: 'C:\\\\Users\\\\alex\\\\raw.mp4' }", 'C:\\Users\\alex'), "{ path: '~\\\\raw.mp4' }");
+  assert.strictEqual(redact('file:///C:/Users/alex/x.mp4', 'C:\\Users\\alex'), 'file:///~/x.mp4');
+  assert.strictEqual(redact('c:\\Users\\alex\\x', 'C:\\Users\\alex'), '~\\x');
 });
 
 test('Report a problem: a long log is trimmed from the oldest end so the URL stays usable', () => {

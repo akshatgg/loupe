@@ -20,8 +20,16 @@ function registerUpdatesIpc({ ipcMain, electron, getUpdater }) {
 
   const openReleasePage = () => shell.openExternal(updater.state().latest?.url ?? RELEASES_PAGE);
   const copyBrewCommand = () => clipboard.writeText(updater.brewCommand);
+  // The installer is started from will-quit, not here: quitting can be held
+  // up (before-quit in main.js first stops and saves a recording in
+  // progress, or an export), and an installer already running would close
+  // Loupe in the middle of that and lose the recording.
+  let relaunch = false;
   const restartToUpdate = () => {
-    if (updater.install({ relaunch: true })) app.quit();
+    const s = updater.state();
+    if (s.kind !== 'installer' || s.status !== 'ready') return;
+    relaunch = true;
+    app.quit();
   };
 
   ipcMain.handle('updates:state', () => updater.state());
@@ -78,10 +86,11 @@ function registerUpdatesIpc({ ipcMain, electron, getUpdater }) {
   }
 
   // "Install on quit" (Windows): an update that was downloaded and verified
-  // but not installed yet goes in as Loupe closes.
+  // but not installed yet goes in as Loupe closes -- and starts Loupe again
+  // afterwards when the user chose "Restart to update".
   app.on('will-quit', () => {
     try {
-      updater.install({ relaunch: false });
+      updater.install({ relaunch });
     } catch (err) {
       console.error('Loupe: could not start the update installer:', err);
     }

@@ -491,7 +491,8 @@ ipcMain.handle('permissions:open', (_e, pane) => permissions.openPane(pane));
 // Settings (settings:get/set included), the Library and Settings windows,
 // presets, menus, updates and crash reports: see app-shell.js.
 const appShell = createAppShell({
-  electron, openEditorWindow, showPicker, getEditorWindow: () => editorWindow
+  electron, openEditorWindow, showPicker, getEditorWindow: () => editorWindow,
+  getEditorDir: () => (editorWindow && !editorWindow.isDestroyed() ? editorDir : null)
 });
 appShell.start();
 const currentSettings = () => appShell.settings.get();

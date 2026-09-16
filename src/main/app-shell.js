@@ -26,11 +26,12 @@ const { registerAboutIpc } = require('./ipc/about');
 //                                 general | recording | export | updates | privacy | about
 //   shell.recordingsChanged()     tell an open Library a recording was added
 //
-// `deps` from main.js: openEditorWindow(dir), showPicker(), getEditorWindow().
+// `deps` from main.js: openEditorWindow(dir), showPicker(), getEditorWindow(),
+// getEditorDir() (the recording open in the editor, or null).
 const SECTIONS = ['general', 'recording', 'export', 'updates', 'privacy', 'about'];
 const WINDOW_BG = '#2a2b2e';
 
-function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindow }) {
+function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindow, getEditorDir }) {
   const { app, ipcMain, BrowserWindow } = electron;
   const preload = path.join(__dirname, '..', 'preload', 'shell.js');
   const renderer = (name) => path.join(__dirname, '..', 'renderer', name, 'index.html');
@@ -146,7 +147,9 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
         return image.isEmpty() ? null : image.toJPEG(82);
       }
     });
-    registerLibraryIpc({ ipcMain, electron, library, openEditor: openEditorWindow, showPicker });
+    registerLibraryIpc({
+      ipcMain, electron, library, openEditor: openEditorWindow, showPicker, editorDir: () => getEditorDir?.() ?? null
+    });
 
     // The Library follows the recordings folder when it changes.
     settings.onChange((next, before) => {

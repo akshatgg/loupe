@@ -24,6 +24,33 @@ const WINDOWS_INSTALLER = 'Loupe-Setup-x64.exe';
 const BREW_COMMAND = 'brew upgrade --cask loupe';
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const CASKROOMS = ['/opt/homebrew/Caskroom/loupe', '/usr/local/Caskroom/loupe'];
+// A request that gets no answer (a captive portal, a network that drops
+// packets) would otherwise leave "Checking for updates…" spinning forever,
+// with Check now disabled because a check is still running.
+const REQUEST_TIMEOUT_MS = 20 * 1000;
+// The installer is large, so the download has no overall limit -- only a
+// limit on how long it may go without receiving anything.
+const DOWNLOAD_STALL_MS = 60 * 1000;
+
+class TimeoutError extends Error {}
+
+// fetch with a deadline for the response headers. Aborts the request and
+// also races it, so a fetch that ignores the signal can't hang the check.
+async function fetchWithTimeout(fetchImpl, url, opts = {}, ms = REQUEST_TIMEOUT_MS) {
+  const controller = new AbortController();
+  let timer;
+  const timeout = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new TimeoutError('The request timed out'));
+    }, ms);
+  });
+  try {
+    return await Promise.race([fetchImpl(url, { ...opts, signal: controller.signal }), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 // ---- versions ---------------------------------------------------------------
 
@@ -64,11 +91,15 @@ function compareVersions(a, b) {
 
 // ---- GitHub -----------------------------------------------------------------
 
-async function fetchLatestRelease(fetchImpl) {
-  const res = await fetchImpl(RELEASES_API, {
+async function fetchLatestRelease(fetchImpl, { timeoutMs = REQUEST_TIMEOUT_MS } = {}) {
+  const res = await fetchWithTimeout(fetchImpl, RELEASES_API, {
     headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Loupe' }
-  });
-  if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
+  }, timeoutMs);
+  if (!res.ok) {
+    const err = new Error(`GitHub answered ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   const body = await res.json();
   const version = String(body?.tag_name ?? '').replace(/^v/, '');
   if (!parseVersion(version)) throw new Error('The latest release has no version number');
@@ -150,12 +181,14 @@ async function sha512OfFile(file) {
 // Downloads the Windows installer for `release` into `dir` and returns its
 // path -- only if its sha512 matches latest.yml. A mismatch deletes the file
 // and throws: a corrupted or tampered installer is never offered.
-async function downloadVerifiedInstaller({ release, fetchImpl, dir }) {
+async function downloadVerifiedInstaller({
+  release, fetchImpl, dir, timeoutMs = REQUEST_TIMEOUT_MS, stallMs = DOWNLOAD_STALL_MS
+}) {
   const ymlAsset = release.assets.find((a) => a.name === 'latest.yml');
   const exeAsset = release.assets.find((a) => a.name === WINDOWS_INSTALLER);
   if (!ymlAsset || !exeAsset) throw new Error('This release has no Windows installer to update from');
 
-  const ymlRes = await fetchImpl(ymlAsset.url, { headers: { 'User-Agent': 'Loupe' } });
+  const ymlRes = await fetchWithTimeout(fetchImpl, ymlAsset.url, { headers: { 'User-Agent': 'Loupe' } }, timeoutMs);
   if (!ymlRes.ok) throw new Error(`Could not download latest.yml (${ymlRes.status})`);
   const manifest = parseLatestYml(await ymlRes.text());
   if (manifest.version !== release.version) {
@@ -171,16 +204,24 @@ async function downloadVerifiedInstaller({ release, fetchImpl, dir }) {
   if (fs.existsSync(target) && await sha512OfFile(target) === entry.sha512) return target;
 
   const partial = `${target}.partial`;
-  const exeRes = await fetchImpl(exeAsset.url, { headers: { 'User-Agent': 'Loupe' } });
+  const exeRes = await fetchWithTimeout(fetchImpl, exeAsset.url, { headers: { 'User-Agent': 'Loupe' } }, timeoutMs);
   if (!exeRes.ok || !exeRes.body) throw new Error(`Could not download the installer (${exeRes.status})`);
   const hash = crypto.createHash('sha512');
+  let stall = null;
   try {
     const body = Readable.fromWeb(exeRes.body);
-    body.on('data', (chunk) => hash.update(chunk));
+    const watch = () => {
+      clearTimeout(stall);
+      stall = setTimeout(() => body.destroy(new TimeoutError('The download stopped')), stallMs);
+    };
+    watch();
+    body.on('data', (chunk) => { watch(); hash.update(chunk); });
     await pipeline(body, fs.createWriteStream(partial));
   } catch (err) {
     fs.rmSync(partial, { force: true });
     throw err;
+  } finally {
+    clearTimeout(stall);
   }
   if (hash.digest('base64') !== entry.sha512) {
     fs.rmSync(partial, { force: true });
@@ -206,9 +247,12 @@ function installerArgs({ relaunch }) {
   return relaunch ? ['/S', '--updated', '--force-run'] : ['/S', '--updated'];
 }
 
+// A last check "in the future" (the clock was wrong, then corrected) counts
+// as due; otherwise checks would stop until the clock caught up, maybe years.
 function shouldAutoCheck(settings, now) {
+  const since = now - settings.lastUpdateCheck;
   return settings.checkForUpdates === true
-    && !(settings.lastUpdateCheck > 0 && now - settings.lastUpdateCheck < CHECK_INTERVAL_MS);
+    && !(settings.lastUpdateCheck > 0 && since >= 0 && since < CHECK_INTERVAL_MS);
 }
 
 // ---- the updater ------------------------------------------------------------
@@ -223,7 +267,7 @@ function shouldAutoCheck(settings, now) {
 function createUpdater({
   currentVersion, platform = process.platform, fetchImpl, downloadDir,
   getSettings, patchSettings, now = Date.now, exists = fs.existsSync,
-  spawn, onChange = () => {}
+  spawn, onChange = () => {}, timeoutMs = REQUEST_TIMEOUT_MS
 }) {
   const kind = installKind(platform, exists);
   let state = { status: 'idle', kind, currentVersion, latest: null, error: null, checkedAt: null };
@@ -240,7 +284,7 @@ function createUpdater({
     set({ status: 'checking', error: null });
     let release;
     try {
-      release = await fetchLatestRelease(fetchImpl);
+      release = await fetchLatestRelease(fetchImpl, { timeoutMs });
     } catch (err) {
       set({ status: 'error', error: friendlyError(err), checkedAt: now(), latest: null });
       return state;
@@ -257,7 +301,9 @@ function createUpdater({
     }
     set({ status: 'downloading', latest, checkedAt: now() });
     try {
-      installerPath = await downloadVerifiedInstaller({ release: { ...release, assets }, fetchImpl, dir: downloadDir });
+      installerPath = await downloadVerifiedInstaller({
+        release: { ...release, assets }, fetchImpl, dir: downloadDir, timeoutMs
+      });
       set({ status: 'ready' });
     } catch (err) {
       installerPath = null;
@@ -308,9 +354,19 @@ function createUpdater({
   };
 }
 
+// What the Settings window shows. Raw network and HTTP errors mean nothing
+// to most people, so the common ones get a plain sentence.
 function friendlyError(err) {
   const msg = String(err?.message ?? err);
-  if (/fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|network/i.test(msg)) {
+  if (err instanceof TimeoutError || err?.name === 'AbortError') {
+    return 'GitHub took too long to answer. Check your internet connection and try again.';
+  }
+  if (err?.status === 403 || err?.status === 429) {
+    return 'GitHub is getting too many requests right now. Try again in an hour.';
+  }
+  if (err?.status === 404) return 'No released version of Loupe was found.';
+  if (err?.status >= 500) return 'GitHub isn’t answering right now. Try again later.';
+  if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ERR_INTERNET|ERR_NAME|network/i.test(msg)) {
     return 'Could not reach GitHub. Check your internet connection and try again.';
   }
   return msg;
@@ -320,5 +376,5 @@ module.exports = {
   RELEASES_API, RELEASES_PAGE, WINDOWS_INSTALLER, BREW_COMMAND, CHECK_INTERVAL_MS, CASKROOMS,
   parseVersion, compareVersions, fetchLatestRelease, parseLatestYml, formatLatestYml,
   sha512OfFile, downloadVerifiedInstaller, installKind, installerArgs, shouldAutoCheck,
-  createUpdater
+  createUpdater, fetchWithTimeout, friendlyError, REQUEST_TIMEOUT_MS
 };

@@ -189,14 +189,27 @@ function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
     return entry(id, dir);
   }
 
+  // The copy is made in a hidden folder (list() skips dot folders) and only
+  // renamed into place once complete: a big recording takes a while to copy,
+  // and a half-copied one must never show up in the Library, be opened, or
+  // collide with a second Duplicate pressed before the first one finished.
   async function duplicate(id) {
     const dir = resolve(id);
     const base = rootReal();
-    let stamp = now();
-    while (fs.existsSync(path.join(base, String(stamp)))) stamp++;
-    const copyId = String(stamp);
-    const target = path.join(base, copyId);
     const source = entry(id, dir);
+    let work;
+    for (let n = 0; ; n++) {
+      work = path.join(base, `.copying-${now()}-${n}`);
+      try {
+        fs.mkdirSync(work);
+        break;
+      } catch (err) {
+        if (err.code !== 'EEXIST') throw err;
+      }
+    }
+    // cp wants a target that doesn't exist yet; `work` only reserves the name.
+    const target = path.join(work, 'copy');
+    let copyId;
     try {
       await fs.promises.cp(dir, target, {
         recursive: true, errorOnExist: true, force: false,
@@ -208,11 +221,16 @@ function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
       // The copy keeps the original's date, so it sorts next to it.
       project.createdAt = source.createdAt;
       writeJson(file, project);
-    } catch (err) {
-      fs.rmSync(target, { recursive: true, force: true });
-      throw err;
+      // Picked only now, and renamed in the same synchronous step, so two
+      // duplicates finishing together can't pick the same name.
+      let stamp = now();
+      while (fs.existsSync(path.join(base, String(stamp)))) stamp++;
+      copyId = String(stamp);
+      fs.renameSync(target, path.join(base, copyId));
+    } finally {
+      fs.rmSync(work, { recursive: true, force: true });
     }
-    return entry(copyId, target);
+    return entry(copyId, path.join(base, copyId));
   }
 
   return { root, resolve, list, thumbnail, rename, duplicate };
@@ -226,9 +244,18 @@ function displayPath(p, home = os.homedir(), platform = process.platform) {
 }
 
 // IPC for the Library window. `openEditor(dir)` is main.js's
-// openEditorWindow; `showPicker()` brings up the source picker.
-function registerLibraryIpc({ ipcMain, electron, library, openEditor, showPicker }) {
+// openEditorWindow; `showPicker()` brings up the source picker;
+// `editorDir()` is the folder open in the editor right now, or null.
+function registerLibraryIpc({ ipcMain, electron, library, openEditor, showPicker, editorDir = () => null }) {
   const { shell, dialog, BrowserWindow } = electron;
+
+  const sameFolder = (a, b) => {
+    try {
+      return fs.realpathSync(a) === fs.realpathSync(b);
+    } catch {
+      return false;
+    }
+  };
 
   ipcMain.handle('library:list', () => {
     const root = library.root();
@@ -246,6 +273,12 @@ function registerLibraryIpc({ ipcMain, electron, library, openEditor, showPicker
   // recording can't be trashed without the user saying so.
   ipcMain.handle('library:trash', async (e, id) => {
     const dir = library.resolve(id);
+    // The editor would go on saving (and exporting) into a folder that is now
+    // in the Trash, so it has to be closed first.
+    const open = editorDir();
+    if (open && sameFolder(open, dir)) {
+      throw new Error('This recording is open in the editor. Close the editor, then try again.');
+    }
     const { title } = library.list().find((r) => r.id === id) ?? { title: 'this recording' };
     const bin = process.platform === 'win32' ? 'Recycle Bin' : 'Trash';
     const owner = BrowserWindow.fromWebContents(e.sender);

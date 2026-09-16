@@ -1,5 +1,5 @@
 'use strict';
-/* global Response -- the fetch API's Response, built into Node */
+/* global Response, ReadableStream -- the fetch API's classes, built into Node */
 const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
@@ -185,6 +185,8 @@ test('automatic checks: only with the setting on, and at most once a day', () =>
   assert.strictEqual(shouldAutoCheck({ checkForUpdates: false, lastUpdateCheck: 0 }, now), false);
   assert.strictEqual(shouldAutoCheck({ checkForUpdates: true, lastUpdateCheck: now - 60_000 }, now), false);
   assert.strictEqual(shouldAutoCheck({ checkForUpdates: true, lastUpdateCheck: now - CHECK_INTERVAL_MS }, now), true);
+  // Saved while the clock was set years ahead: still checks.
+  assert.strictEqual(shouldAutoCheck({ checkForUpdates: true, lastUpdateCheck: now + 3 * CHECK_INTERVAL_MS }, now), true);
 });
 
 function harness({ platform = 'darwin', exists = () => false, routes, settings = {}, version = '0.2.0' }) {
@@ -280,4 +282,59 @@ test('Windows: a checksum mismatch ends in an error and nothing to install', asy
   assert.match(st.error, /checksum/);
   assert.strictEqual(h.updater.install({ relaunch: false }), false);
   assert.strictEqual(h.spawned.length, 0);
+});
+
+// ---- hangs and unfriendly errors ---------------------------------------------
+
+// A fetch that never answers unless aborted, like a network that drops packets.
+const hangingFetch = () => (_url, opts) => new Promise((_resolve, reject) => {
+  opts?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+});
+
+test('a check that gets no answer ends in an error instead of spinning forever', async () => {
+  const states = [];
+  const updater = createUpdater({
+    currentVersion: '0.2.0', platform: 'darwin', exists: () => false,
+    fetchImpl: hangingFetch(), getSettings: () => normalizeSettings({}), patchSettings: () => {},
+    onChange: (s) => states.push(s.status), timeoutMs: 50
+  });
+  const state = await updater.check();
+  assert.strictEqual(state.status, 'error');
+  assert.match(state.error, /took too long/);
+  assert.deepStrictEqual(states, ['checking', 'error']);
+  // Check now works again afterwards.
+  assert.strictEqual((await updater.check()).status, 'error');
+});
+
+test('a fetch that ignores the abort signal still times out', async () => {
+  const neverFetch = () => new Promise(() => {});
+  await assert.rejects(fetchLatestRelease(neverFetch, { timeoutMs: 30 }), /timed out/);
+});
+
+test('GitHub rate limits and outages read as plain sentences', async () => {
+  for (const [status, text] of [[403, /too many requests/], [429, /too many requests/], [404, /No released version/], [502, /isn’t answering/]]) {
+    const updater = createUpdater({
+      currentVersion: '0.2.0', platform: 'darwin', exists: () => false,
+      fetchImpl: fakeFetch({ [RELEASES_API]: status }), getSettings: () => normalizeSettings({}), patchSettings: () => {}
+    });
+    const state = await updater.check();
+    assert.strictEqual(state.status, 'error');
+    assert.match(state.error, text);
+  }
+});
+
+test('Windows: an installer download that stalls is discarded', async () => {
+  const dir = tmpDir();
+  const yml = formatLatestYml({ version: '0.3.0', file: 'Loupe-Setup-x64.exe', sha512: sha512(Buffer.from('x')), size: 1, releaseDate: 'now' });
+  const fetchImpl = async (url) => {
+    if (url === YML_URL) return new Response(yml);
+    // Sends one chunk, then nothing.
+    const body = new ReadableStream({ start(c) { c.enqueue(new Uint8Array([1, 2, 3])); } });
+    return new Response(body);
+  };
+  await assert.rejects(
+    downloadVerifiedInstaller({ release: { ...release(), version: '0.3.0', assets: release().assets.map((a) => ({ name: a.name, url: a.browser_download_url })) }, fetchImpl, dir, stallMs: 50 }),
+    /stopped/
+  );
+  assert.deepStrictEqual(fs.readdirSync(dir), []);
 });
