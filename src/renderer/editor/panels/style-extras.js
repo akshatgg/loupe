@@ -87,6 +87,7 @@ export function presetsSection(editor) {
   });
   nameInput.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { saveRow.hidden = true; saveBtn.hidden = false; }
+    if (e.key === 'Enter') { e.preventDefault(); saveRow.requestSubmit(); }
   });
 
   function render() {
@@ -170,7 +171,8 @@ export function picturesRow(editor, { onPick }) {
       own.classList.remove('has-picture');
     }
   }
-  return { el: h('div', { class: 'swatches pictures' }, ...buttons, own), buttons, own, update };
+  const el = h('div', {}, h('span', { class: 'swatch-caption' }, 'Pictures'), h('div', { class: 'swatches pictures' }, ...buttons, own));
+  return { el, buttons, own, update };
 }
 
 // ---------------------------------------------------------------- keystrokes

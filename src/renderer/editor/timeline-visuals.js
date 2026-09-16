@@ -24,6 +24,7 @@ export const TRANSITIONS = [
   { type: 'dip', label: 'Dip to black' }
 ];
 export const TRANSITION_LENGTHS = [0.25, 0.5, 1, 2];
+const LANE_PX = 28;
 
 // helpers: { x(t), timeAt(clientX, opts), pps(), beginDrag(e, handlers),
 //            snapPoints(), snap(t, points), showGuide(t|null), rootEl, scroller }
@@ -39,8 +40,11 @@ export function createVisualTracks({ store, player, editor, helpers: t }) {
   function renderAnnotations(p, layout) {
     const sel = store.selection;
     const pieces = annotationPieces(p, layout);
-    const lanes = Math.min(3, stackLanes(pieces));
-    const laneH = 100 / lanes;
+    // The track grows a lane for each annotation overlapping another.
+    const lanes = Math.min(4, stackLanes(pieces));
+    const height = `${8 + lanes * LANE_PX}px`;
+    track.style.height = height;
+    label.style.height = height;
     const els = pieces.map((piece) => {
       const a = piece.annotation;
       const lane = Math.min(lanes - 1, piece.lane);
@@ -49,7 +53,7 @@ export function createVisualTracks({ store, player, editor, helpers: t }) {
         dataset: { id: a.id, clip: String(piece.clipIndex) },
         style: {
           left: `${t.x(piece.outStart)}px`, width: `${Math.max(4, (piece.outEnd - piece.outStart) * t.pps())}px`,
-          top: `calc(${lane * laneH}% + 3px)`, height: `calc(${laneH}% - 6px)`
+          top: `${4 + lane * LANE_PX}px`, height: `${LANE_PX - 4}px`
         },
         title: `${annotationLabel(a)} — drag to move, drag the edges to change how long it shows`
       },

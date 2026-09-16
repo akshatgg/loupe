@@ -17,7 +17,7 @@ textarea.text-input { resize: vertical; display: block; }
 .btn.wide { width: 100%; margin-top: 10px; }
 
 /* ---- Style: pictures, presets, keyboard */
-.swatches.pictures { margin-top: 8px; }
+.swatch-caption { display: block; margin: 14px 0 8px; color: var(--ink-3); font-size: 12px; }
 .swatch-picture { background-color: var(--well); }
 .swatch-own { display: grid; place-items: center; background: var(--well); color: var(--ink-2); }
 .swatch-own:hover { color: var(--ink); }
@@ -95,7 +95,7 @@ textarea.text-input { resize: vertical; display: block; }
 .anno-inline:focus { outline: none; }
 
 /* ---- timeline: annotation track and joins */
-.lbl-annotations, .tl-annotations { height: 36px; }
+.lbl-annotations, .tl-annotations { height: 36px; transition: height .12s; }
 .tl-annotations::before {
   content: ""; position: absolute; inset: 3px 0; border-radius: 7px; background: rgba(255,255,255,.025);
 }
