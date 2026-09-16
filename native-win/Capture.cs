@@ -24,14 +24,16 @@ interface IDirect3DDxgiInterfaceAccess
 }
 
 // `loupe-native capture --source <display:N|window:N> --out <file.mp4> --mic <0|1>
-//   [--crop-x N --crop-y N --crop-w N --crop-h N]`
+//   [--system-audio <0|1>] [--crop-x N --crop-y N --crop-w N --crop-h N]`
 //
 // The Windows counterpart of Capture.swift: Windows.Graphics.Capture for the
 // pixels (without the cursor -- it is drawn at export, like on macOS), Media
 // Foundation's sink writer for a hardware-encoded H.264 MP4, and the
 // microphone into the same file. Messages:
-//   {"type":"started","clock"}  the first frame, on the QPC clock inputtap uses
-//   {"type":"progress","frames","bytes"}
+//   {"type":"started","clock","now"}  the first frame, on the QPC clock inputtap uses
+//   {"type":"progress","frames","bytes","now"}
+//   {"type":"system_audio","file"}  computer sound is being written (SystemAudio.cs)
+//   {"type":"warning","message"}    computer sound failed; the video carries on
 //   {"type":"stopped","duration"}
 //   {"type":"error","message"}
 // Crop values are physical pixels in global screen space (main.js converts
@@ -50,8 +52,9 @@ static class Capture
         var sourceId = Args.Get(argv, "--source");
         var outPath = Args.Get(argv, "--out");
         if (sourceId == null || outPath == null)
-            return Out.Fail("usage: capture --source <id> --out <path> --mic <0|1> [--crop-x N --crop-y N --crop-w N --crop-h N]");
+            return Out.Fail("usage: capture --source <id> --out <path> --mic <0|1> [--system-audio <0|1>] [--crop-x N --crop-y N --crop-w N --crop-h N]");
         bool withMic = Args.Get(argv, "--mic") == "1";
+        bool withSystemAudio = Args.Get(argv, "--system-audio") == "1";
 
         var parts = sourceId.Split(':');
         if (parts.Length != 2 || !ulong.TryParse(parts[1], out var handleValue))
@@ -83,7 +86,7 @@ static class Capture
         bool cropped = cx != null && cy != null && cw != null && ch != null;
 
         MediaFactory.MFStartup(true).CheckError();
-        using var session = new Session(outPath, withMic);
+        using var session = new Session(outPath, withMic, withSystemAudio);
         try
         {
             session.Start(parts[0] == "display", handle, origin,
@@ -106,7 +109,8 @@ static class Capture
         const double IdleRepaintInterval = 0.5; // see Capture.swift: same reasoning
 
         readonly string outPath;
-        readonly bool withMic;
+        readonly bool withMic, withSystemAudio;
+        SystemAudio? systemAudio;
         readonly object gate = new();
         readonly ManualResetEventSlim finished = new();
         int exitCode;
@@ -137,10 +141,11 @@ static class Capture
         IMFMediaSource? micSource;
         Thread? micThread;
 
-        public Session(string outPath, bool withMic)
+        public Session(string outPath, bool withMic, bool withSystemAudio)
         {
             this.outPath = outPath;
             this.withMic = withMic;
+            this.withSystemAudio = withSystemAudio;
         }
 
         public void Start(bool isDisplay, IntPtr handle, Win32.RECT origin, (double x, double y, double w, double h)? crop)
@@ -203,9 +208,31 @@ static class Capture
             capture = pool.CreateCaptureSession(item);
             try { capture.IsCursorCaptureEnabled = false; } catch { /* before 2004 */ }
             try { capture.IsBorderRequired = false; } catch { /* Windows 10: no yellow border to remove */ }
+            // Computer sound starts before the first frame so none is missed;
+            // SystemAudio drops what arrives before it.
+            if (withSystemAudio) StartSystemAudio();
             capture.StartCapture();
 
             idleTimer = new Timer(_ => RepaintIfIdle(), null, 500, 500);
+        }
+
+        void StartSystemAudio()
+        {
+            // Losing the computer sound is not worth losing the recording
+            // over: a warning, not an error (the same as Capture.swift).
+            try
+            {
+                var path = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(outPath))!, SystemAudio.FileName);
+                systemAudio = new SystemAudio(path, () => { lock (gate) return startClock; },
+                    message => Out.Emit(new { type = "warning", message }));
+                systemAudio.Start();
+            }
+            catch (Exception e)
+            {
+                systemAudio?.Dispose();
+                systemAudio = null;
+                Out.Emit(new { type = "warning", message = $"computer sound could not be recorded: {e.Message}" });
+            }
         }
 
         void CreateWriter()
@@ -358,7 +385,9 @@ static class Capture
                 {
                     startClock = clock;
                     micThread?.Start();
-                    Out.Emit(new { type = "started", clock });
+                    // `now` pairs this helper's clock with the recorder's
+                    // (src/main/clock-sync.js); here it is the same QPC base.
+                    Out.Emit(new { type = "started", clock, now = Clock.Now() });
                 }
                 lastFrameClock = clock;
                 WriteFrame(clock - startClock.Value);
@@ -367,7 +396,7 @@ static class Capture
                 {
                     long bytes = 0;
                     try { bytes = new FileInfo(outPath).Length; } catch { }
-                    Out.Emit(new { type = "progress", frames, bytes });
+                    Out.Emit(new { type = "progress", frames, bytes, now = Clock.Now() });
                 }
             }
         }
@@ -487,6 +516,8 @@ static class Capture
             micThread?.Join(1000);
 
             double duration = 0;
+            lock (gate) { if (startClock != null) duration = Clock.Now() - startClock.Value; }
+            try { systemAudio?.Finish(duration); } catch (Exception e) { Out.Emit(new { type = "warning", message = $"computer sound: {e.Message}" }); }
             lock (gate)
             {
                 if (startClock != null)
@@ -521,6 +552,7 @@ static class Capture
         public void Dispose()
         {
             try { writer?.Dispose(); } catch { }
+            try { systemAudio?.Dispose(); } catch { }
             try { micReader?.Dispose(); } catch { }
             try { micSource?.Dispose(); } catch { }
             staging?.Dispose();

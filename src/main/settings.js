@@ -41,8 +41,11 @@ const DEFAULT_SETTINGS = deepFreeze({
   // (and what a native helper can match on). null = the system default.
   microphone: null,
   camera: null,
+  recordCamera: false,      // the camera bubble; `camera` is which camera
   systemAudio: false,
-  showKeystrokes: false,
+  // Records shortcuts only (a key with a modifier, Esc, arrows...), never
+  // typing, so it is on unless turned off.
+  showKeystrokes: true,
   exportDefaults: { format: 'mp4', resolution: '1080p', quality: 'balanced' },
   checkForUpdates: true,
   lastUpdateCheck: 0,       // ms; written by updates.js, not the renderer
@@ -143,6 +146,7 @@ const VALIDATORS = {
   openAtLogin: isBool,
   microphone: validDevice,
   camera: validDevice,
+  recordCamera: isBool,
   systemAudio: isBool,
   showKeystrokes: isBool,
   exportDefaults: validExportDefaults,
@@ -159,7 +163,7 @@ const VALIDATORS = {
 // presets through presets:*, update bookkeeping only from updates.js -- so a
 // renderer can't point recordings at an arbitrary path or corrupt presets.
 const RENDERER_KEYS = [
-  'zoomTriggers', 'countdown', 'openAtLogin', 'microphone', 'camera', 'systemAudio',
+  'zoomTriggers', 'countdown', 'openAtLogin', 'microphone', 'camera', 'recordCamera', 'systemAudio',
   'showKeystrokes', 'exportDefaults', 'checkForUpdates', 'saveCrashReports'
 ];
 

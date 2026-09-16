@@ -47,4 +47,19 @@ button.icon svg { width: 16px; height: 16px; fill: #ef4444; }
 #recording .mic { opacity: .8; }
 #recording .warn { color: #fbbf24; font-size: 11px; }
 #recording .error { color: #fca5a5; font-size: 11px; }
-#recording #stop { margin-left: auto; }
+#recording #pause { margin-left: auto; }
+button.icon.plain svg { fill: #e8eaed; }
+
+/* Paused: the dot stops pulsing and turns amber, the timer dims. */
+.dot.paused { background: #fbbf24; animation: none; }
+#recording.paused .time { opacity: .55; }
+.pausedlabel { color: #fbbf24; font-weight: 600; }
+
+.note { color: #fbbf24; font-size: 11px; white-space: nowrap; margin-left: auto; }
+
+/* 3-2-1 */
+#countdown { display: flex; align-items: center; gap: 14px; height: 76px; }
+#countdown .count { font-size: 48px; font-weight: 600; width: 44px; text-align: center;
+                    font-variant-numeric: tabular-nums; color: #ef4444; }
+#countdown .countlabel { font-size: 13px; line-height: 1.4; }
+#countdown .hint { color: #9aa0a6; font-size: 11px; }

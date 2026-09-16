@@ -30,7 +30,8 @@ test('defaults for everything else are the quiet, safe choices', () => {
   assert.strictEqual(DEFAULT_SETTINGS.microphone, null);
   assert.strictEqual(DEFAULT_SETTINGS.camera, null);
   assert.strictEqual(DEFAULT_SETTINGS.systemAudio, false);
-  assert.strictEqual(DEFAULT_SETTINGS.showKeystrokes, false);
+  assert.strictEqual(DEFAULT_SETTINGS.showKeystrokes, true);
+  assert.strictEqual(DEFAULT_SETTINGS.recordCamera, false);
   assert.deepStrictEqual(DEFAULT_SETTINGS.exportDefaults, { format: 'mp4', resolution: '1080p', quality: 'balanced' });
   assert.strictEqual(DEFAULT_SETTINGS.checkForUpdates, true);
   assert.strictEqual(DEFAULT_SETTINGS.saveCrashReports, true);

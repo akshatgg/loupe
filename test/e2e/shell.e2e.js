@@ -480,7 +480,7 @@ async function run() {
 
   await check('the settings file stayed valid and complete', () => {
     const s = readSettings();
-    for (const key of ['zoomTriggers', 'countdown', 'openAtLogin', 'microphone', 'camera', 'systemAudio',
+    for (const key of ['zoomTriggers', 'countdown', 'openAtLogin', 'microphone', 'camera', 'recordCamera', 'systemAudio',
       'showKeystrokes', 'exportDefaults', 'checkForUpdates', 'saveCrashReports', 'presets', 'defaultPresetId']) {
       assert.ok(key in s, key);
     }
