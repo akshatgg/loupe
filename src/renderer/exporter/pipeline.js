@@ -1,7 +1,8 @@
 // One export, start to finish (docs/EDITOR-V2.md section 6): read and demux
 // every recording the timeline uses, mix the sound, then for each output frame
 // fetch the source picture, draw it with the same compositor as the editor
-// preview, encode, and mux. The muxed file comes out as positioned byte
+// preview, and encode and mux it -- H.264/HEVC + AAC into MP4, VP9 + Opus into
+// WebM, or 256-colour frames into a GIF. The file comes out as positioned byte
 // ranges through `write`, which the page hands to the main process.
 //
 //   exportProject(job, { write, progress, signal }) -> summary
@@ -10,20 +11,28 @@
 //   project,                       // v2 project (validated again here)
 //   sources: { [key]: { video, cursor, systemAudio } },   // file:// URLs or null
 //   background,                    // file:// URL of a background image, or null
-//   resolution, codec, quality, fps
+//   format, resolution, codec, quality, fps, sizeLimit, gifWidth, gifFps, dither
 // }
+//
+// With a size limit the video is encoded at the bitrate the limit allows; an
+// encoder that still overshoots gets another pass at a proportionally lower
+// bitrate, written over the first from byte 0 (main cuts the file to the
+// final pass's length, summary.bytes).
 
 import { loadProjectData } from '../../core/project.js';
 import { buildTimeline } from '../../core/timeline.js';
-import { drawFrame, exportSize } from '../../core/compose.js';
+import { drawFrame } from '../../core/compose.js';
+import { outputSize, outputFps, videoBitrate, MB } from '../../core/export-plan.js';
 import { parseCursorTrack } from '../../core/cursor.js';
 import { exportMix } from '../../core/audio/tracks.js';
 import { isWav, parseWav } from '../../core/audio/wav.js';
-import { Muxer, StreamTarget } from '../../vendor/mp4-muxer/mp4-muxer.mjs';
+import { Muxer as Mp4Muxer, StreamTarget as Mp4Target } from '../../vendor/mp4-muxer/mp4-muxer.mjs';
+import { Muxer as WebmMuxer, StreamTarget as WebmTarget } from '../../vendor/webm-muxer/webm-muxer.mjs';
 import { readFile, demux } from './demux.js';
 import { openVideoSource } from './video-source.js';
 import { decodeAudioTrack, encodeAudio } from './audio.js';
 import { chooseVideoConfig, AUDIO_RATE, AUDIO_CHANNELS, KEYFRAME_SECONDS } from './encode.js';
+import { createGifWriter } from './gif.js';
 
 const WRITE_CHUNK_BYTES = 8 * 1024 * 1024;
 const MAX_PENDING_WRITES = 4;
@@ -32,6 +41,11 @@ const PROGRESS_EVERY_MS = 100;
 // How far ahead of the video the sound may be written: players read a file
 // front to back, so the two are kept roughly side by side in it.
 const AUDIO_LEAD_US = 500000;
+// Extra passes allowed to get under a size limit, and how far under the
+// limit each retry aims.
+const LIMIT_RETRIES = 2;
+const RETRY_MARGIN = 0.93;
+const JOB_EXPORT_KEYS = ['format', 'resolution', 'codec', 'quality', 'fps', 'sizeLimit', 'gifWidth', 'gifFps', 'dither'];
 
 function labelOf(key, count) {
   return count > 1 ? `the recording "${key}"` : 'the recording';
@@ -46,7 +60,7 @@ async function loadImage(url) {
   return createImageBitmap(blob);
 }
 
-async function openSources(job, project, keys, report) {
+async function openSources(job, project, keys, report, { sound = true } = {}) {
   const opened = {};
   const decoded = { mic: {}, system: {} };
   for (const [i, key] of keys.entries()) {
@@ -63,6 +77,8 @@ async function openSources(job, project, keys, report) {
       cursor = parseCursorTrack(await readFile(files.cursor, `the cursor track of ${label}`).catch(() => new ArrayBuffer(0)));
     }
     opened[key] = { video, cursor };
+    // A GIF has no sound, so none is decoded.
+    if (!sound) continue;
     if (project.sources[key].mic && demuxed.audio && !project.audio.mic.muted) {
       decoded.mic[key] = await decodeAudioTrack(demuxed, label);
     }
@@ -77,54 +93,74 @@ async function openSources(job, project, keys, report) {
   return { opened, decoded };
 }
 
-export async function exportProject(job, { write, progress = () => {}, signal } = {}) {
-  const started = performance.now();
-  const project = loadProjectData(job.project);
-  const tl = buildTimeline(project);
-  const fps = job.fps ?? project.export.fps;
-  const plan = tl.framePlan(fps);
-  const { width, height } = exportSize(project, job.resolution ?? project.export.resolution);
-  const codec = job.codec ?? project.export.codec;
-  const quality = job.quality ?? project.export.quality;
-
-  const keys = [...new Set(project.clips.map((c) => c.source))];
-  const { opened, decoded } = await openSources(job, project, keys, progress);
-  checkAbort(signal);
-
-  const assets = {
-    cursors: Object.fromEntries(keys.map((k) => [k, opened[k].cursor])),
-    background: project.style.background.type === 'image' && job.background
-      ? await loadImage(job.background).catch(() => null) : null
-  };
-
-  progress({ phase: 'sound' });
-  const mix = exportMix(project, tl, decoded);
-  const audioChunks = mix ? await encodeAudio(mix, { signal }) : [];
-  checkAbort(signal);
-
-  const video = await chooseVideoConfig({ codec, width, height, fps, quality });
-
-  // Bytes to main, in order, with a little backpressure so a slow disk
-  // doesn't pile the whole file up in this page's memory.
-  let writing = Promise.resolve();
-  let pendingWrites = 0;
-  let failure = null;
-  const target = new StreamTarget({
-    chunked: true,
-    chunkSize: WRITE_CHUNK_BYTES,
-    onData: (data, position) => {
+// Bytes to main, in order, with a little backpressure so a slow disk doesn't
+// pile the whole file up in this page's memory. `end` is the file length
+// written so far.
+function createWriter(write) {
+  const state = {
+    writing: Promise.resolve(), pending: 0, failure: null, end: 0,
+    send(position, data) {
       const bytes = data.slice();
-      pendingWrites++;
-      writing = writing.then(() => write(position, bytes)).catch((e) => { failure ??= e; })
-        .finally(() => { pendingWrites--; });
+      state.end = Math.max(state.end, position + bytes.byteLength);
+      state.pending++;
+      state.writing = state.writing.then(() => write(position, bytes)).catch((e) => { state.failure ??= e; })
+        .finally(() => { state.pending--; });
+      return state.writing;
     }
-  });
-  const muxer = new Muxer({
-    target,
+  };
+  return state;
+}
+
+function createMuxer(format, { onData, video, width, height, fps, audio }) {
+  if (format === 'webm') {
+    return new WebmMuxer({
+      target: new WebmTarget({ chunked: true, chunkSize: WRITE_CHUNK_BYTES, onData }),
+      video: { codec: video.muxCodec, width, height, frameRate: fps },
+      audio: audio ? { codec: 'A_OPUS', sampleRate: AUDIO_RATE, numberOfChannels: AUDIO_CHANNELS } : undefined,
+      firstTimestampBehavior: 'offset'
+    });
+  }
+  return new Mp4Muxer({
+    target: new Mp4Target({ chunked: true, chunkSize: WRITE_CHUNK_BYTES, onData }),
     video: { codec: video.muxCodec, width, height, frameRate: fps },
-    audio: audioChunks.length ? { codec: 'aac', sampleRate: AUDIO_RATE, numberOfChannels: AUDIO_CHANNELS } : undefined,
+    audio: audio ? { codec: 'aac', sampleRate: AUDIO_RATE, numberOfChannels: AUDIO_CHANNELS } : undefined,
     fastStart: false,
     firstTimestampBehavior: 'offset'
+  });
+}
+
+// Draws output frames in order: onFrame(canvas, ctx, k) after each.
+async function renderFrames({ plan, opened, project, tl, fps, width, height, assets, signal, progress, readPixels }, onFrame) {
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: readPixels });
+  let lastReport = 0;
+  for (let k = 0; k < plan.length; k++) {
+    checkAbort(signal);
+    const { source, t } = plan[k];
+    const picture = await opened[source].video.frameAt(t);
+    drawFrame(ctx, {
+      project, tl, outT: k / fps, frames: { [source]: picture }, size: { width, height }, assets
+    });
+    await onFrame(canvas, ctx, k);
+    const now = performance.now();
+    if (now - lastReport > PROGRESS_EVERY_MS || k === plan.length - 1) {
+      lastReport = now;
+      progress({ phase: 'video', frame: k + 1, total: plan.length });
+    }
+  }
+}
+
+// One pass of a video format at `bitrate` -> { encoded, bytes, config, hardware }.
+async function encodeVideoPass(ctx) {
+  const { exp, fps, width, height, plan, audioChunks, write, bitrate, pass } = ctx;
+  const video = await chooseVideoConfig({
+    format: exp.format, codec: exp.codec, width, height, fps, quality: exp.quality,
+    bitrate, constant: Boolean(exp.sizeLimit)
+  });
+  const out = createWriter(write);
+  const muxer = createMuxer(exp.format, {
+    onData: (data, position) => out.send(position, data),
+    video, width, height, fps, audio: audioChunks.length > 0
   });
 
   let nextAudio = 0;
@@ -136,6 +172,7 @@ export async function exportProject(job, { write, progress = () => {}, signal } 
   };
 
   let encoded = 0;
+  let failure = null;
   const encoder = new VideoEncoder({
     output: (chunk, meta) => {
       try {
@@ -150,50 +187,110 @@ export async function exportProject(job, { write, progress = () => {}, signal } 
   });
   encoder.configure(video.config);
 
-  const canvas = new OffscreenCanvas(width, height);
-  const ctx = canvas.getContext('2d', { alpha: false });
   const frameUs = 1e6 / fps;
   const keyEvery = Math.max(1, Math.round(KEYFRAME_SECONDS * fps));
-  let lastReport = 0;
   const failed = (e) => new Error(`Couldn't encode the video (${e.message ?? e}).`);
+  const report = pass > 0
+    // A retry shows its progress as the second half of the bar.
+    ? (p) => ctx.progress(p.phase === 'video' ? { ...p, pass } : p)
+    : ctx.progress;
 
   try {
-    for (let k = 0; k < plan.length; k++) {
-      checkAbort(signal);
+    await renderFrames({ ...ctx, progress: report, readPixels: false }, async (canvas, _c, k) => {
       if (failure) throw failed(failure);
-      const { source, t } = plan[k];
-      const picture = await opened[source].video.frameAt(t);
-      drawFrame(ctx, {
-        project, tl, outT: k / fps, frames: { [source]: picture }, size: { width, height }, assets
-      });
       const frame = new VideoFrame(canvas, { timestamp: Math.round(k * frameUs), duration: Math.round(frameUs) });
       encoder.encode(frame, { keyFrame: k % keyEvery === 0 });
       frame.close();
-
-      while ((encoder.encodeQueueSize > MAX_ENCODE_QUEUE || pendingWrites > MAX_PENDING_WRITES) && !failure) {
+      while ((encoder.encodeQueueSize > MAX_ENCODE_QUEUE || out.pending > MAX_PENDING_WRITES) && !failure) {
         await new Promise((resolve) => setTimeout(resolve, 1));
       }
-      const now = performance.now();
-      if (now - lastReport > PROGRESS_EVERY_MS || k === plan.length - 1) {
-        lastReport = now;
-        progress({ phase: 'video', frame: k + 1, total: plan.length });
-      }
-    }
+    });
     await encoder.flush();
     if (failure) throw failed(failure);
     addAudioUpTo(Infinity);
     muxer.finalize();
-    await writing;
-    if (failure) throw failure;
+    await out.writing;
+    if (out.failure) throw out.failure;
   } finally {
     if (encoder.state !== 'closed') encoder.close();
+  }
+  return { encoded, bytes: out.end, config: video.config, hardware: video.hardware, frames: plan.length };
+}
+
+async function encodeGif(ctx) {
+  const { exp, fps, width, height, plan, write } = ctx;
+  const out = createWriter(write);
+  const gif = createGifWriter({
+    width, height, fps, dither: exp.dither,
+    write: (position, bytes) => out.send(position, bytes)
+  });
+  await renderFrames({ ...ctx, readPixels: true }, async (_canvas, c, k) => {
+    await gif.addFrame(c.getImageData(0, 0, width, height).data, k);
+    if (out.failure) throw out.failure;
+  });
+  const result = await gif.finish(plan.length);
+  await out.writing;
+  if (out.failure) throw out.failure;
+  return { encoded: result.frames, bytes: out.end, palettes: result.palettes, frames: plan.length, config: { codec: 'gif' }, hardware: false };
+}
+
+export async function exportProject(job, { write, progress = () => {}, signal } = {}) {
+  const started = performance.now();
+  const project = loadProjectData(job.project);
+  const exp = { ...project.export };
+  for (const key of JOB_EXPORT_KEYS) if (job[key] !== undefined) exp[key] = job[key];
+  const tl = buildTimeline(project);
+  const fps = outputFps(exp);
+  const plan = tl.framePlan(fps);
+  const { width, height } = outputSize(project, exp);
+  const gif = exp.format === 'gif';
+
+  const keys = [...new Set(project.clips.map((c) => c.source))];
+  const { opened, decoded } = await openSources(job, project, keys, progress, { sound: !gif });
+  checkAbort(signal);
+
+  try {
+    const assets = {
+      cursors: Object.fromEntries(keys.map((k) => [k, opened[k].cursor])),
+      background: project.style.background.type === 'image' && job.background
+        ? await loadImage(job.background).catch(() => null) : null
+    };
+    const ctx = { exp, project, tl, fps, plan, width, height, opened, assets, signal, progress, write };
+
+    let result;
+    let audioChunks = [];
+    let passes = 1;
+    if (gif) {
+      result = await encodeGif(ctx);
+    } else {
+      progress({ phase: 'sound' });
+      const mix = exportMix(project, tl, decoded);
+      audioChunks = mix ? await encodeAudio(mix, { signal, format: exp.format }) : [];
+      checkAbort(signal);
+      const audio = audioChunks.length > 0;
+      let bitrate = videoBitrate(exp, { width, height, fps, duration: tl.duration, audio });
+      result = await encodeVideoPass({ ...ctx, audioChunks, bitrate, pass: 0 });
+      const limit = exp.sizeLimit ? exp.sizeLimit * MB : Infinity;
+      while (result.bytes > limit && passes <= LIMIT_RETRIES) {
+        bitrate = Math.max(50000, Math.floor(bitrate * (limit / result.bytes) * RETRY_MARGIN));
+        result = await encodeVideoPass({ ...ctx, audioChunks, bitrate, pass: passes });
+        passes++;
+      }
+      if (result.bytes > limit) {
+        throw new Error(`The video came out at ${(result.bytes / MB).toFixed(1)} MB, over the ${exp.sizeLimit} MB limit. Try a smaller size or a bigger limit.`);
+      }
+      result.bitrate = bitrate;
+    }
+
+    const seconds = (performance.now() - started) / 1000;
+    return {
+      format: exp.format, frames: result.frames, encoded: result.encoded, width, height, fps, duration: tl.duration,
+      codec: result.config.codec, hardware: result.hardware, audio: audioChunks.length > 0,
+      bytes: result.bytes, passes, ...(result.bitrate ? { bitrate: result.bitrate } : {}),
+      ...(gif ? { palettes: result.palettes } : {}),
+      seconds, speed: seconds > 0 ? tl.duration / seconds : 0
+    };
+  } finally {
     for (const k of keys) opened[k].video.close();
   }
-
-  const seconds = (performance.now() - started) / 1000;
-  return {
-    frames: plan.length, encoded, width, height, fps, duration: tl.duration,
-    codec: video.config.codec, hardware: video.hardware, audio: audioChunks.length > 0,
-    seconds, speed: seconds > 0 ? tl.duration / seconds : 0
-  };
 }

@@ -53,6 +53,9 @@ contextBridge.exposeInMainWorld('loupe', {
   cancelExport: () => ipcRenderer.invoke('export:cancel'),
   // Shows the last exported video in Finder/Explorer.
   revealExport: () => ipcRenderer.invoke('export:reveal'),
+  // This recording's earlier exports that still exist, newest first:
+  // [{ file, name, format, width, height, duration, bytes, at }].
+  recentExports: () => ipcRenderer.invoke('export:recent'),
   // Returns a function that stops listening.
   onExportProgress: (cb) => {
     const listener = (_e, d) => cb(d);
