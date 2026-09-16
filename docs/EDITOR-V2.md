@@ -268,6 +268,28 @@ Quality `high | balanced | small`, plus "Fit a size limit" (for Slack/email:
 After export: Show in Finder/Explorer, Copy (file to clipboard), drag the file
 out of the editor (`webContents.startDrag`), Share link.
 
+How formats, limits and the dialog are wired: `core/export-plan.js` (pure)
+decides the output size (`outputSize`: videos by resolution, GIFs
+`gifWidth` wide in the same shape), frame rate, file name
+(`export-WxH.mp4|webm|gif`), the bitrate for a quality or `sizeLimit` (MB =
+1,000,000 bytes) and the dialog's "up to about" estimate and warnings.
+`project.export` gains `sizeLimit: null|MB, gifWidth: 480|720|960,
+gifFps: 10|15|20, dither: true`. WebM is VP9 (`vp09.00.<level>.08`) + Opus
+through vendored `webm-muxer`; the Opus delay is measured like AAC's. GIF
+(`exporter/gif.js` + pure `core/gif.js`, vendored `gifenc`): a 255-colour
+palette per scene (made again when the picture no longer fits it), optional
+4x4 ordered dithering, frame differencing (unchanged pixels are transparent
+over the kept frame, compared by palette colour so fades leave no ghosts),
+unchanged frames merged, delays rounded on the running total so they add up
+exactly. Size limits: the first pass uses the limit's bitrate with a keyframe
+every 10 s; an encoder that overshoots gets a lower-bitrate pass, then 30 fps,
+then 75% and 50% size; each pass overwrites from byte 0 and main truncates the
+file to `summary.bytes`. Main remembers finished exports in the recording's
+`exports.json` (`export:recent`, preload `recentExports()`). The dialog applies
+Settings' `exportDefaults` to a project whose export settings were never
+changed. Checks: `npm run test:e2e:export` (each format decoded from the
+outside, limits honoured, clipboard, the dialog with the share mock).
+
 ## 7. Recording additions (native helpers + recorder)
 
 - **System audio**: macOS `SCStreamConfiguration.capturesAudio` into
