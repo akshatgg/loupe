@@ -107,11 +107,19 @@ function registerShareIpc(ipcMain, {
 
   ipcMain.handle('share:status', () => service.status());
 
-  ipcMain.handle('share:upload', (event, filePath, details) => {
+  ipcMain.handle('share:upload', async (event, filePath, details) => {
     const sender = event.sender;
-    return service.upload(filePath, details, (progress) => {
-      if (!sender.isDestroyed()) sender.send('share:progress', progress);
-    });
+    // Closing the window that started an upload cancels it: nobody would see
+    // the link, and a 500 MB upload should not carry on out of sight.
+    const onClosed = () => service.cancel();
+    sender.once('destroyed', onClosed);
+    try {
+      return await service.upload(filePath, details, (progress) => {
+        if (!sender.isDestroyed()) sender.send('share:progress', progress);
+      });
+    } finally {
+      sender.removeListener('destroyed', onClosed);
+    }
   });
 
   ipcMain.handle('share:cancel', () => service.cancel());

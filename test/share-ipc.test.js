@@ -24,7 +24,10 @@ function fakeIpcMain() {
 }
 
 function fakeSender() {
-  return { sent: [], destroyed: false, isDestroyed() { return this.destroyed; }, send(c, d) { this.sent.push([c, d]); } };
+  const { EventEmitter } = require('node:events');
+  return Object.assign(new EventEmitter(), {
+    sent: [], destroyed: false, isDestroyed() { return this.destroyed; }, send(c, d) { this.sent.push([c, d]); }
+  });
 }
 
 test('checkExportedFile only lets exported media files through', () => {
@@ -64,6 +67,7 @@ test('share IPC uploads end to end, forwarding progress to the calling window', 
     const sender = fakeSender();
     const result = await ipcMain.invoke('share:upload', { sender }, file, { title: 'Export', width: 'wide' });
     assert.strictEqual(result.ok, true, JSON.stringify(result));
+    assert.strictEqual(sender.listenerCount('destroyed'), 0, 'no listener left on the window');
     assert.match(result.url, /^https:\/\/share\.test\/v\/[A-Za-z0-9_-]{16}$/);
     assert.ok(sender.sent.length >= 2);
     assert.ok(sender.sent.every(([c]) => c === 'share:progress'));
@@ -150,4 +154,31 @@ test('cleanDetails keeps only sensible values', () => {
   assert.deepStrictEqual(cleanDetails({ title: 'x'.repeat(200), width: 1920, height: 0, duration: -1 }),
     { title: 'x'.repeat(120), width: 1920, height: undefined, duration: undefined });
   assert.deepStrictEqual(cleanDetails('nope'), { title: '', width: undefined, height: undefined, duration: undefined });
+});
+
+test('closing the window that started an upload cancels it', async () => {
+  const ipcMain = fakeIpcMain();
+  const file = path.join(tmp, 'closing.mp4');
+  fs.writeFileSync(file, 'data');
+  let started;
+  const uploading = new Promise((resolve) => { started = resolve; });
+  const service = registerShareIpc(ipcMain, {
+    net: { isOnline: () => true },
+    client: {
+      status: async () => ({ enabled: true }),
+      upload: (f, d, { signal }) => new Promise((resolve, reject) => {
+        started();
+        signal.addEventListener('abort', () => reject(new ShareError('cancelled')));
+      })
+    }
+  });
+  const sender = fakeSender();
+  const pending = ipcMain.invoke('share:upload', { sender }, file);
+  await uploading;
+  assert.strictEqual(service.busy, true);
+  sender.destroyed = true;
+  sender.emit('destroyed');
+  assert.strictEqual((await pending).code, 'cancelled');
+  assert.strictEqual(service.busy, false);
+  assert.strictEqual(sender.listenerCount('destroyed'), 0, 'listener removed');
 });

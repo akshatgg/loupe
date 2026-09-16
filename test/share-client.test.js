@@ -12,7 +12,7 @@ const { createShareClient, ShareError, isNetworkError } = require('../src/main/s
 const { checkExportedFile } = require('../src/main/exported-file');
 const { startMockShareServer, verifyClientToken, RW_TOKEN, STORE_ID } = require('./fixtures/mock-share-server');
 
-const { AbortController } = globalThis;
+const { AbortController, ReadableStream, fetch } = globalThis;
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'loupe-share-'));
 test.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
@@ -168,6 +168,58 @@ test('cancel stops an upload in flight', async () => {
     await assert.rejects(clientFor(server).upload(makeFile('pre.mp4', 10), {}, { signal: controller.signal }),
       (err) => err.code === 'cancelled');
     assert.strictEqual(server.requests.length, 0);
+  });
+});
+
+test('a request that stops making progress is dropped and retried', async () => {
+  // The first PUT is never answered (a connection that silently died).
+  let hung = false;
+  const intercept = (r) => {
+    if (!hung && r.path === '/blob/') {
+      hung = true;
+      return { hang: true };
+    }
+    return undefined;
+  };
+  await withServer({ intercept }, async (server) => {
+    const file = makeFile('stall.mp4', 3 * 1024 * 1024);
+    const started = Date.now();
+    const result = await clientFor(server, { stallTimeoutMs: 300 }).upload(file);
+    assert.ok(Date.now() - started < 5000, 'recovers promptly');
+    assert.ok(server.blob.files.get(`shares/${result.id}/loupe-recording.mp4`).body.equals(fs.readFileSync(file.path)));
+    assert.deepStrictEqual(server.requests.filter((r) => r.path === '/blob/').map((r) => r.headers['x-api-blob-request-attempt']),
+      ['0', '1']);
+  });
+
+  // Never answered at all: gives up with a friendly error instead of hanging.
+  await withServer({ intercept: (r) => (r.path.startsWith('/blob') ? { hang: true } : undefined) }, async (server) => {
+    await assert.rejects(clientFor(server, { stallTimeoutMs: 200 }).upload(makeFile('dead.mp4', 1024 * 1024)),
+      (err) => err instanceof ShareError && err.code === 'offline');
+  });
+});
+
+test('a slow upload that keeps moving is not mistaken for a stall', async () => {
+  // fetch pulls the body slowly, the way it does over a slow connection.
+  const slowFetch = (url, init) => {
+    if (!(init.body instanceof ReadableStream)) return fetch(url, init);
+    const reader = init.body.getReader();
+    const body = new ReadableStream({
+      async pull(controller) {
+        await new Promise((r) => setTimeout(r, 40));
+        const { done, value } = await reader.read();
+        if (done) controller.close();
+        else controller.enqueue(value);
+      }
+    });
+    return fetch(url, { ...init, body });
+  };
+  await withServer({}, async (server) => {
+    const file = makeFile('slow.mp4', 1024 * 1024);
+    const started = Date.now();
+    const result = await clientFor(server, { stallTimeoutMs: 200, fetch: slowFetch }).upload(file);
+    assert.ok(Date.now() - started > 400, `took ${Date.now() - started} ms, well over the stall timeout`);
+    assert.ok(server.blob.files.get(`shares/${result.id}/loupe-recording.mp4`).body.equals(fs.readFileSync(file.path)));
+    assert.ok(server.requests.filter((r) => r.path === '/blob/').every((r) => r.headers['x-api-blob-request-attempt'] === '0'));
   });
 });
 

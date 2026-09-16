@@ -90,6 +90,31 @@ app.whenReady().then(async () => {
     check('cancel acknowledged', cancelled.cancel.cancelled === true);
     check('cancelled upload reports cancelled', cancelled.res.code === 'cancelled', JSON.stringify(cancelled.res));
 
+    // Closing the window mid-upload cancels the upload, so the next Share works.
+    const doomed = new BrowserWindow({
+      show: false,
+      webPreferences: { preload: path.join(__dirname, '..', '..', 'src', 'preload', 'preload.js') }
+    });
+    await doomed.loadURL('data:text/html,<title>closing</title>');
+    const mediaCount = () => [...server.blob.files.keys()].filter((k) => !k.endsWith('meta.json')).length;
+    const storedBefore = mediaCount();
+    doomed.webContents.executeJavaScript(`(() => {
+      const off = window.loupe.onShareProgress((p) => {
+        if (p.loaded > 0) { off(); document.title = 'progressed'; }
+      });
+      window.loupe.shareUpload(${JSON.stringify(bigFile)}, {});
+    })()`);
+    while (doomed.webContents.getTitle() !== 'progressed') await new Promise((r) => setTimeout(r, 20));
+    doomed.destroy();
+    const closedAt = Date.now();
+    let after;
+    do {
+      await new Promise((r) => setTimeout(r, 50));
+      after = await js(`window.loupe.shareUpload(${JSON.stringify(path.join(dir, 'missing.mp4'))}, {})`);
+    } while (after.code === 'busy' && Date.now() - closedAt < 5000);
+    check('closing the window cancels its upload', after.code === 'missing' && mediaCount() === storedBefore,
+      `${JSON.stringify(after)} after ${Date.now() - closedAt} ms`);
+
     const bad = await js('window.loupe.shareUpload("/etc/hosts")');
     check('non-export refused', bad.ok === false && bad.code === 'unsupported');
 

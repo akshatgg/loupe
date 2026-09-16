@@ -36,7 +36,7 @@ const nodeCrypto = require('node:crypto');
 const { ReadableStream } = require('node:stream/web');
 const { URLSearchParams } = require('node:url');
 
-const { AbortController, AbortSignal } = globalThis;
+const { AbortController, AbortSignal, DOMException } = globalThis;
 
 const DEFAULT_SITE_URL = 'https://loupeapp.vercel.app';
 const DEFAULT_BLOB_API_URL = 'https://vercel.com/api/blob';
@@ -50,6 +50,12 @@ const CHUNK_SIZE = 64 * 1024;
 const ATTEMPTS = 3;
 const STATUS_TIMEOUT_MS = 10_000;
 const HANDSHAKE_TIMEOUT_MS = 30_000;
+// A Blob request that makes no progress for this long is dropped and retried.
+// Without it a connection that silently dies (Wi-Fi switch, laptop sleep)
+// leaves the upload hanging with its progress bar frozen forever: fetch has
+// no timeout of its own, and a stalled socket reports no error for many
+// minutes. "Progress" is the body being pulled, then the response arriving.
+const STALL_TIMEOUT_MS = 60_000;
 
 const MESSAGES = {
   offline: 'You’re offline. Connect to the internet and try again.',
@@ -143,6 +149,7 @@ function sleep(ms, signal) {
  * @param {number} [opts.partSize]     multipart part size (tests use small parts)
  * @param {number} [opts.multipartOver] files larger than this use multipart
  * @param {number} [opts.retryDelayMs]
+ * @param {number} [opts.stallTimeoutMs] drop a Blob request idle this long
  */
 function createShareClient(opts = {}) {
   const siteUrl = (opts.siteUrl || DEFAULT_SITE_URL).replace(/\/+$/, '');
@@ -152,6 +159,7 @@ function createShareClient(opts = {}) {
   const partSize = opts.partSize || PART_SIZE;
   const multipartOver = opts.multipartOver ?? MULTIPART_OVER;
   const retryDelayMs = opts.retryDelayMs ?? 500;
+  const stallTimeoutMs = opts.stallTimeoutMs ?? STALL_TIMEOUT_MS;
 
   // Runs `fn`, turning whatever went wrong into a ShareError the UI can show.
   async function guard(signal, fn) {
@@ -247,9 +255,22 @@ function createShareClient(opts = {}) {
       for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
         if (attempt > 0) await sleep(retryDelayMs * attempt, signal);
         let sent = 0;
+        const attemptController = new AbortController();
+        const stop = () => attemptController.abort(signal.reason);
+        signal.addEventListener('abort', stop, { once: true });
+        let timer;
+        let settled = false;
+        const touch = (ms = stallTimeoutMs) => {
+          // fetch can still pull a chunk after it gave up on the request.
+          if (settled) return;
+          clearTimeout(timer);
+          timer = setTimeout(() => attemptController.abort(
+            new DOMException('The upload stopped making progress.', 'TimeoutError')), ms);
+        };
+        touch();
         const init = {
           method,
-          signal,
+          signal: attemptController.signal,
           headers: {
             authorization: `Bearer ${token.clientToken}`,
             'x-api-version': BLOB_API_VERSION,
@@ -262,7 +283,13 @@ function createShareClient(opts = {}) {
           }
         };
         if (body) {
-          init.body = countingStream(body, (n) => { sent += n; onBytes?.(sent); });
+          init.body = countingStream(body, (n) => {
+            sent += n;
+            // Once the last chunk is handed over, the OS may still be sending
+            // a few MB of it on a slow link before the service can answer.
+            touch(sent >= body.length ? stallTimeoutMs * 5 : stallTimeoutMs);
+            onBytes?.(sent);
+          });
           init.duplex = 'half';
           init.headers['x-content-length'] = String(body.length);
         } else if (json !== undefined) {
@@ -270,21 +297,23 @@ function createShareClient(opts = {}) {
           init.headers['content-type'] = 'application/json';
         }
         let res;
+        let resBody;
         try {
           res = await fetchImpl(`${blobApiUrl}${route}?${query}`, init);
+          touch();
+          resBody = res.ok ? await res.json() : await res.json().catch(() => undefined);
         } catch (err) {
           if (signal.aborted || !isNetworkError(err)) throw err;
           lastErr = err;
           onBytes?.(0);
           continue;
+        } finally {
+          settled = true;
+          clearTimeout(timer);
+          signal.removeEventListener('abort', stop);
         }
-        if (res.ok) return res.json();
-        let apiCode;
-        try {
-          apiCode = (await res.json())?.error?.code;
-        } catch {
-          apiCode = undefined;
-        }
+        if (res.ok) return resBody;
+        const apiCode = resBody?.error?.code;
         if (res.status >= 500) {
           lastErr = new Error(`Blob API ${res.status} ${apiCode ?? ''}`);
           onBytes?.(0);
