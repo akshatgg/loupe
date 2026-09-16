@@ -31,6 +31,9 @@ test('plain typing is never a shortcut', { skip }, () => {
   assert.strictEqual(label(KEY.TWO, SHIFT), '');
   assert.strictEqual(label(KEY.SPACE, 0), '');
   assert.strictEqual(label(KEY.SPACE, SHIFT), '');
+  // Delete on its own only corrects typing (and would count the characters).
+  assert.strictEqual(label(KEY.DELETE, 0), '');
+  assert.strictEqual(label(KEY.DELETE, SHIFT), '');
 });
 
 test('a key with Command, Control or Option is a shortcut, modifiers in menu order', { skip }, () => {
@@ -40,6 +43,7 @@ test('a key with Command, Control or Option is a shortcut, modifiers in menu ord
   assert.strictEqual(label(KEY.K, CONTROL | OPTION | SHIFT | COMMAND), '⌃⌥⇧⌘K');
   assert.strictEqual(label(KEY.SPACE, CONTROL), '⌃Space');
   assert.strictEqual(label(KEY.RETURN, OPTION), '⌥↩');
+  assert.strictEqual(label(KEY.DELETE, OPTION), '⌥⌫');
 });
 
 test('Shift does not turn a digit into its symbol', { skip }, () => {
@@ -51,7 +55,6 @@ test('command keys count on their own', { skip }, () => {
   assert.strictEqual(label(KEY.LEFT, 0), '←');
   assert.strictEqual(label(KEY.F1, 0), 'F1');
   assert.strictEqual(label(KEY.RETURN, 0), '↩');
-  assert.strictEqual(label(KEY.DELETE, 0), '⌫');
   assert.strictEqual(label(KEY.TAB, SHIFT), '⇧⇥');
 });
 

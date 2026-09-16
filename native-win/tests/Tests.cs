@@ -218,7 +218,9 @@ static void KeysStandalone()
     Assert(Label(0x25) == "Left", "Left");
     Assert(Label(0x70) == "F1", "F1");
     Assert(Label(0x87) == "F24", "F24");
-    Assert(Label(0x2E) == "Delete", "Delete");
+    Assert(Label(0x2E) == null, "Delete alone only corrects typing");
+    Assert(Label(0x08) == null, "Backspace alone only corrects typing");
+    Assert(Label(0x08, ctrl: true) == "Ctrl+Backspace", "Ctrl+Backspace");
     Assert(Label(0x09, shift: true) == "Shift+Tab", "Shift+Tab");
 }
 

@@ -73,16 +73,16 @@ final class TapState {
 // ---- keyboard shortcuts -----------------------------------------------------
 // Only presses that are clearly commands are reported: a key held with ⌘, ⌃
 // or ⌥, or one of the keys that is a command on its own (Esc, Tab, Return,
-// Delete, the arrows, function keys). Plain typing -- letters, digits,
-// punctuation, with or without Shift -- is never reported, so nothing typed
-// (a password, a message) ends up in a recording. Password fields also turn
+// the arrows, function keys). Plain typing -- letters, digits, punctuation,
+// with or without Shift, and Delete on its own, which only corrects typing
+// (and would show how many characters were typed) -- is never reported, so
+// nothing typed (a password, a message) ends up in a recording. Password fields also turn
 // on Secure Event Input, which hides every key from event taps anyway.
 
 // Keys that are commands on their own, by virtual key code, with the symbol
 // macOS menus use for them.
 let standaloneKeys: [Int: String] = [
     kVK_Escape: "⎋", kVK_Tab: "⇥", kVK_Return: "↩", kVK_ANSI_KeypadEnter: "⌤",
-    kVK_Delete: "⌫", kVK_ForwardDelete: "⌦",
     kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑", kVK_DownArrow: "↓",
     kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4", kVK_F5: "F5", kVK_F6: "F6",
     kVK_F7: "F7", kVK_F8: "F8", kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12",
@@ -92,7 +92,7 @@ let standaloneKeys: [Int: String] = [
 
 // Keys only worth naming as part of a shortcut.
 let namedKeys: [Int: String] = [
-    kVK_Space: "Space", kVK_Home: "↖", kVK_End: "↘", kVK_PageUp: "⇞", kVK_PageDown: "⇟"
+    kVK_Space: "Space", kVK_Delete: "⌫", kVK_ForwardDelete: "⌦", kVK_Home: "↖", kVK_End: "↘", kVK_PageUp: "⇞", kVK_PageDown: "⇟"
 ]
 
 // What the key prints with no modifiers, on the current keyboard layout, so

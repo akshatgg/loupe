@@ -6,8 +6,9 @@ namespace Loupe.Native;
 //
 // Only presses that are clearly commands are reported: a key held with Ctrl,
 // Alt or the Windows key, or a key that is a command on its own (Esc, Tab,
-// Enter, Backspace, Delete, the arrows, function keys). Plain typing --
-// letters, digits, punctuation, with or without Shift -- is never reported, so
+// Enter, the arrows, function keys). Plain typing --
+// letters, digits, punctuation, with or without Shift, and Backspace/Delete on
+// their own, which only correct typing -- is never reported, so
 // nothing typed (a password, a message) ends up in a recording. AltGr (which
 // Windows reports as Ctrl+right Alt) types characters on many keyboards, so a
 // printable key with AltGr and nothing else is typing too.
@@ -18,14 +19,15 @@ public static class Keys
     // Keys that are commands on their own.
     static readonly Dictionary<uint, string> Standalone = new()
     {
-        [0x1B] = "Esc", [0x09] = "Tab", [0x0D] = "Enter", [0x08] = "Backspace", [0x2E] = "Delete",
+        [0x1B] = "Esc", [0x09] = "Tab", [0x0D] = "Enter",
         [0x25] = "Left", [0x26] = "Up", [0x27] = "Right", [0x28] = "Down",
     };
 
     // Keys only worth naming as part of a shortcut.
     static readonly Dictionary<uint, string> Named = new()
     {
-        [0x20] = "Space", [0x24] = "Home", [0x23] = "End", [0x21] = "Page Up", [0x22] = "Page Down",
+        [0x20] = "Space", [0x08] = "Backspace", [0x2E] = "Delete",
+        [0x24] = "Home", [0x23] = "End", [0x21] = "Page Up", [0x22] = "Page Down",
         [0x2D] = "Insert", [0x2C] = "Print Screen", [0x13] = "Pause",
         [0x6A] = "Num *", [0x6B] = "Num +", [0x6D] = "Num -", [0x6E] = "Num .", [0x6F] = "Num /",
     };
