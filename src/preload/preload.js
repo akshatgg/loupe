@@ -1,5 +1,5 @@
 'use strict';
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('loupe', {
   // 'darwin' or 'win32': the picker and editor name keys the way the OS does.
@@ -76,5 +76,12 @@ contextBridge.exposeInMainWorld('loupe', {
   revealFile: (filePath) => ipcRenderer.invoke('file:reveal', filePath),
   prepareFileDrag: (filePath) => ipcRenderer.invoke('file:prepareDrag', filePath),
   // Call from dragstart (after preventDefault); the OS carries the file.
-  startFileDrag: (filePath) => { ipcRenderer.invoke('file:startDrag', filePath); }
+  startFileDrag: (filePath) => { ipcRenderer.invoke('file:startDrag', filePath); },
+  // Audio: voiceover takes and background music, saved into the project folder.
+  saveVoiceover: (take) => ipcRenderer.invoke('voiceover:save', take),
+  deleteVoiceover: (file) => ipcRenderer.invoke('voiceover:delete', { file }),
+  chooseMusic: () => ipcRenderer.invoke('music:choose'),
+  // A File dropped on the editor; only its path crosses to main, which copies it.
+  importMusicFile: (file) =>
+    ipcRenderer.invoke('music:import', webUtils.getPathForFile(file))
 });

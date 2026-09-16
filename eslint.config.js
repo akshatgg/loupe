@@ -89,7 +89,11 @@ module.exports = [
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: 'module',
-      globals: { console: 'readonly', structuredClone: 'readonly', URL: 'readonly' }
+      globals: {
+        console: 'readonly', structuredClone: 'readonly', URL: 'readonly',
+        globalThis: 'readonly', process: 'readonly', fetch: 'readonly',
+        WebAssembly: 'readonly', Blob: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly'
+      }
     },
     rules: {
       'no-unused-vars': 'error',

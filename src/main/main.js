@@ -17,6 +17,8 @@ const { createExportRunner, registerExportIpc } = require('./ipc/export');
 const { createProjectStore, registerProjectIpc } = require('./ipc/project');
 const { registerShareIpc } = require('./ipc/share');
 const { registerFileActionsIpc } = require('./ipc/fileActions');
+const { registerVoiceoverIpc } = require('./ipc/voiceover');
+const { registerMusicIpc } = require('./ipc/music');
 const {
   helperCommand, coordinateMapper, attachThumbnails
 } = require('./platform');
@@ -679,6 +681,10 @@ ipcMain.handle('record:stop', stopRecording);
 // Export follow-ups: share links, copy/drag/reveal the exported file.
 registerShareIpc(ipcMain);
 registerFileActionsIpc(ipcMain);
+
+// Audio files the editor adds to the open project (voiceover takes, music).
+registerVoiceoverIpc({ ipcMain, getProjectDir: () => editorDir });
+registerMusicIpc({ ipcMain, dialog, BrowserWindow, getProjectDir: () => editorDir });
 
 // Whether the Control+Shift+S stop-recording shortcut is actually held by
 // us. globalShortcut.register() returns false (not a rejection/throw) when
