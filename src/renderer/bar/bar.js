@@ -88,8 +88,9 @@ function renderRecording(d) {
   recordingEl.classList.toggle('paused', paused);
   document.getElementById('recDot').className = paused ? 'dot paused' : 'dot rec';
   document.getElementById('pausedLabel').hidden = !paused;
-  document.getElementById('pauseIcon').hidden = paused;
-  document.getElementById('resumeIcon').hidden = !paused;
+  // SVG elements have no `hidden` property: the attribute itself is toggled.
+  document.getElementById('pauseIcon').toggleAttribute('hidden', paused);
+  document.getElementById('resumeIcon').toggleAttribute('hidden', !paused);
   const keys = shortcutText(d.pauseShortcut);
   const label = paused ? 'Resume' : 'Pause';
   pauseBtn.title = keys ? `${label} (${keys})` : label;

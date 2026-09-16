@@ -11,6 +11,7 @@
     "dev": "electron . --enable-logging",
     "lint": "eslint .",
     "test": "eslint . && node --test 'test/**/*.test.js'",
+    "test:e2e:recording": "electron test/e2e/recording-ui.e2e.js && electron test/e2e/camera.e2e.js && node test/e2e/recording.e2e.js",
     "build:native": "bash packaging/build-native.sh",
     "dist:mac": "npm run build:native && electron-builder --mac --config electron-builder.config.js --publish never",
     "build:native:win": "dotnet publish native-win/Loupe.Native.csproj -c Release -o bin-win",
