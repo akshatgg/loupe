@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const {
-  validateExportOptions, buildJob, createExportRunner, registerExportIpc
+  validateExportOptions, buildJob, createExportRunner, registerExportIpc, recentExports, rememberExport
 } = require('../src/main/ipc/export');
 const { createProject, saveProject } = require('../src/main/project');
 
@@ -221,5 +221,51 @@ test('export:start flushes the pending project save first; export:reveal shows o
   assert.deepStrictEqual(order, ['flush', 'start']);
   assert.strictEqual(await handlers['export:reveal']({}, '/etc/passwd'), true);
   assert.deepStrictEqual(revealed, [result.file]);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('export options: formats, size limits and GIF settings', () => {
+  assert.deepStrictEqual(validateExportOptions({ format: 'gif', gifWidth: 480, gifFps: 10, dither: false }),
+    { resolution: undefined, codec: undefined, quality: undefined, fps: undefined, format: 'gif', gifWidth: 480, gifFps: 10, dither: false });
+  assert.strictEqual(validateExportOptions({ sizeLimit: 25 }).sizeLimit, 25);
+  assert.strictEqual(validateExportOptions({ sizeLimit: null }).sizeLimit, null);
+  assert.throws(() => validateExportOptions({ format: 'avi' }), /Unknown export format/);
+  assert.throws(() => validateExportOptions({ sizeLimit: 0 }), /size limit/);
+  assert.throws(() => validateExportOptions({ sizeLimit: '25' }), /size limit/);
+  assert.throws(() => validateExportOptions({ gifWidth: 1000 }), /GIF width/);
+  assert.throws(() => validateExportOptions({ gifFps: 60 }), /GIF frame rate/);
+  assert.throws(() => validateExportOptions({ dither: 1 }), /Dithering/);
+});
+
+test('a GIF job is named .gif at its own size', () => {
+  const dir = v1Dir('gif');
+  const { job, out } = buildJob(dir, { format: 'gif', gifWidth: 720 });
+  assert.strictEqual(job.format, 'gif');
+  assert.strictEqual(job.gifWidth, 720);
+  // 1440x900 is 1728x1080 at 1080p; 720 wide keeps the shape.
+  assert.strictEqual(out, path.join(dir, 'export-720x450.gif'));
+  assert.strictEqual(path.basename(buildJob(dir, { format: 'webm', resolution: '720p' }).out), 'export-1152x720.webm');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('recent exports: newest first, one entry per file, only files that exist, nothing outside the folder', () => {
+  const dir = tempDir('recent');
+  const a = path.join(dir, 'export-1x1.mp4');
+  const b = path.join(dir, 'export-2x2.gif');
+  fs.writeFileSync(a, 'aaaa');
+  fs.writeFileSync(b, 'bb');
+  assert.deepStrictEqual(recentExports(dir), []);
+  rememberExport(dir, { file: a, format: 'mp4', width: 1, height: 1, duration: 3, bytes: 4 }, { now: 1 });
+  rememberExport(dir, { file: b, format: 'gif', width: 2, height: 2, duration: 3, bytes: 2 }, { now: 2 });
+  rememberExport(dir, { file: a, format: 'mp4', width: 1, height: 1, duration: 3, bytes: 4 }, { now: 3 });
+  assert.deepStrictEqual(recentExports(dir).map((r) => [r.name, r.at, r.bytes]), [['export-1x1.mp4', 3, 4], ['export-2x2.gif', 2, 2]]);
+  assert.strictEqual(recentExports(dir)[0].file, a);
+  fs.rmSync(a);
+  assert.deepStrictEqual(recentExports(dir).map((r) => r.name), ['export-2x2.gif']);
+  // A hand-edited list can't point elsewhere.
+  fs.writeFileSync(path.join(dir, 'exports.json'), JSON.stringify([{ name: '../x.gif', format: 'gif' }, { name: 'export-2x2.gif', format: 'exe' }, 'junk']));
+  assert.deepStrictEqual(recentExports(dir), []);
+  fs.writeFileSync(path.join(dir, 'exports.json'), '{nope');
+  assert.deepStrictEqual(recentExports(dir), []);
   fs.rmSync(dir, { recursive: true, force: true });
 });
