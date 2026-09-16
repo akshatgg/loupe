@@ -115,6 +115,29 @@ module.exports = [
       eqeqeq: 'error'
     }
   },
+  // Captions (src/core/captions, the burn-in layer, src/renderer/captions):
+  // the page side and its module worker also use Worker and WebAudio/
+  // WebCodecs globals; these add to the core block above for those files.
+  {
+    files: ['src/core/captions/**/*.js', 'src/core/layers/captions.js', 'src/renderer/captions/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: {
+        self: 'readonly', window: 'readonly', globalThis: 'readonly', console: 'readonly',
+        fetch: 'readonly', URL: 'readonly', Worker: 'readonly', postMessage: 'readonly',
+        performance: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly',
+        AbortController: 'readonly', OfflineAudioContext: 'readonly', AudioDecoder: 'readonly',
+        EncodedAudioChunk: 'readonly'
+      }
+    },
+    rules: {
+      'no-unused-vars': 'error',
+      'no-undef': 'error',
+      'prefer-const': 'error',
+      eqeqeq: 'error'
+    }
+  },
   // The exporter window (src/renderer/exporter) is ES modules running in a
   // hidden, sandboxed page: browser and WebCodecs globals, no Node. The e2e
   // lab page is the same kind of page.

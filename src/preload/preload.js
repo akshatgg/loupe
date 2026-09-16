@@ -102,5 +102,20 @@ contextBridge.exposeInMainWorld('loupe', {
     stopped: (info) => ipcRenderer.invoke('camera:stopped', info),
     error: (info) => ipcRenderer.invoke('camera:error', info),
     onCommand: (cb) => ipcRenderer.on('camera:command', (_e, d) => cb(d))
+  },
+
+  // Captions: the speech model's one-time download and saving subtitles.
+  // Transcription itself runs in a worker in the page (renderer/captions).
+  captions: {
+    models: () => ipcRenderer.invoke('captions:models'),
+    ensureModel: (key) => ipcRenderer.invoke('captions:model-ensure', key),
+    cancelModel: (key) => ipcRenderer.invoke('captions:model-cancel', key),
+    removeModel: (key) => ipcRenderer.invoke('captions:model-remove', key),
+    onModelProgress: (cb) => {
+      const handler = (_e, d) => cb(d);
+      ipcRenderer.on('captions:model-progress', handler);
+      return () => ipcRenderer.removeListener('captions:model-progress', handler);
+    },
+    saveSubtitles: (payload) => ipcRenderer.invoke('captions:save-subtitles', payload)
   }
 });
