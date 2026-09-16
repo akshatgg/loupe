@@ -28,6 +28,7 @@ module.exports = [
   // doing permanently even though it is clean today.
   {
     files: ['src/renderer/**/*.js'],
+    ignores: ['src/renderer/exporter/**'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'script',
@@ -88,6 +89,29 @@ module.exports = [
       eqeqeq: 'error'
     }
   },
+  // The exporter window (src/renderer/exporter) is ES modules running in a
+  // hidden, sandboxed page: browser and WebCodecs globals, no Node.
+  {
+    files: ['src/renderer/exporter/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: {
+        window: 'readonly', document: 'readonly', console: 'readonly', fetch: 'readonly',
+        URL: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly',
+        performance: 'readonly', OffscreenCanvas: 'readonly', createImageBitmap: 'readonly',
+        VideoDecoder: 'readonly', VideoEncoder: 'readonly', VideoFrame: 'readonly',
+        AudioDecoder: 'readonly', AudioEncoder: 'readonly', AudioData: 'readonly',
+        EncodedVideoChunk: 'readonly', EncodedAudioChunk: 'readonly'
+      }
+    },
+    rules: {
+      'no-unused-vars': 'error',
+      'no-undef': 'error',
+      'prefer-const': 'error',
+      eqeqeq: 'error'
+    }
+  },
   // Local git worktrees of this repo are checked out under it; each lints itself.
-  { ignores: ['bin/', 'node_modules/', 'dist/', '.build-native/', 'web/node_modules/'] }
+  { ignores: ['src/vendor/', 'test/e2e/out/', 'bin/', 'node_modules/', 'dist/', '.build-native/', 'web/node_modules/'] }
 ];
