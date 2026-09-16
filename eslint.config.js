@@ -193,6 +193,18 @@ module.exports = [
                  Buffer: 'readonly', globalThis: 'readonly' }
     }
   },
+  // The editor's sound (audio-preview.js and its module worker, the
+  // voiceover recorder): Web Audio, workers and WebCodecs on top of the
+  // editor block above.
+  {
+    files: ['src/renderer/editor/**/*.js'],
+    languageOptions: {
+      globals: {
+        AudioContext: 'readonly', Worker: 'readonly', self: 'readonly',
+        setInterval: 'readonly', clearInterval: 'readonly'
+      }
+    }
+  },
   // Local git worktrees of this repo are checked out under it; each lints itself.
   { ignores: ['src/vendor/', 'test/e2e/out/', 'bin/', 'node_modules/', 'dist/', '.build-native/', 'web/node_modules/'] }
 ];

@@ -59,9 +59,9 @@ const CASES = [
     await seek(ed, 0.2);
     await ed.key('Space');
     await sleep(1000);
-    // The microphone plays along, on the same clock.
-    const sound = await ed.js(`(() => { const [mic] = window.__editor.player.audio.tracks.main;
-      return { paused: mic.el.paused, drift: mic.el.currentTime - window.__editor.store.tl.toSource(window.__editor.player.time).t }; })()`);
+    // The sound (the preview's mix) plays along, on the same clock.
+    const sound = await ed.js(`(() => { const a = window.__editor.player.audio;
+      return { paused: !a.playing, drift: a.position - window.__editor.player.time }; })()`);
     assert.strictEqual(sound.paused, false, 'the sound plays');
     assert.ok(Math.abs(sound.drift) < 0.25, `the sound is ${sound.drift.toFixed(3)} s off the picture`);
     await sleep(300);

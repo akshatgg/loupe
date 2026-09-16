@@ -391,3 +391,78 @@ kbd {
 .fatal-card { max-width: 440px; text-align: center; }
 .fatal-card h1 { font-size: 19px; margin: 16px 0 8px; }
 .fatal-card p { color: var(--ink-3); line-height: 1.5; margin: 0; }
+
+/* ---- audio (panels/audio.js, audio-preview.js, voiceover-session.js, timeline-audio.js) */
+.track-head { display: flex; align-items: center; gap: 9px; margin: 0 0 12px; }
+.track-icon {
+  width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent); flex-shrink: 0;
+}
+.track-name { flex: 1; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.track-head.muted-track .track-icon { background: var(--well); color: var(--ink-3); }
+.track-head.muted-track .track-name { color: var(--ink-3); }
+.mute-btn[aria-pressed="true"] { color: var(--red); }
+.panel-section .toggle { margin-top: 14px; }
+.music-empty .btn { width: 100%; }
+.music-empty .hint { text-align: center; margin-top: 8px; }
+.music-file {
+  display: flex; align-items: center; gap: 8px; padding: 6px 4px 6px 10px; margin-bottom: 12px;
+  border-radius: 8px; background: var(--well); color: #d7aefb;
+}
+.music-name { flex: 1; min-width: 0; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-file.bad .music-name { color: var(--red); }
+.record-btn { width: 100%; }
+.record-btn .icon { color: var(--red); }
+.take-list { margin-top: 10px; display: flex; flex-direction: column; gap: 2px; }
+.take-row { display: flex; align-items: center; gap: 2px; border-radius: 8px; }
+.take-row:hover { background: var(--raised); }
+.take-main {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; padding: 7px 8px; border: 0;
+  background: transparent; cursor: pointer; text-align: left; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.take-main .muted { overflow: hidden; text-overflow: ellipsis; }
+.take-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+.take-name { font-weight: 550; }
+.audio-status { display: flex; align-items: center; gap: 8px; margin: -4px 0 8px; color: var(--ink-3); font-size: 12px; }
+
+.audio-note {
+  position: absolute; top: 12px; right: 14px; display: flex; align-items: center; gap: 8px; padding: 5px 11px;
+  border-radius: 14px; background: rgba(24,24,27,.88); border: 1px solid var(--line-2); color: var(--ink-2);
+  font-size: 12px; pointer-events: none;
+}
+.audio-note-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: audio-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes audio-pulse { from { opacity: .35; } to { opacity: 1; } }
+
+.vo-overlay { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.vo-count {
+  width: 132px; height: 132px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(18,18,20,.82); border: 2px solid var(--accent); color: var(--ink);
+  font: 700 64px/1 var(--font); font-variant-numeric: tabular-nums; box-shadow: 0 20px 60px rgba(0,0,0,.5);
+}
+.vo-count.pop { animation: vo-pop .9s ease-out; }
+@keyframes vo-pop { from { transform: scale(1.25); opacity: .4; } 30% { transform: scale(1); opacity: 1; } }
+.vo-bar {
+  position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); pointer-events: auto;
+  display: flex; align-items: center; gap: 12px; padding: 7px 8px 7px 16px; border-radius: 24px;
+  background: rgba(24,24,27,.94); border: 1px solid var(--line-2); box-shadow: 0 12px 34px rgba(0,0,0,.5); white-space: nowrap;
+}
+.vo-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); animation: audio-pulse .8s ease-in-out infinite alternate; }
+.vo-clock { font-variant-numeric: tabular-nums; color: var(--ink-2); min-width: 34px; }
+.vo-stop { height: 30px; border-radius: 16px; }
+.vo-stop-square { width: 10px; height: 10px; border-radius: 2px; background: var(--red); }
+
+.drop-shade {
+  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: rgba(10,10,12,.62);
+  pointer-events: none;
+}
+.drop-card {
+  display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 40px; border-radius: 16px;
+  border: 2px dashed var(--accent); background: rgba(24,24,27,.94); color: var(--ink-2);
+}
+.drop-card .icon { color: #d7aefb; }
+.drop-card strong { color: var(--ink); font-size: 15px; }
+
+.lbl-audio, .tl-audio { height: 40px; }
+.tl-audio-canvas { position: sticky; left: 0; display: block; }

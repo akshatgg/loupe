@@ -13,6 +13,7 @@
 
 import * as P from '../../core/project.js';
 import { h, icon } from './ui.js';
+import { createAudioLane } from './timeline-audio.js';
 import {
   clipLayout, zoomPieces, speedPieces, sourceInClip, clipIndexAt, newZoomRange, movedZoom,
   resizedZoom, snap, snapPoints, insertionIndex, tickStep, formatTime, clamp
@@ -32,11 +33,17 @@ export function createTimeline({ root, store, player, editor }) {
   const playhead = h('div', { class: 'tl-playhead' }, h('div', { class: 'tl-knob' }));
   const guide = h('div', { class: 'tl-guide', hidden: true });
   const insert = h('div', { class: 'tl-insert', hidden: true });
-  const content = h('div', { class: 'tl-content' }, ruler, clipsTrack, zoomTrack, speedTrack, guide, insert, playhead);
+  // The sound strip under the clips (timeline-audio.js) draws itself.
+  const audioLane = createAudioLane({
+    store, player, editor,
+    view: { x: (t) => x(t), get pps() { return pps; }, get scroller() { return scroller; } }
+  });
+  const content = h('div', { class: 'tl-content' }, ruler, clipsTrack, audioLane.track, zoomTrack, speedTrack, guide, insert, playhead);
   const scroller = h('div', { class: 'tl-scroll' }, content);
   const labels = h('div', { class: 'tl-labels' },
     h('div', { class: 'tl-label lbl-ruler' }),
     h('div', { class: 'tl-label lbl-clips' }, icon('clips', { size: 15 }), 'Clips'),
+    audioLane.label,
     h('div', { class: 'tl-label lbl-zooms' }, icon('zoom', { size: 15 }), 'Zoom'),
     h('div', { class: 'tl-label lbl-speed' }, icon('speed', { size: 15 }), 'Speed'));
   const menu = h('div', { class: 'speed-menu', role: 'menu', hidden: true });
@@ -167,6 +174,7 @@ export function createTimeline({ root, store, player, editor }) {
     const endX = x(duration()) - left;
     ctx.fillStyle = 'rgba(232,234,237,0.35)';
     ctx.fillRect(Math.round(endX), 6, 1, 20);
+    audioLane.draw();
   }
 
   function movePlayhead(t) {
