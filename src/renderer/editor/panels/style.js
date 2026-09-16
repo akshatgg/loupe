@@ -1,9 +1,11 @@
-// Style: what's around the recording (background, padding, corners, shadow,
-// shape) and how the cursor looks. Every control is one undo step; a slider
-// dragged back and forth is one step too.
+// Style: presets, what's around the recording (background colour, gradient
+// or picture, padding, corners, shadow, shape), how the cursor looks and the
+// keyboard shortcut badges. Every control is one undo step; a slider dragged
+// back and forth is one step too.
 
 import { h, slider, toggle, segmented, section } from '../ui.js';
 import { setStyle } from '../../../core/project.js';
+import { presetsSection, picturesRow, keystrokesSection } from './style-extras.js';
 
 export const GRADIENTS = [
   { angle: 135, stops: ['#4f5bd5', '#962fbf'] },
@@ -62,6 +64,9 @@ export default {
     picker.addEventListener('input', () => edit({ background: { type: 'color', value: picker.value } }, 'style:colour'));
     picker.addEventListener('change', done);
     const custom = h('label', { class: 'swatch swatch-custom', title: 'Pick any colour' }, picker);
+    const pictures = picturesRow(editor, { onPick: (bg) => { edit({ background: bg }); done(); } });
+    const presets = presetsSection(editor);
+    const keys = keystrokesSection(editor);
 
     // ---- frame
     const padding = slider({
@@ -103,11 +108,13 @@ export default {
     const cursorOnly = [size, smooth, idle, highlight];
 
     container.append(
-      section('Background', h('div', { class: 'swatches' }, none, ...grads, ...cols, custom)),
+      presets.el,
+      section('Background', h('div', { class: 'swatches' }, none, ...grads, ...cols, custom), pictures.el),
       section('Frame', padding, radius, shadow),
       section('Shape', aspect),
       section('Cursor', showCursor, ...cursorOnly),
-      section('Clicks', clicks)
+      section('Clicks', clicks),
+      keys.el
     );
 
     function update() {
@@ -127,6 +134,8 @@ export default {
       highlight.set(s.cursor.highlight);
       clicks.set(s.cursor.clicks);
       for (const row of cursorOnly) row.classList.toggle('disabled', !s.cursor.show);
+      pictures.update();
+      keys.update();
     }
     update();
     return { update };

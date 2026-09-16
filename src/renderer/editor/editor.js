@@ -16,6 +16,8 @@ import { commandFor } from './shortcuts.js';
 import { PANELS, panelById } from './panels/index.js';
 import { h, icon } from './ui.js';
 import { clipLayout, newZoomRange, formatTime } from './timeline-math.js';
+import { newAnnotation } from './annotation-math.js';
+import { createAnnotationOverlay } from './annotation-overlay.js';
 
 const loupe = window.loupe;
 const $ = (id) => document.getElementById(id);
@@ -109,6 +111,17 @@ async function start() {
     store, player, core: P, platform: loupe.platform, toast,
     select(sel, { seek = false } = {}) {
       store.select(sel);
+      if (sel?.kind === 'annotation') {
+        showPanel('annotations');
+        const a = store.project.annotations.find((q) => q.id === sel.id);
+        const at = store.tl.toSource(player.time);
+        // Past its fade-in, so it's fully there to drag.
+        const onScreen = a && at.source === a.source && at.t >= a.start + 0.25 && at.t < a.end - 0.25;
+        if (seek && a && !onScreen) {
+          const t = store.tl.toOutput(a.source, Math.min((a.start + a.end) / 2, a.start + 0.3));
+          if (t !== null && t !== undefined) player.seek(t);
+        }
+      }
       if (sel?.kind === 'zoom') {
         showPanel('zoom');
         if (seek) {
@@ -124,6 +137,17 @@ async function start() {
       const next = store.apply((p) => P.addZoom(p, { ...range, level: 2, follow: true }));
       const added = next?.zooms.find((z) => !before.has(z.id));
       if (added) editor.select({ kind: 'zoom', id: added.id });
+      return added ?? null;
+    },
+    // A new annotation at the playhead, selected and ready to drag into place.
+    addAnnotation(type) {
+      const draft = newAnnotation(store.project, clipLayout(store.project, store.tl), player.time, type);
+      if (!draft) return null;
+      player.pause();
+      const before = new Set(store.project.annotations.map((a) => a.id));
+      const next = store.apply((p) => P.addAnnotation(p, draft));
+      const added = next?.annotations.find((a) => !before.has(a.id));
+      if (added) editor.select({ kind: 'annotation', id: added.id }, { seek: true });
       return added ?? null;
     },
     addZoomAtPlayhead() {
@@ -163,6 +187,7 @@ async function start() {
   // ---- timeline, transport, top bar
 
   const timeline = createTimeline({ root: $('timeline'), store, player, editor });
+  const overlay = createAnnotationOverlay({ canvas: $('preview'), stage: $('stage'), store, player, editor });
   const exportDialog = createExportDialog({ store, loupe, player, beforeExport: () => saver.flush() });
   const cheat = createCheatSheet(loupe.platform);
 
@@ -187,7 +212,7 @@ async function start() {
   function deleteSelection() {
     const sel = store.selection;
     if (!sel) {
-      toast('Select a clip, zoom or speed change first.');
+      toast('Select a clip, zoom, speed change or annotation first.');
       return;
     }
     if (sel.kind === 'clip') {
@@ -198,6 +223,8 @@ async function start() {
       store.apply((p) => P.deleteClip(p, sel.id));
     } else if (sel.kind === 'zoom') {
       store.apply((p) => P.removeZoom(p, sel.id));
+    } else if (sel.kind === 'annotation') {
+      store.apply((p) => P.removeAnnotation(p, sel.id));
     } else if (sel.kind === 'speed') {
       store.apply((p) => P.paintSpeed(p, { source: sel.source, start: sel.start, end: sel.end, rate: 1 }));
     }
@@ -296,7 +323,7 @@ async function start() {
   setSaveState(loaded.migrated ? 'Opened from an older version' : 'All changes saved');
 
   // For the end-to-end tests (test/e2e/editor.js), which drive this page.
-  window.__editor = { store, player, timeline, exportDialog, cheat, editor, actions, saver };
+  window.__editor = { store, player, timeline, exportDialog, cheat, editor, actions, saver, overlay };
   document.body.dataset.ready = 'true';
 }
 

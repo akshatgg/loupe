@@ -1,0 +1,129 @@
+/* The editor's visual features: annotations (panel, preview handles, timeline
+   track), transitions on clip joins, the Webcam panel, background pictures
+   and presets. Same palette as editor.css. */
+:root {
+  --note: #c58af9;
+  --note-soft: rgba(197, 138, 249, .2);
+}
+
+/* ---- shared bits */
+.text-input {
+  width: 100%; min-height: 32px; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--line-2);
+  background: var(--well); color: var(--ink); font: 13px/1.4 var(--font); user-select: text;
+}
+.text-input:focus { outline: none; border-color: var(--accent); }
+textarea.text-input { resize: vertical; display: block; }
+.btn.small { height: 28px; padding: 0 10px; font-size: 12px; }
+.btn.wide { width: 100%; margin-top: 10px; }
+
+/* ---- Style: pictures, presets, keyboard */
+.swatches.pictures { margin-top: 8px; }
+.swatch-picture { background-color: var(--well); }
+.swatch-own { display: grid; place-items: center; background: var(--well); color: var(--ink-2); }
+.swatch-own:hover { color: var(--ink); }
+.swatch-own.has-picture .icon { opacity: 0; }
+
+.preset-list { display: flex; flex-direction: column; gap: 2px; }
+.preset-list .hint { margin: 0; }
+.preset-row { display: flex; align-items: center; gap: 2px; border-radius: 8px; }
+.preset-row:hover { background: var(--raised); }
+.preset-apply {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 0;
+  background: transparent; cursor: pointer; text-align: left;
+}
+.preset-swatch { width: 26px; height: 18px; border-radius: 5px; flex-shrink: 0; box-shadow: inset 0 0 0 1px rgba(255,255,255,.1); }
+.preset-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-default { color: var(--ink-3); }
+.preset-default.on { color: #fdd663; }
+.preset-default.on path { fill: currentColor; }
+.preset-save { display: flex; gap: 6px; margin-top: 10px; }
+.preset-save .text-input { flex: 1; min-width: 0; height: 28px; min-height: 28px; padding: 4px 8px; }
+
+/* ---- Webcam panel */
+.shape-icon { display: block; width: 13px; height: 13px; border: 1.5px solid currentColor; }
+.shape-icon.circle { border-radius: 50%; }
+.shape-icon.rounded { border-radius: 4px; }
+.corner-picker {
+  position: relative; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%;
+  aspect-ratio: 16 / 9; padding: 8px; border-radius: 10px; background: var(--well);
+}
+.corner-btn {
+  display: flex; padding: 8px; border: 1px dashed transparent; border-radius: 7px; background: transparent; cursor: pointer;
+}
+.corner-btn:hover { border-color: var(--line-2); }
+.corner-btn[data-corner^="top"] { align-items: flex-start; }
+.corner-btn[data-corner^="bottom"] { align-items: flex-end; }
+.corner-btn[data-corner$="left"] { justify-content: flex-start; }
+.corner-btn[data-corner$="right"] { justify-content: flex-end; }
+.corner-dot { width: 22px; height: 22px; border-radius: 50%; background: var(--line-2); transition: background .12s; }
+.corner-btn:hover .corner-dot { background: var(--ink-3); }
+.corner-btn[aria-pressed="true"] .corner-dot { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* ---- Annotations panel */
+.add-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.add-tile {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 64px;
+  padding: 8px 4px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--raised);
+  color: var(--ink-2); cursor: pointer; font-size: 11.5px; text-align: center;
+}
+.add-tile:hover { background: var(--hover); color: var(--ink); border-color: #4a4c54; }
+.add-tile .icon { color: var(--note); }
+.anno-top > .hint { margin: 0 0 12px; }
+.anno-top .panel-section:first-of-type { border-top: 0; padding-top: 0; }
+.anno-text { min-height: 56px; }
+.swatches.colours { grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.swatch.small { border-radius: 50%; }
+.anno-icon { display: grid; place-items: center; width: 20px; color: var(--note); }
+.anno-row span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- handles on the preview */
+.anno-overlay { position: absolute; z-index: 3; }
+.anno-frame {
+  position: absolute; pointer-events: none; border: 1.5px dashed var(--accent); border-radius: 4px;
+  box-shadow: 0 0 0 1px rgba(0,0,0,.35);
+}
+.anno-frame.kind-arrow { border: 0; box-shadow: none; }
+.anno-handle {
+  position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
+  background: #fff; border: 2px solid var(--accent); box-shadow: 0 1px 4px rgba(0,0,0,.5);
+}
+.anno-inline {
+  position: absolute; z-index: 4; padding: 6px 10px; border-radius: 8px; border: 2px solid var(--accent);
+  background: rgba(24,24,27,.96); color: #fff; font: 600 16px/1.3 var(--font); text-align: center; resize: none;
+  user-select: text; box-shadow: 0 10px 30px rgba(0,0,0,.5);
+}
+.anno-inline:focus { outline: none; }
+
+/* ---- timeline: annotation track and joins */
+.lbl-annotations, .tl-annotations { height: 36px; }
+.tl-annotations::before {
+  content: ""; position: absolute; inset: 3px 0; border-radius: 7px; background: rgba(255,255,255,.025);
+}
+.anno-bar {
+  position: absolute; border-radius: 6px; cursor: grab; overflow: hidden; min-height: 8px;
+  background: var(--note-soft); border: 1px solid rgba(197, 138, 249, .55); color: #ecd9fd;
+}
+.anno-bar.kind-blur { background: rgba(154, 160, 166, .22); border-color: rgba(154, 160, 166, .6); color: var(--ink); }
+.anno-bar.kind-title { background: rgba(253, 214, 99, .18); border-color: rgba(253, 214, 99, .55); color: #feefc3; }
+.anno-bar:hover { filter: brightness(1.15); }
+.anno-bar.selected { background: var(--note); border-color: var(--note); color: #1f0d33; }
+.anno-bar.kind-blur.selected { background: #bdc1c6; border-color: #bdc1c6; color: #202124; }
+.anno-bar.kind-title.selected { background: #fdd663; border-color: #fdd663; color: #2b1f00; }
+.anno-bar-label {
+  position: absolute; inset: 0 8px; display: flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; pointer-events: none;
+}
+.anno-bar .handle { width: 7px; }
+.anno-bar .handle:hover, .anno-bar.selected .handle { background: rgba(255,255,255,.2); }
+
+.tl-joins { position: absolute; left: 0; right: 0; pointer-events: none; z-index: 4; }
+.tl-join {
+  position: absolute; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; padding: 0; border-radius: 50%;
+  display: grid; place-items: center; pointer-events: auto; cursor: pointer;
+  background: #2a2b30; border: 1px solid var(--line-2); color: var(--ink-3);
+  box-shadow: 0 2px 6px rgba(0,0,0,.45); transition: transform .1s;
+}
+.tl-join:hover { transform: scale(1.12); color: var(--ink); border-color: var(--ink-3); }
+.tl-join.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.tl-join.open { box-shadow: 0 0 0 3px var(--accent-soft), 0 2px 6px rgba(0,0,0,.45); }
+.join-menu .menu-sep { width: 1px; align-self: stretch; margin: 3px 4px; background: var(--line-2); }

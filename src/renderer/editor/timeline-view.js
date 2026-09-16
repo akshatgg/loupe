@@ -4,6 +4,8 @@
 //   Zoom   drag across empty space to add one, drag one to move it, drag its
 //          edges to change its length, double-click to open its settings
 //   Speed  drag across a stretch, then pick a speed from the little menu
+//   Notes  annotations, and the transition buttons on each join between
+//          clips (timeline-visuals.js)
 //
 // Everything is laid out in output time (timeline-math.js). Drags edit from
 // the project as it was when the drag began, so the pointer always means the
@@ -17,6 +19,7 @@ import {
   clipLayout, zoomPieces, speedPieces, sourceInClip, clipIndexAt, newZoomRange, movedZoom,
   resizedZoom, snap, snapPoints, insertionIndex, tickStep, formatTime, clamp
 } from './timeline-math.js';
+import { createVisualTracks } from './timeline-visuals.js';
 
 const PAD = 16;           // px before 0:00 and after the end
 const SNAP_PX = 8;
@@ -29,18 +32,28 @@ export function createTimeline({ root, store, player, editor }) {
   const clipsTrack = h('div', { class: 'tl-track tl-clips', 'aria-label': 'Clips' });
   const zoomTrack = h('div', { class: 'tl-track tl-zooms', 'aria-label': 'Zooms' });
   const speedTrack = h('div', { class: 'tl-track tl-speed', 'aria-label': 'Speed' });
+  const visuals = createVisualTracks({
+    store, player, editor,
+    helpers: {
+      x: (t) => x(t), pps: () => pps, timeAt: (cx, o) => timeAt(cx, o), beginDrag: (e, hs) => beginDrag(e, hs),
+      snapPoints: () => snapPoints(store.project, clipLayout(store.project, store.tl), { playhead: player.time }),
+      snap: (v, points) => snap(v, points, SNAP_PX / pps), snapped: (v, points) => snapped(v, points),
+      showGuide: (v) => showGuide(v), rootEl: root
+    }
+  });
   const playhead = h('div', { class: 'tl-playhead' }, h('div', { class: 'tl-knob' }));
   const guide = h('div', { class: 'tl-guide', hidden: true });
   const insert = h('div', { class: 'tl-insert', hidden: true });
-  const content = h('div', { class: 'tl-content' }, ruler, clipsTrack, zoomTrack, speedTrack, guide, insert, playhead);
+  const content = h('div', { class: 'tl-content' }, ruler, clipsTrack, zoomTrack, speedTrack, visuals.track, visuals.joins, guide, insert, playhead);
   const scroller = h('div', { class: 'tl-scroll' }, content);
   const labels = h('div', { class: 'tl-labels' },
     h('div', { class: 'tl-label lbl-ruler' }),
     h('div', { class: 'tl-label lbl-clips' }, icon('clips', { size: 15 }), 'Clips'),
     h('div', { class: 'tl-label lbl-zooms' }, icon('zoom', { size: 15 }), 'Zoom'),
-    h('div', { class: 'tl-label lbl-speed' }, icon('speed', { size: 15 }), 'Speed'));
+    h('div', { class: 'tl-label lbl-speed' }, icon('speed', { size: 15 }), 'Speed'),
+    visuals.label);
   const menu = h('div', { class: 'speed-menu', role: 'menu', hidden: true });
-  root.replaceChildren(labels, scroller, menu);
+  root.replaceChildren(labels, scroller, menu, visuals.menu);
 
   let pps = 50;
   let fitted = true;
@@ -134,6 +147,7 @@ export function createTimeline({ root, store, player, editor }) {
     renderClips(p, layout);
     renderZooms(p, layout);
     renderSpeed(p, layout);
+    visuals.render(p, layout, clipsTrack);
     movePlayhead(player.time);
     drawRuler();
   }
@@ -418,6 +432,8 @@ export function createTimeline({ root, store, player, editor }) {
 
   content.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
+    if (visuals.pointerdown(e)) return;
+    visuals.closeMenu();
     const clip = e.target.closest('.clip');
     const zoom = e.target.closest('.zoom');
     const speed = e.target.closest('.speed');
@@ -438,6 +454,7 @@ export function createTimeline({ root, store, player, editor }) {
   content.addEventListener('pointerup', finish);
   content.addEventListener('pointercancel', finish);
   content.addEventListener('dblclick', (e) => {
+    if (visuals.dblclick(e)) return;
     const zoom = e.target.closest('.zoom');
     if (!zoom) return;
     editor.select({ kind: 'zoom', id: zoom.dataset.id });
@@ -474,8 +491,9 @@ export function createTimeline({ root, store, player, editor }) {
     zoomIn: () => setScale(pps * 1.5),
     zoomOut: () => setScale(pps / 1.5),
     fit: () => { fitted = true; setScale(fitPps()); scroller.scrollLeft = 0; },
-    closeMenu,
-    get menuOpen() { return !menu.hidden; },
+    closeMenu: () => { closeMenu(); visuals.closeMenu(); },
+    get menuOpen() { return !menu.hidden || visuals.menuOpen; },
+    visuals,
     get pxPerSecond() { return pps; },
     // For tests: the pixel x (in client coordinates) of output time t.
     clientX: (t) => content.getBoundingClientRect().left + x(t),
