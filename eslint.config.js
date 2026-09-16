@@ -2,7 +2,7 @@
 module.exports = [
   {
     files: ['**/*.js'],
-    ignores: ['src/renderer/**', 'web/**'],
+    ignores: ['src/renderer/**', 'web/**', 'src/core/**'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'commonjs',
@@ -71,5 +71,23 @@ module.exports = [
       eqeqeq: 'error'
     }
   },
+  // The shared core (src/core, docs/EDITOR-V2.md) is ES modules used by
+  // main, the renderer windows and the tests alike, so it may only lean on
+  // what every one of those has: no DOM, no Node APIs.
+  {
+    files: ['src/core/**/*.js', 'test/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: { console: 'readonly', structuredClone: 'readonly', URL: 'readonly' }
+    },
+    rules: {
+      'no-unused-vars': 'error',
+      'no-undef': 'error',
+      'prefer-const': 'error',
+      eqeqeq: 'error'
+    }
+  },
+  // Local git worktrees of this repo are checked out under it; each lints itself.
   { ignores: ['bin/', 'node_modules/', 'dist/', '.build-native/', 'web/node_modules/'] }
 ];

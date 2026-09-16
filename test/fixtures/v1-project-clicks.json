@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "source": {
+    "kind": "display",
+    "id": "display:1",
+    "title": "Display 1470x956",
+    "width": 1470,
+    "height": 956,
+    "originX": 0,
+    "originY": 0
+  },
+  "capture": {
+    "file": "raw.mov",
+    "fps": 60,
+    "duration": 3.456151583348401,
+    "hasMicTrack": true
+  },
+  "zoomKeyframes": [],
+  "cursorTrack": "cursor.bin",
+  "clicks": [
+    {
+      "t": 3.322465250035748,
+      "x": 436.38671875,
+      "y": 93.0859375,
+      "button": "left"
+    }
+  ],
+  "speedSegments": [],
+  "voiceover": [],
+  "settings": {
+    "preserveVoicePitch": true,
+    "clickHighlights": true,
+    "showCursor": true,
+    "cursorSmoothing": true,
+    "rampMs": 200
+  },
+  "export": {
+    "resolution": "1080p",
+    "fps": 60,
+    "codec": "h264"
+  },
+  "recordedZoomKeyframes": [],
+  "removedZooms": []
+}
