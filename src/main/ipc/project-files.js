@@ -15,10 +15,12 @@ function requireProjectDir(getProjectDir) {
 }
 
 // `rel` must be a plain relative path under `subdir` (e.g. "music/song.mp3"):
-// no absolute paths, no "..", no backslashes, nothing outside the folder.
+// no absolute paths, no "..", no backslashes, nothing outside the folder. No
+// colons either: on Windows "voiceover/C:take.webm" is drive-relative and
+// quietly names a different file ("take.webm"), and "a:b" is an NTFS stream.
 function resolveProjectFile(projectDir, subdir, rel) {
   if (typeof rel !== 'string' || rel.length === 0 || rel.length > 512
-      || rel.includes('\\') || rel.includes('\0') || path.isAbsolute(rel)) {
+      || rel.includes('\\') || rel.includes('\0') || rel.includes(':') || path.isAbsolute(rel)) {
     throw new Error('Invalid file path.');
   }
   const parts = rel.split('/');

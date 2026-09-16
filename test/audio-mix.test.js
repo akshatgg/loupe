@@ -162,3 +162,12 @@ test('mix speed', (t) => {
   const ms = performance.now() - t0;
   t.diagnostic(`mix (mono voice + stereo 44.1 kHz music with resampling and a gain curve): ${((seconds * 1000) / ms).toFixed(0)}x realtime`);
 });
+
+test('a volume that is not a number (hand-edited project) does not poison the mix', () => {
+  const x = new Float32Array(SR).fill(0.25);
+  for (const volume of ['0.5', NaN, null, Infinity, -2]) {
+    const { channels: [L] } = mixTracks([{ channels: [x], sampleRate: SR, volume }]);
+    assert.ok(L.every(Number.isFinite), `volume ${volume}`);
+    assert.ok(peak([L]) <= 0.25 + 1e-9, `volume ${volume}`);
+  }
+});

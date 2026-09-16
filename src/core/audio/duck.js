@@ -48,7 +48,7 @@ export function duckingCurve(voiceTracks, duration, {
   const steps = Math.max(1, Math.ceil(duration * rate) + 1);
   const talking = new Uint8Array(steps);
   for (const t of voiceTracks) {
-    if (!t || t.muted || (t.volume ?? 1) === 0) continue;
+    if (!t || t.muted || t.volume === 0) continue;
     const r = t.sampleRate;
     const from = Math.max(0, Math.round((t.offset ?? 0) * r));
     const to = t.duration === undefined

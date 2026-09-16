@@ -213,10 +213,22 @@ export function friendlyMicError(err) {
   }
 }
 
+// ipcRenderer.invoke wraps a handler's error as "Error invoking remote method
+// 'voiceover:save': Error: <message>"; people should only see <message>.
+export function ipcMessage(err) {
+  const msg = String(err?.message ?? err ?? '');
+  const m = /^Error invoking remote method '[^']*': (?:\w*Error: )?([\s\S]*)$/.exec(msg);
+  return (m ? m[1] : msg) || 'Something went wrong.';
+}
+
 // Sends the take to the main process, which writes it into the project
 // folder and returns its path relative to the project (for the `file` field).
 export async function saveVoiceover(blob, loupe = globalThis.window?.loupe) {
   if (!loupe?.saveVoiceover) throw new Error('Saving a voiceover isn’t available here.');
   const data = new Uint8Array(await blob.arrayBuffer());
-  return loupe.saveVoiceover({ data, mimeType: blob.type });
+  try {
+    return await loupe.saveVoiceover({ data, mimeType: blob.type });
+  } catch (err) {
+    throw new Error(ipcMessage(err), { cause: err });
+  }
 }

@@ -53,6 +53,10 @@ export function validateCurve(curve) {
   }
 }
 
+// project.json is plain text people can edit; a volume that isn't a sensible
+// number must not turn the whole mix into NaN (silence or noise in the file).
+const volumeOf = (t) => (Number.isFinite(t.volume) ? Math.min(10, Math.max(0, t.volume)) : 1);
+
 function trackEnd(track) {
   const len = track.channels[0].length / track.sampleRate;
   const offset = track.offset ?? 0;
@@ -63,7 +67,7 @@ function trackEnd(track) {
 export function mixTracks(tracks, {
   sampleRate = MIX_RATE, duration, protect = 'limit', ceilingDb = -1
 } = {}) {
-  const active = tracks.filter((t) => t && !t.muted && (t.volume ?? 1) !== 0);
+  const active = tracks.filter((t) => t && !t.muted && volumeOf(t) !== 0);
   for (const t of active) {
     if (!Array.isArray(t.channels) || !t.channels.length
         || !t.channels.every((c) => c instanceof Float32Array)) {
@@ -95,7 +99,7 @@ export function mixTracks(tracks, {
     // Clip the track to [0, n) of the output.
     const i0 = Math.max(0, -startSample);
     const i1 = Math.min(len, n - startSample);
-    const volume = t.volume ?? 1;
+    const volume = volumeOf(t);
     if (!t.gain) {
       for (let i = i0; i < i1; i++) {
         L[startSample + i] += left[i] * volume;

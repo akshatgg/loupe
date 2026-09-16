@@ -5,7 +5,7 @@ const { Blob } = require('node:buffer');
 const { fitMusic, musicTrack, MUSIC_EXTENSIONS } = require('../src/core/audio/music.js');
 const {
   anchorAt, createVoiceover, placeVoiceovers, pickMimeType, startVoiceoverRecording, saveVoiceover,
-  friendlyMicError
+  friendlyMicError, ipcMessage
 } = require('../src/core/audio/voiceover.js');
 const { mixTracks, gainAt } = require('../src/core/audio/mix.js');
 const { speechLike, rmsDb } = require('./audio-fixtures');
@@ -238,4 +238,16 @@ test('stop after cancel is refused and cancel twice is harmless', async () => {
   assert.strictEqual(media.log.stoppedTracks, 1);
   assert.strictEqual(media.log.closed, 1);
   await assert.rejects(rec.stop(), /already stopped/);
+});
+
+test('saveVoiceover shows the main process message without the IPC wrapper', async () => {
+  const loupe = {
+    saveVoiceover: async () => {
+      throw new Error("Error invoking remote method 'voiceover:save': Error: The voiceover couldn’t be saved. Check that there is free disk space.");
+    }
+  };
+  await assert.rejects(saveVoiceover(new Blob([new Uint8Array([1])]), loupe),
+    { message: 'The voiceover couldn’t be saved. Check that there is free disk space.' });
+  assert.strictEqual(ipcMessage(new Error('plain')), 'plain');
+  assert.strictEqual(ipcMessage(null), 'Something went wrong.');
 });

@@ -172,3 +172,30 @@ test('music:import that fails to copy leaves nothing behind and says so plainly'
     fs.chmodSync(song, 0o644);
   }
 });
+
+test('resolveProjectFile under Windows path rules: no drive-relative or stream names', () => {
+  // Load a fresh copy of the module with node:path swapped for path.win32, so
+  // the checks run exactly as they would on Windows.
+  const Module = require('node:module');
+  const id = require.resolve('../src/main/ipc/project-files');
+  const cached = require.cache[id];
+  delete require.cache[id];
+  const load = Module._load;
+  Module._load = function (request, ...rest) {
+    return request === 'node:path' ? path.win32 : load.call(this, request, ...rest);
+  };
+  let win;
+  try {
+    win = require('../src/main/ipc/project-files');
+  } finally {
+    Module._load = load;
+    require.cache[id] = cached;
+  }
+  const dir = 'C:\\Users\\me\\Videos\\Loupe\\1789';
+  assert.strictEqual(win.resolveProjectFile(dir, 'voiceover', 'voiceover/Voiceover 2.webm'),
+    'C:\\Users\\me\\Videos\\Loupe\\1789\\voiceover\\Voiceover 2.webm');
+  for (const bad of ['voiceover/C:take.webm', 'voiceover/a:b.webm', 'voiceover\\x.webm',
+    'C:\\x.webm', 'voiceover/..', '\\\\server\\share\\x.webm', 'music/x.webm']) {
+    assert.throws(() => win.resolveProjectFile(dir, 'voiceover', bad), /Invalid file path/, bad);
+  }
+});
