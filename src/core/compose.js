@@ -16,7 +16,7 @@
 // Sizes are in "units" of the output's short side at 1080 pixels, so 1080p,
 // 4K and a 9:16 export look alike.
 
-import { solveCamera, cameraAt, viewRect } from './camera.js';
+import { solveCamera, cameraAt, viewRect, SAME_ASPECT_TOLERANCE } from './camera.js';
 import * as background from './layers/background.js';
 import * as frame from './layers/frame.js';
 import * as cursor from './layers/cursor.js';
@@ -74,8 +74,12 @@ export function exportSize(project, resolution = project.export.resolution) {
 }
 
 // Where the recording goes in a `size` output: the output inset by the
-// padding on every side, with rounded corners.
-export function layout(project, size) {
+// padding on every side, with rounded corners. With the 'source' shape the
+// inset box no longer has the recording's shape (the same padding is taken
+// off a long and a short side), so the recording is fitted inside it and
+// centred rather than cropped: nobody asked to lose the top of their screen.
+// `meta` is the recording being drawn; without it the box is used as is.
+export function layout(project, size, meta = null) {
   const { width, height } = size;
   const short = Math.min(width, height);
   const unit = short / REFERENCE_HEIGHT;
@@ -84,6 +88,19 @@ export function layout(project, size) {
     x: padding, y: padding,
     w: Math.max(1, width - 2 * padding), h: Math.max(1, height - 2 * padding)
   };
+  if (project.style.aspect === 'source' && meta && meta.width > 0 && meta.height > 0) {
+    const src = meta.width / meta.height;
+    // Within a hair of the recording's shape (even-pixel rounding) it fills
+    // the box, as v1 did; a migrated project keeps its exact picture.
+    if (Math.abs(content.w / content.h / src - 1) >= SAME_ASPECT_TOLERANCE) {
+      const w = Math.min(content.w, Math.round(content.h * src));
+      const h = Math.min(content.h, Math.round(content.w / src));
+      content.x = Math.round((width - w) / 2);
+      content.y = Math.round((height - h) / 2);
+      content.w = Math.max(1, w);
+      content.h = Math.max(1, h);
+    }
+  }
   const radius = Math.min(project.style.radius * unit, content.w / 2, content.h / 2);
   return { unit, padding, content, radius };
 }
@@ -115,12 +132,12 @@ export function cameraTrackFor(project, source, cursorTrack, aspect) {
 export function frameState({ project, tl, outT, frames = {}, size, assets = {} }) {
   const at = tl.toSource(outT);
   const meta = project.sources[at.source];
-  const geo = layout(project, size);
+  const geo = layout(project, size, meta);
   const { content } = geo;
-  // The view has the content area's shape; camera.js treats a shape within
-  // a hair of the recording's own as that shape.
-  const aspect = project.style.aspect === 'source' && project.style.padding === 0
-    ? null : content.w / content.h;
+  // The view has the content area's shape. With the 'source' shape that is
+  // the recording's own (layout fitted it); camera.js also treats a chosen
+  // shape within a hair of the recording's as that shape.
+  const aspect = project.style.aspect === 'source' ? null : content.w / content.h;
   const track = assets.cameras?.[at.source] ??
     cameraTrackFor(project, at.source, assets.cursors?.[at.source], aspect);
   const camera = cameraAt(track, at.t, meta);

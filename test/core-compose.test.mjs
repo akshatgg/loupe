@@ -169,6 +169,27 @@ test('padding, rounded corners and shadow frame the recording', () => {
   assert.strictEqual(ctx.depth, 0, 'every save is restored');
 });
 
+test('with the source shape, padding fits the whole recording instead of cropping it', () => {
+  // A new project: source shape, 6% padding. The inset box is wider than the
+  // recording, so the recording is centred in it at its own shape.
+  const p = P.createProject({ main: MAIN });
+  const size = exportSize(p);
+  assert.deepStrictEqual(size, { width: 1728, height: 1080 });
+  const { ctx, state } = render(p, { size });
+  const [, sx, sy, sw, sh, dx, dy, dw, dh] = ctx.named('drawImage')[0].args;
+  assert.deepStrictEqual([sx, sy, sw, sh], [0, 0, 3200, 2000], 'nothing cropped');
+  near(dw / dh, 1.6, 2e-3);
+  assert.strictEqual(dy, 65);
+  assert.strictEqual(dh, 950);
+  near(dx + dw / 2, size.width / 2, 1);
+  assert.strictEqual(state.rect.width, 1600);
+  // A square recording appended to a wide video is letterboxed, not stretched.
+  const q = P.setStyle(P.appendRecording(p, 'src2', { width: 800, height: 800, duration: 4 }), { padding: 0 });
+  const sq = render(q, { outT: 11, size, frames: { src2: { displayWidth: 800, displayHeight: 800 } } });
+  const args = sq.ctx.named('drawImage')[0].args;
+  assert.deepStrictEqual(args.slice(1), [0, 0, 800, 800, 324, 0, 1080, 1080]);
+});
+
 test('a 9:16 export of a wide recording shows a full-height slice that pans to the cursor', () => {
   let p = P.setStyle(P.createProject({ main: MAIN }), { aspect: '9:16', padding: 0 });
   p = P.setStyle(p, { radius: 0 });

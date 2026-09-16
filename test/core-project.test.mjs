@@ -3,6 +3,9 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import * as P from '../src/core/project.js';
 import { buildTimeline } from '../src/core/timeline.js';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
 
 // Real v1 projects copied from ~/Movies/Loupe: one with recorded zooms (one
 // of which dips 4x -> 1.2x -> 4x, and one still zoomed at the end), one with
@@ -73,6 +76,20 @@ test('recorded zoom keyframes become zooms with their keyframes kept', () => {
   assert.deepStrictEqual(p.zooms.map((z) => z.id), ['z1', 'z2', 'z3']);
   // x/y (used if switched to fixed) is where the cursor was when zooming.
   assert.deepStrictEqual([c.x, c.y], [530.12109375, 271.4296875]);
+});
+
+test('a zoom removed in the v1 editor stays removed after migration', () => {
+  // v1 kept every recorded zoom and derived zoomKeyframes minus the removed
+  // ones; the export read zoomKeyframes, so migration must too.
+  const v1 = require('../src/main/segments.js');
+  const segs = v1.zoomSegments(V1_ZOOMS.zoomKeyframes, V1_ZOOMS.capture.duration);
+  const edited = JSON.parse(JSON.stringify(v1.removeZoom(V1_ZOOMS, segs[1])));
+  assert.strictEqual(edited.recordedZoomKeyframes.length, V1_ZOOMS.zoomKeyframes.length);
+  const p = P.migrate(edited);
+  assert.strictEqual(p.zooms.length, 2);
+  near(p.zooms[0].start, 6.422797709000406, 1e-12);
+  near(p.zooms[1].end, V1_ZOOMS.capture.duration, 1e-12);
+  assert.ok(p.zooms.every((z) => z.start > segs[1].end || z.end < segs[1].start));
 });
 
 test('a zoom stretch that never passes 1.05x is dropped', () => {

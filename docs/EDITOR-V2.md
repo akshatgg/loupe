@@ -105,6 +105,8 @@ item is attached to.
   speed: [{ source, start, end, rate }],          // 0.25..8, source time
   zooms: [{ id, source, start, end, level, follow: true, x, y, recorded: bool }],
                                  // follow=false pins the view at x,y (source points)
+                                 // a migrated zoom also keeps `keyframes: [{t, zoom}]`, the
+                                 // v1 in/out it replays; editing its time or level drops them
   style: {
     background: { type: "none"|"color"|"gradient"|"image", value },
     padding: 0.06,               // fraction of the output's short side
@@ -126,7 +128,8 @@ item is attached to.
   },
   captions: { show: false, language: "auto", segments: [{ id, source, start, end, text }],
               style: { size: 1, position: "bottom" } },
-  export: { format: "mp4"|"webm"|"gif", resolution: "1080p", quality: "balanced", fps: 60 }
+  export: { format: "mp4"|"webm"|"gif", resolution: "1080p", quality: "balanced", fps: 60,
+            codec: "h264"|"hevc" }
 }
 ```
 
@@ -177,7 +180,9 @@ holds loaded images (background image, etc). Draw order:
 8. captions
 9. transition blend at clip boundaries
 
-Sizes scale with the output height (reference 1080p) so 1080p/4K/9:16 look
+With `aspect: "source"` the recording is fitted, centred, inside the padded
+area (never cropped); with a chosen aspect it fills the padded area and the
+camera pans. Sizes scale with the output's short side (reference 1080p) so 1080p/4K/9:16 look
 alike. Layers live in `core/layers/*.js` and are registered in order in
 `compose.js`.
 

@@ -24,7 +24,7 @@ export const SMOOTH_CUTOFF_HZ = 1.2;
 // Output shapes within this fraction of the source's are treated as the
 // source's own shape: the export size is rounded to even pixels, and v1
 // simply stretched that last pixel rather than cropping for it.
-const SAME_ASPECT_TOLERANCE = 0.005;
+export const SAME_ASPECT_TOLERANCE = 0.005;
 
 export function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
