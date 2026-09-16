@@ -24,6 +24,7 @@ const {
   helperCommand, coordinateMapper, attachThumbnails
 } = require('./platform');
 const { registerRecordingExtras } = require('./ipc/recording');
+const { defaultPresetStyle } = require('./presets');
 
 const IS_WINDOWS = process.platform === 'win32';
 // Physical pixels <-> DIPs on Windows; identities on macOS (platform.js).
@@ -451,15 +452,30 @@ async function stopRecording() {
   // must not strand the user with no window at all: the picker has to come
   // back regardless of how stop() ends, so the recovery runs in `finally`
   // and the failure is re-thrown afterward rather than swallowed.
+  let opened = false;
   try {
-    const result = await recorder.stop({ webcam });
+    const result = await recorder.stop({ webcam, style: newProjectStyle() });
     if (result?.dir) {
       openEditorWindow(result.dir);
+      opened = true;
       appShell.recordingsChanged();
     }
     return result;
   } finally {
-    showPicker();
+    // After a recording the editor is what comes next; the picker would only
+    // cover it (New Recording brings it back). Backing out, or a stop that
+    // failed, returns to the picker.
+    if (!opened) showPicker();
+  }
+}
+
+// A new recording starts with the default preset's look, if one is chosen.
+// A settings problem never costs the recording: the defaults apply.
+function newProjectStyle() {
+  try {
+    return defaultPresetStyle(appShell.settings.get());
+  } catch {
+    return null;
   }
 }
 

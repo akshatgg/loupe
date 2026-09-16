@@ -8,7 +8,7 @@ const { buildExcludeWindowArgs } = require('./exclude-args');
 const { helperCommand, captureFileName } = require('./platform');
 const { createClockSync } = require('./clock-sync');
 const { createPauseTracker, toSourcePauses, clipsFromPauses } = require('./pauses');
-const { buildMainSource, writeKeys, validKeyLabel } = require('./recording-v2');
+const { buildMainSource, writeKeys, validKeyLabel, toProjectV2 } = require('./recording-v2');
 
 const identity = (v) => v;
 
@@ -332,7 +332,13 @@ function createRecorder({
   // the helpers stop (ipc/camera.js finish()). startLocal is when webcam.webm's first frame was taken, on the
   // `now` clock (see ipc/camera.js), so its offset into the recording is
   // that moment in source time -- negative when the camera started first.
-  async function stop({ webcam = null } = {}) {
+  //
+  // `style` is the look a new project starts with (the default preset's
+  // style), or null for the defaults. Resolves { dir, project, recording,
+  // cursorTrack }: `project` is the version-2 project.json written, and
+  // `recording` the raw facts it was made from (v1 fields plus
+  // sources.main and clips).
+  async function stop({ webcam = null, style = null } = {}) {
     // stop() can be reached from a stop button or a global hotkey, either of
     // which may fire with no recording ever started (source is still null).
     // Rather than throwing out of an async function, resolve to null: a
@@ -400,10 +406,14 @@ function createRecorder({
     };
     project.clips = clipsFromPauses(duration, sourcePauses);
 
-    saveProject(dir, project);
+    // The folder is named by the moment recording started (main.js).
+    const folderTime = Number(path.basename(dir));
+    const createdAt = Number.isSafeInteger(folderTime) && folderTime > 1e12 ? folderTime : Date.now();
+    const v2 = toProjectV2(project, { createdAt, style });
+    saveProject(dir, v2 ?? project);
     writeCursorTrack(dir, cursorTrack);
     if (keysEnabled) writeKeys(dir, keys);
-    return { dir, project, cursorTrack };
+    return { dir, project: v2 ?? project, recording: project, cursorTrack };
   }
 
   function state() {
