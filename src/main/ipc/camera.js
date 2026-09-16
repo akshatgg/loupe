@@ -274,6 +274,10 @@ function createCameraBubble({
   }
 
   function close() {
+    // Stop runs finish() and then tears everything down, which lands here:
+    // the page is still sending its last chunk, so finish() closes the
+    // window itself once that is in (or its timeout passes).
+    if (session?.finishing) return;
     const w = win;
     win = null;
     if (session && !session.finishing) abortSession();

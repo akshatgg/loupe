@@ -112,6 +112,32 @@ test('a recording writes webcam.webm in order, gives it a duration, and reports 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+// main.js starts finish() and then tears the armed state down, which calls
+// close(): the page must still be heard until its last chunk is in.
+test('close() while finishing leaves the window to finish, so the last chunk and duration land', async () => {
+  const { bubble, handlers, dir } = setup();
+  const win = bubble.open({});
+  const from = { sender: win.webContents };
+  bubble.start(dir);
+  await handlers['camera:started'](from, { startedAgoMs: 0, width: 640, height: 480 });
+  await handlers['camera:chunk'](from, new Uint8Array(firstChunk()));
+
+  const finished = bubble.finish();
+  bubble.close();
+  assert.ok(!win.isDestroyed(), 'not closed under the page while it finishes');
+  await handlers['camera:chunk'](from, Buffer.from([7, 8]));
+  await handlers['camera:stopped'](from, { durationMs: 1234 });
+  const result = await finished;
+
+  assert.strictEqual(result.file, 'webcam.webm');
+  assert.ok(win.isDestroyed(), 'closed once finished');
+  const file = fs.readFileSync(path.join(dir, 'webcam.webm'));
+  assert.deepStrictEqual([...file.subarray(-2)], [7, 8], 'the last chunk was kept');
+  const at = file.indexOf(Buffer.from('448988', 'hex'));
+  assert.strictEqual(file.readDoubleBE(at + 3), 1234);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('messages from any other page are ignored', async () => {
   const { bubble, handlers, dir } = setup();
   bubble.open({});
