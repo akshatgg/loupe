@@ -127,7 +127,9 @@ export function createTimeline({ root, store, player, editor }) {
   function render() {
     const p = store.project;
     const layout = clipLayout(p, store.tl);
-    if (fitted) pps = Math.min(MAX_PPS, fitPps());
+    // Fitted, the scale follows the video's length -- but not mid-drag, where
+    // the pointer would then mean a different moment on every move.
+    if (fitted && !drag) pps = Math.min(MAX_PPS, fitPps());
     content.style.width = `${Math.max(scroller.clientWidth, x(duration()) + PAD)}px`;
     renderClips(p, layout);
     renderZooms(p, layout);
@@ -431,6 +433,7 @@ export function createTimeline({ root, store, player, editor }) {
     const d = drag;
     drag = null;
     d?.end(e);
+    if (d) render();
   };
   content.addEventListener('pointerup', finish);
   content.addEventListener('pointercancel', finish);

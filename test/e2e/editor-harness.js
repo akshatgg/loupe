@@ -92,7 +92,9 @@ async function openEditor(dir, { width = 1280, height = 840 } = {}) {
     },
     async key(keyCode, modifiers = []) {
       win.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers });
-      if (keyCode.length === 1) win.webContents.sendInputEvent({ type: 'char', keyCode, modifiers });
+      if (keyCode.length === 1 || keyCode === 'Space') {
+        win.webContents.sendInputEvent({ type: 'char', keyCode: keyCode === 'Space' ? ' ' : keyCode, modifiers });
+      }
       win.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
       await sleep(60);
     },
@@ -117,7 +119,7 @@ async function openEditor(dir, { width = 1280, height = 840 } = {}) {
     // Centre (or a point) of the first element matching a selector, in window coordinates.
     async box(selector) {
       const r = await js(`(() => { const el = document.querySelector(${JSON.stringify(selector)});
-        if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })()`);
+        if (!el) return null; el.scrollIntoView({ block: 'nearest' }); const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })()`);
       assert.ok(r, `no element ${selector}`);
       return r;
     },

@@ -139,13 +139,13 @@ export function createExportDialog({ store, loupe, player, beforeExport }) {
   }
 
   return {
-    open() {
+    show() {
       if (dialog.open) return;
       settings();
       dialog.showModal();
     },
     close,
-    get open() { return dialog.open; },
+    get isOpen() { return dialog.open; },
     get state() { return state; }
   };
 }

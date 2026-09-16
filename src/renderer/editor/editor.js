@@ -213,7 +213,7 @@ async function start() {
   const actions = {
     undo: () => store.undo(),
     redo: () => store.redo(),
-    export: () => { timeline.closeMenu(); exportDialog.open(); },
+    export: () => { timeline.closeMenu(); exportDialog.show(); },
     playPause: () => player.toggle(),
     backFrame: () => player.seek(player.time - player.frameStep()),
     forwardFrame: () => player.seek(player.time + player.frameStep()),
@@ -229,7 +229,8 @@ async function start() {
     timelineFit: () => timeline.fit(),
     cheatSheet: () => cheat.toggle(),
     escape: () => {
-      if (timeline.menuOpen) timeline.closeMenu();
+      if (cheat.open) cheat.toggle();
+      else if (timeline.menuOpen) timeline.closeMenu();
       else store.select(null);
     }
   };
@@ -252,7 +253,7 @@ async function start() {
     if (!command) return;
     // In a text field only the app-wide shortcuts apply; undo there undoes typing.
     if (typing && !['export'].includes(command)) return;
-    if (exportDialog.open) return;
+    if (exportDialog.isOpen) return;
     if (cheat.open && command !== 'cheatSheet' && command !== 'escape') return;
     // Space on a focused button would press it as well as play.
     if (command === 'playPause' || command === 'delete') e.preventDefault();
