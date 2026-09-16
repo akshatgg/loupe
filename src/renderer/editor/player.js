@@ -35,8 +35,10 @@ export function createPlayer({ canvas, store, sources }) {
   let size = { width: 2, height: 2 };
   let lastState = null;
 
-  for (const [key, files] of Object.entries(sources)) {
-    if (!files.video) continue;
+  // One muted <video> (and its cursor track) per recording. Also used when a
+  // recording is added to the project later (Add recording).
+  function loadSource(key, files) {
+    if (!files.video || videos[key]) return;
     const v = document.createElement('video');
     v.muted = true;
     v.preload = 'auto';
@@ -56,6 +58,7 @@ export function createPlayer({ canvas, store, sources }) {
         .catch(() => {}); // no cursor track: the preview just has no cursor
     }
   }
+  for (const [key, files] of Object.entries(sources)) loadSource(key, files);
 
   const project = () => store.project;
   const duration = () => store.tl.duration;
@@ -194,6 +197,13 @@ export function createPlayer({ canvas, store, sources }) {
       return 1 / (p.sources[at.source].fps || 60);
     },
     redraw() { dirty = true; },
+    // A recording added to the project: its files (as project:load gives
+    // them). The sound preview reads the same `sources`, so it follows.
+    addSource(key, files) {
+      sources[key] = files;
+      loadSource(key, files);
+      dirty = true;
+    },
     onTime(fn) {
       listeners.add(fn);
       return () => listeners.delete(fn);

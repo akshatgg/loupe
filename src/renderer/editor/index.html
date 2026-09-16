@@ -3,6 +3,7 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src file:; media-src file:; img-src file: data: blob:">
 <title>Loupe</title>
 <link rel="stylesheet" href="editor.css">
+<link rel="stylesheet" href="app.css">
 <body>
   <div id="app">
     <header id="topbar">
@@ -41,6 +42,8 @@
         <button id="splitBtn" type="button" class="tool" title="Split at the playhead (S)"></button>
         <button id="zoomBtn" type="button" class="tool" title="Add a zoom at the playhead (Z)"></button>
         <button id="deleteBtn" type="button" class="tool" title="Delete what’s selected (Delete)" disabled></button>
+        <span class="tool-sep" aria-hidden="true"></span>
+        <button id="addRecBtn" type="button" class="tool" title="Add another recording after this one"></button>
       </div>
       <div class="group tl-zoom">
         <button id="tlOut" type="button" class="icon-btn small" aria-label="Zoom the timeline out"></button>

@@ -15,7 +15,7 @@ import * as P from '../../core/project.js';
 import { h, icon } from './ui.js';
 import {
   clipLayout, zoomPieces, speedPieces, sourceInClip, clipIndexAt, newZoomRange, movedZoom,
-  resizedZoom, snap, snapPoints, insertionIndex, tickStep, formatTime, clamp
+  resizedZoom, snap, snapPoints, insertionIndex, tickStep, formatTime, clamp, stripTiles, thumbStep
 } from './timeline-math.js';
 
 const PAD = 16;           // px before 0:00 and after the end
@@ -24,7 +24,8 @@ const DRAG_PX = 4;        // movement before a press becomes a drag
 const MAX_PPS = 600;      // closest timeline zoom, px per second
 export const SPEEDS = [0.25, 0.5, 1, 1.5, 2, 3, 4, 8];
 
-export function createTimeline({ root, store, player, editor }) {
+// `thumbnails` (thumbnails.js, optional): pictures along the clips.
+export function createTimeline({ root, store, player, editor, thumbnails = null }) {
   const ruler = h('canvas', { class: 'tl-ruler' });
   const clipsTrack = h('div', { class: 'tl-track tl-clips', 'aria-label': 'Clips' });
   const zoomTrack = h('div', { class: 'tl-track tl-zooms', 'aria-label': 'Zooms' });
@@ -58,7 +59,15 @@ export function createTimeline({ root, store, player, editor }) {
 
   // ---- layout and drawing
 
-  function setScale(next, anchorT = player.time) {
+  // The moment a zoom keeps still on screen: the playhead when it's in view,
+  // otherwise the middle of what's showing.
+  function defaultAnchor() {
+    const px = x(player.time) - scroller.scrollLeft;
+    if (px >= 0 && px <= scroller.clientWidth) return player.time;
+    return clamp((scroller.scrollLeft + scroller.clientWidth / 2 - PAD) / pps, 0, duration());
+  }
+
+  function setScale(next, anchorT = defaultAnchor()) {
     const min = fitPps();
     const old = pps;
     pps = clamp(next, Math.min(min, MAX_PPS), MAX_PPS);
@@ -81,6 +90,7 @@ export function createTimeline({ root, store, player, editor }) {
         style: { left: `${x(l.outStart)}px`, width: `${Math.max(2, len * pps)}px` },
         title: 'Drag the edges to trim, or drag the clip to move it'
       },
+      thumbnails ? h('div', { class: 'clip-strip', 'aria-hidden': 'true' }) : null,
       h('div', { class: 'handle start', dataset: { edge: 'start' } }),
       h('div', { class: 'clip-label' },
         many ? h('span', { class: 'clip-name' }, `Clip ${i + 1}`) : null,
@@ -136,7 +146,41 @@ export function createTimeline({ root, store, player, editor }) {
     renderSpeed(p, layout);
     movePlayhead(player.time);
     drawRuler();
+    drawStrips();
   }
+
+  // The pictures along each clip, for the part of the timeline in view (and
+  // a screen either side, so scrolling finds them ready).
+  function drawStrips() {
+    if (!thumbnails) return;
+    const p = store.project;
+    const layout = clipLayout(p, store.tl);
+    const w = scroller.clientWidth;
+    const viewStart = scroller.scrollLeft - w;
+    const viewEnd = scroller.scrollLeft + 2 * w;
+    for (const el of clipsTrack.children) {
+      const strip = el.querySelector('.clip-strip');
+      const i = Number(el.dataset.index);
+      const L = layout[i];
+      if (!strip || !L) continue;
+      const key = L.clip.source;
+      const tileWidth = thumbnails.widthFor(key, strip.clientHeight || 58);
+      const step = thumbStep(tileWidth / pps);
+      const tiles = stripTiles({ outStart: L.outStart, outEnd: L.outEnd, pps, tileWidth, viewStart, viewEnd, pad: PAD });
+      const imgs = [];
+      for (const tile of tiles) {
+        const url = thumbnails.get(key, sourceInClip(p, layout, i, tile.outT), step);
+        if (url) imgs.push(h('img', { src: url, alt: '', draggable: 'false', style: { left: `${tile.x}px`, width: `${tileWidth}px` } }));
+      }
+      strip.replaceChildren(...imgs);
+    }
+  }
+
+  let stripFrame = 0;
+  const drawStripsSoon = () => {
+    if (stripFrame) return;
+    stripFrame = requestAnimationFrame(() => { stripFrame = 0; drawStrips(); });
+  };
 
   function drawRuler() {
     const dpr = window.devicePixelRatio || 1;
@@ -150,7 +194,7 @@ export function createTimeline({ root, store, player, editor }) {
     const left = scroller.scrollLeft;
     const { major, minor } = tickStep(pps);
     const t0 = Math.max(0, Math.floor((left - PAD) / pps / minor) * minor);
-    const t1 = Math.min(duration(), (left + w) / pps);
+    const t1 = Math.min(duration(), (left + w - PAD) / pps);
     ctx.font = '10px -apple-system, system-ui, sans-serif';
     ctx.textBaseline = 'top';
     for (let i = 0, t = t0; t <= t1 + 1e-9; i++, t = t0 + i * minor) {
@@ -446,7 +490,7 @@ export function createTimeline({ root, store, player, editor }) {
   document.addEventListener('pointerdown', (e) => {
     if (!menu.hidden && !menu.contains(e.target) && !speedTrack.contains(e.target)) closeMenu();
   });
-  scroller.addEventListener('scroll', drawRuler);
+  scroller.addEventListener('scroll', () => { drawRuler(); drawStripsSoon(); });
   scroller.addEventListener('wheel', (e) => {
     if (e.ctrlKey || e.metaKey) {
       // Pinch or ⌘-scroll zooms the timeline around the pointer.
@@ -462,10 +506,14 @@ export function createTimeline({ root, store, player, editor }) {
   store.subscribe(() => render());
   player.onTime((t, playing) => {
     movePlayhead(t);
-    // Keep the playhead in view while playing.
+    const px = x(t) - scroller.scrollLeft;
     if (playing) {
-      const px = x(t) - scroller.scrollLeft;
+      // Keep the playhead in view while playing: a page at a time.
       if (px > scroller.clientWidth - 40 || px < 0) scroller.scrollLeft = x(t) - 40;
+    } else if (!drag && (px < 0 || px > scroller.clientWidth)) {
+      // A jump (Home, End, a clip picked in a panel) to somewhere out of
+      // view brings the timeline along, with a little room either side.
+      scroller.scrollLeft = Math.max(0, x(t) - scroller.clientWidth / 3);
     }
   });
   render();
@@ -475,6 +523,7 @@ export function createTimeline({ root, store, player, editor }) {
     zoomOut: () => setScale(pps / 1.5),
     fit: () => { fitted = true; setScale(fitPps()); scroller.scrollLeft = 0; },
     closeMenu,
+    redrawPictures: drawStripsSoon,
     get menuOpen() { return !menu.hidden; },
     get pxPerSecond() { return pps; },
     // For tests: the pixel x (in client coordinates) of output time t.
