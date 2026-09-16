@@ -10,7 +10,8 @@ module.exports = [
                  console: 'readonly', __dirname: 'readonly', Buffer: 'readonly',
                  setTimeout: 'readonly', clearTimeout: 'readonly',
                  setInterval: 'readonly', clearInterval: 'readonly',
-                 setImmediate: 'readonly', fetch: 'readonly' }
+                 setImmediate: 'readonly', fetch: 'readonly',
+                 AbortController: 'readonly' }
     },
     rules: {
       'no-unused-vars': 'error',
@@ -46,6 +47,14 @@ module.exports = [
       'no-undef': 'error',
       'prefer-const': 'error',
       eqeqeq: 'error'
+    }
+  },
+  // The Library and Settings windows are ES modules (docs/EDITOR-V2.md).
+  {
+    files: ['src/renderer/library/**/*.js', 'src/renderer/settings/**/*.js'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: { Intl: 'readonly', CSS: 'readonly', Option: 'readonly', location: 'readonly' }
     }
   },
   // The website (web/, deployed to Vercel) is plain browser scripts too.

@@ -249,175 +249,31 @@ recordButton.onclick = async () => {
 };
 
 // ---- zoom shortcuts ---------------------------------------------------------
-// Two slots, each set by clicking it and then pressing the button you want.
-// Saved in main.js (settings.js) and handed to bin/inputtap at record time.
-// Only buttons you can HOLD while scrolling without side effects are taken:
-// modifier keys and the middle/side mouse buttons. A letter key would type
-// into whatever is being recorded; left/right click are needed for the demo.
-
-// The saved names are the same on both systems (settings.js); Windows just
-// calls the keys Alt, Ctrl and the Windows key.
-const IS_WINDOWS = window.loupe.platform === 'win32';
-const TRIGGERS = IS_WINDOWS ? {
-  option: { label: 'Alt', key: 'Alt' },
-  control: { label: 'Ctrl', key: 'Ctrl' },
-  command: { label: '⊞ Windows key', key: '⊞ Win' },
-  shift: { label: '⇧ Shift', key: 'Shift' },
-  'mouse-side': { label: '🖱 Mouse side button', words: 'a mouse side button' },
-  'mouse-middle': { label: '🖱 Middle mouse button', words: 'the middle mouse button' }
-} : {
-  option: { label: '⌥ Option', key: '⌥' },
-  control: { label: '⌃ Control', key: '⌃' },
-  command: { label: '⌘ Command', key: '⌘' },
-  shift: { label: '⇧ Shift', key: '⇧' },
-  'mouse-side': { label: '🖱 Mouse side button', words: 'a mouse side button' },
-  'mouse-middle': { label: '🖱 Middle mouse button', words: 'the middle mouse button' }
-};
-const KEY_TRIGGERS = { Alt: 'option', Control: 'control', Meta: 'command', Shift: 'shift' };
-// MouseEvent.button: 1 middle, 3 back, 4 forward (0/2 are left/right).
-const MOUSE_TRIGGERS = { 1: 'mouse-middle', 3: 'mouse-side', 4: 'mouse-side' };
-
-const PROMPT = 'Press a key or mouse button…';
-const captureEls = [...document.querySelectorAll('.capture')];
-const clearEls = [...document.querySelectorAll('.clear')];
-
-let zoomTriggers = [null, null];
-let capturing = null; // slot index being set, or null
-let refusedTimer = null;
-
-// The header line spells out whatever is currently set. Built with DOM nodes
-// rather than innerHTML, like the rest of this window.
-function renderZoomHelp() {
-  const help = document.getElementById('zoomHelp');
-  help.textContent = '';
-  const set = zoomTriggers.filter(Boolean);
-  if (set.length === 0) {
-    help.textContent = 'Zoom is off — set a zoom shortcut below to turn it on.';
-    return;
-  }
-  help.append('Hold ');
-  set.forEach((t, i) => {
-    if (i > 0) help.append(' or ');
-    if (TRIGGERS[t].key) {
-      const kbd = document.createElement('kbd');
-      kbd.textContent = TRIGGERS[t].key;
-      help.append(kbd);
-    } else {
-      help.append(TRIGGERS[t].words);
-    }
-  });
-  help.append(' and scroll while recording: scroll up to zoom in, back down to zoom out.');
-}
-
-function renderShortcuts() {
-  captureEls.forEach((el, slot) => {
-    const t = zoomTriggers[slot];
-    el.classList.toggle('capturing', capturing === slot);
-    el.classList.remove('refused');
-    el.classList.toggle('empty', !t && capturing !== slot);
-    el.textContent = capturing === slot ? PROMPT : (t ? TRIGGERS[t].label : 'Click to set');
-    clearEls[slot].hidden = !t || capturing === slot;
-  });
-  renderZoomHelp();
-}
-
-function stopCapture() {
-  clearTimeout(refusedTimer);
-  capturing = null;
-  renderShortcuts();
-}
-
-// Says why a button wasn't taken, in the field itself, then goes back to
-// waiting for another press.
-function refuse(message) {
-  const el = captureEls[capturing];
-  clearTimeout(refusedTimer);
-  el.classList.add('refused');
-  el.textContent = message;
-  refusedTimer = setTimeout(() => {
-    if (capturing === null) return;
-    el.classList.remove('refused');
-    el.textContent = PROMPT;
-  }, 1600);
-}
-
-async function saveTriggers(next) {
-  try {
-    ({ zoomTriggers } = await window.loupe.setSettings({ zoomTriggers: next }));
-  } catch (err) {
+// The two shortcut fields (click one, press a button) are shared with the
+// Settings window: src/renderer/shared/zoom-shortcuts.js. Only the header
+// line that spells out what's set belongs to the picker.
+const zoomShortcuts = window.loupeZoomShortcuts.mount({
+  captureEls: [...document.querySelectorAll('.capture')],
+  clearEls: [...document.querySelectorAll('.clear')],
+  onRender: (triggers) => {
+    const help = document.getElementById('zoomHelp');
+    const any = window.loupeZoomShortcuts.describe(help, triggers, {
+      after: ' and scroll while recording: scroll up to zoom in, back down to zoom out.'
+    });
+    if (!any) help.textContent = 'Zoom is off — set a zoom shortcut below to turn it on.';
+  },
+  onError: (err) => {
     const banner = document.getElementById('banner');
     banner.hidden = false;
     banner.textContent = `Could not save the zoom shortcut: ${err.message}`;
   }
-  renderShortcuts();
-}
-
-function commit(trigger) {
-  const slot = capturing;
-  if (zoomTriggers[1 - slot] === trigger) {
-    refuse('Already your other shortcut');
-    return;
-  }
-  const next = [...zoomTriggers];
-  next[slot] = trigger;
-  capturing = null;
-  clearTimeout(refusedTimer);
-  saveTriggers(next);
-}
-
-captureEls.forEach((el, slot) => {
-  el.addEventListener('click', () => {
-    capturing = slot;
-    renderShortcuts();
-  });
-});
-clearEls.forEach((el, slot) => {
-  el.addEventListener('click', () => {
-    const next = [...zoomTriggers];
-    next[slot] = null;
-    saveTriggers(next);
-  });
 });
 
-// Capture phase, so nothing else in the window reacts to the press being
-// recorded (e.g. Space/Enter re-"clicking" the focused field).
-document.addEventListener('keydown', (e) => {
-  if (capturing === null) return;
-  e.preventDefault();
-  e.stopPropagation();
-  if (e.key === 'Escape') { stopCapture(); return; }
-  const trigger = KEY_TRIGGERS[e.key];
-  if (trigger) commit(trigger);
-  else refuse(IS_WINDOWS ? 'Use Alt, Ctrl, Shift, Win or a mouse button' : 'Use ⌥ ⌃ ⌘ ⇧ or a mouse button');
-}, true);
+window.loupe.getSettings().then((s) => zoomShortcuts.set(s.zoomTriggers));
+// Changed in the Settings window while this one is open.
+window.loupe.onSettingsChanged?.((s) => zoomShortcuts.set(s.zoomTriggers));
 
-document.addEventListener('mousedown', (e) => {
-  if (capturing === null) return;
-  const trigger = MOUSE_TRIGGERS[e.button];
-  if (trigger) {
-    e.preventDefault();
-    e.stopPropagation();
-    commit(trigger);
-  } else if (e.button === 2) {
-    e.preventDefault();
-    refuse('Use a side or middle mouse button');
-  } else if (e.target !== captureEls[capturing]) {
-    stopCapture(); // an ordinary click elsewhere just cancels
-  }
-}, true);
-
-// A side button's release would otherwise also count as browser Back/Forward.
-for (const type of ['mouseup', 'auxclick']) {
-  document.addEventListener(type, (e) => {
-    if (e.button === 3 || e.button === 4) e.preventDefault();
-  }, true);
-}
-window.addEventListener('blur', () => { if (capturing !== null) stopCapture(); });
-
-window.loupe.getSettings().then((s) => {
-  zoomTriggers = s.zoomTriggers;
-  renderShortcuts();
-});
+document.getElementById('recordings').onclick = () => window.loupe.openLibrary();
 
 window.addEventListener('focus', refreshPermissions);
 load();
