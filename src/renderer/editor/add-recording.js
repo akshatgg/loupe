@@ -90,6 +90,8 @@ export function createAddRecording({ store, player, loupe, core, toast, onAdded 
       return;
     }
     list.replaceChildren(...recordings.map(row));
+    // The first recording, rather than Close, is where the keyboard starts.
+    list.querySelector('.rec-row')?.focus({ focusVisible: false });
   }
 
   return {
