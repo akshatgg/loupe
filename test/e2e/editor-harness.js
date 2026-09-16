@@ -78,6 +78,9 @@ async function openEditor(dir, { width = 1280, height = 840 } = {}) {
   await win.loadFile(path.join(ROOT, 'src', 'renderer', 'editor', 'index.html'));
   const js = (code) => win.webContents.executeJavaScript(code);
   await waitFor(() => js('document.body.dataset.ready === "true" || !document.getElementById("fatal").hidden'), 'the editor to load');
+  // The first-run card sits over the preview; these cases click there, and
+  // the card itself is checked in app-flow.e2e.js.
+  await js('window.__editor?.firstRun?.dismiss()');
   win.focus();
   win.webContents.focus();
 
