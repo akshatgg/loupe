@@ -66,10 +66,9 @@ export function codecCandidates(codec, width, height, fps, format = 'mp4') {
 }
 
 // The first configuration this computer can actually encode.
-// `bitrate` overrides the quality's; `constant` asks for a constant bitrate,
-// which encoders keep to far more closely (used to fit a size limit).
+// `bitrate` overrides the quality's.
 export async function chooseVideoConfig({
-  format = 'mp4', codec = 'h264', width, height, fps, quality, bitrate: wanted, constant = false
+  format = 'mp4', codec = 'h264', width, height, fps, quality, bitrate: wanted
 }, api = globalThis.VideoEncoder) {
   const bitrate = wanted ?? bitrateFor(width, height, fps, quality, format);
   for (const acceleration of ['prefer-hardware', 'prefer-software']) {
@@ -78,7 +77,7 @@ export async function chooseVideoConfig({
       const config = {
         ...codecOptions, width, height, bitrate, framerate: fps,
         hardwareAcceleration: acceleration, latencyMode: 'quality',
-        bitrateMode: constant ? 'constant' : 'variable'
+        bitrateMode: 'variable'
       };
       try {
         const { supported } = await api.isConfigSupported(config);

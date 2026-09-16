@@ -14,10 +14,12 @@
 //   format, resolution, codec, quality, fps, sizeLimit, gifWidth, gifFps, dither
 // }
 //
-// With a size limit the video is encoded at the bitrate the limit allows; an
-// encoder that still overshoots gets another pass at a proportionally lower
-// bitrate, written over the first from byte 0 (main cuts the file to the
-// final pass's length, summary.bytes).
+// With a size limit the video is encoded at the bitrate the limit allows.
+// Encoders only roughly keep to a bitrate, and each has a floor below which
+// it won't go however low the target, so an export that comes out too big is
+// encoded again: first at a proportionally lower bitrate, then at 30 frames a
+// second, then smaller. Each pass is written over the last from byte 0 (main
+// cuts the file to the final pass's length, summary.bytes).
 
 import { loadProjectData } from '../../core/project.js';
 import { buildTimeline } from '../../core/timeline.js';
@@ -41,11 +43,14 @@ const PROGRESS_EVERY_MS = 100;
 // How far ahead of the video the sound may be written: players read a file
 // front to back, so the two are kept roughly side by side in it.
 const AUDIO_LEAD_US = 500000;
-// Extra passes allowed to get under a size limit, and how far under the
-// limit each retry aims.
-const LIMIT_RETRIES = 2;
-const RETRY_MARGIN = 0.93;
+// The steps tried, in order, to get under a size limit (each with up to two
+// bitrate passes), and how far under the limit a retry aims.
+const LIMIT_STEPS = [{ maxFps: Infinity, scale: 1 }, { maxFps: 30, scale: 1 }, { maxFps: 30, scale: 0.75 }, { maxFps: 24, scale: 0.5 }];
+const PASSES_PER_STEP = 2;
+const RETRY_MARGIN = 0.9;
 const JOB_EXPORT_KEYS = ['format', 'resolution', 'codec', 'quality', 'fps', 'sizeLimit', 'gifWidth', 'gifFps', 'dither'];
+
+const even = (n) => Math.max(2, Math.round(n / 2) * 2);
 
 function labelOf(key, count) {
   return count > 1 ? `the recording "${key}"` : 'the recording';
@@ -155,7 +160,7 @@ async function encodeVideoPass(ctx) {
   const { exp, fps, width, height, plan, audioChunks, write, bitrate, pass } = ctx;
   const video = await chooseVideoConfig({
     format: exp.format, codec: exp.codec, width, height, fps, quality: exp.quality,
-    bitrate, constant: Boolean(exp.sizeLimit)
+    bitrate
   });
   const out = createWriter(write);
   const muxer = createMuxer(exp.format, {
@@ -260,6 +265,7 @@ export async function exportProject(job, { write, progress = () => {}, signal } 
     let result;
     let audioChunks = [];
     let passes = 1;
+    let made = { width, height, fps };
     if (gif) {
       result = await encodeGif(ctx);
     } else {
@@ -268,23 +274,31 @@ export async function exportProject(job, { write, progress = () => {}, signal } 
       audioChunks = mix ? await encodeAudio(mix, { signal, format: exp.format }) : [];
       checkAbort(signal);
       const audio = audioChunks.length > 0;
-      let bitrate = videoBitrate(exp, { width, height, fps, duration: tl.duration, audio });
-      result = await encodeVideoPass({ ...ctx, audioChunks, bitrate, pass: 0 });
       const limit = exp.sizeLimit ? exp.sizeLimit * MB : Infinity;
-      while (result.bytes > limit && passes <= LIMIT_RETRIES) {
-        bitrate = Math.max(50000, Math.floor(bitrate * (limit / result.bytes) * RETRY_MARGIN));
-        result = await encodeVideoPass({ ...ctx, audioChunks, bitrate, pass: passes });
-        passes++;
+      passes = 0;
+      steps: for (const step of exp.sizeLimit ? LIMIT_STEPS : LIMIT_STEPS.slice(0, 1)) {
+        const stepFps = Math.min(fps, step.maxFps);
+        const size = { width: even(width * step.scale), height: even(height * step.scale) };
+        if (passes > 0 && stepFps === made.fps && size.width === made.width) continue;
+        const stepPlan = stepFps === fps ? plan : tl.framePlan(stepFps);
+        let bitrate = videoBitrate(exp, { ...size, fps: stepFps, duration: tl.duration, audio });
+        for (let i = 0; i < PASSES_PER_STEP; i++) {
+          made = { ...size, fps: stepFps };
+          result = await encodeVideoPass({ ...ctx, ...size, fps: stepFps, plan: stepPlan, audioChunks, bitrate, pass: passes });
+          result.bitrate = bitrate;
+          passes++;
+          if (result.bytes <= limit) break steps;
+          bitrate = Math.max(50000, Math.floor(bitrate * (limit / result.bytes) * RETRY_MARGIN));
+        }
       }
       if (result.bytes > limit) {
-        throw new Error(`The video came out at ${(result.bytes / MB).toFixed(1)} MB, over the ${exp.sizeLimit} MB limit. Try a smaller size or a bigger limit.`);
+        throw new Error(`This video won’t fit in ${exp.sizeLimit} MB (the smallest try was ${(result.bytes / MB).toFixed(1)} MB). Try a bigger limit, or trim the video first.`);
       }
-      result.bitrate = bitrate;
     }
 
     const seconds = (performance.now() - started) / 1000;
     return {
-      format: exp.format, frames: result.frames, encoded: result.encoded, width, height, fps, duration: tl.duration,
+      format: exp.format, frames: result.frames, encoded: result.encoded, ...made, duration: tl.duration,
       codec: result.config.codec, hardware: result.hardware, audio: audioChunks.length > 0,
       bytes: result.bytes, passes, ...(result.bitrate ? { bitrate: result.bitrate } : {}),
       ...(gif ? { palettes: result.palettes } : {}),
