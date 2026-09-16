@@ -13,7 +13,8 @@ const { transition } = require('./bar-state');
 const { createLiveCamera, stepLiveCamera } = require('./live-camera');
 const { inputTapArgs } = require('./settings');
 const { createAppShell } = require('./app-shell');
-const { createExportRunner, registerExportIpc } = require('./ipc/export');
+const { createExportRunner, registerExportIpc, recentExports } = require('./ipc/export');
+const { createExportedFiles } = require('./exported-file');
 const { createProjectStore, registerProjectIpc } = require('./ipc/project');
 const { registerShareIpc } = require('./ipc/share');
 const { registerFileActionsIpc } = require('./ipc/fileActions');
@@ -27,6 +28,7 @@ const {
 } = require('./platform');
 const { registerRecordingExtras } = require('./ipc/recording');
 const { defaultPresetStyle } = require('./presets');
+const { installWebGuard } = require('./web-guard');
 
 const IS_WINDOWS = process.platform === 'win32';
 // Physical pixels <-> DIPs on Windows; identities on macOS (platform.js).
@@ -45,6 +47,8 @@ const BIN_DIR = app.isPackaged
   ? path.join(process.resourcesPath, 'bin')
   : path.join(__dirname, '..', '..', 'bin');
 const permissions = createPermissions({ systemPreferences, shell });
+// No window may leave its page or open new ones (web-guard.js).
+installWebGuard({ app });
 
 // Surface a helper failure to the user -- but only capture's failure means
 // the recording itself is gone. Losing inputtap (the zoom/click/cursor
@@ -771,9 +775,14 @@ ipcMain.handle('bar:start', async () => {
 
 ipcMain.handle('record:stop', stopRecording);
 
-// Export follow-ups: share links, copy/drag/reveal the exported file.
-registerShareIpc(ipcMain);
-registerFileActionsIpc(ipcMain);
+// Export follow-ups: share links, copy/drag/reveal the exported file. Only
+// files Loupe exported qualify: this run's exports and the open recording's
+// earlier ones (exported-file.js).
+const exportedFiles = createExportedFiles({
+  recent: () => (editorDir ? recentExports(editorDir).map((e) => e.file) : [])
+});
+registerShareIpc(ipcMain, { checkFile: exportedFiles.check });
+registerFileActionsIpc(ipcMain, undefined, { checkFile: exportedFiles.check });
 
 // Audio files the editor adds to the open project (voiceover takes, music).
 registerVoiceoverIpc({ ipcMain, getProjectDir: () => editorDir });
@@ -838,7 +847,8 @@ const projects = createProjectStore({
 registerProjectIpc({ ipcMain, store: projects, projectDir: () => editorDir });
 registerExportIpc({
   ipcMain, runner: exporter, projectDir: () => editorDir, shell,
-  beforeStart: () => projects.flush()
+  beforeStart: () => projects.flush(),
+  onExported: (file) => exportedFiles.remember(file)
 });
 // Add recording: another recording from the Library, played after this one.
 registerAppendRecordingIpc({ ipcMain, library: appShell.library, store: projects, projectDir: () => editorDir });

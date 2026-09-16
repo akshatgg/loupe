@@ -344,7 +344,9 @@ function rememberExport(dir, result, { now = Date.now() } = {}) {
 // since the job is built from project.json on disk). export:reveal shows the
 // last exported file in Finder/Explorer -- only that file, whatever the
 // renderer asks, so it can't be used to open arbitrary folders.
-function registerExportIpc({ ipcMain, runner, projectDir, beforeStart = () => {}, shell = null }) {
+// `onExported(file)` hears of every finished export (main's list of files
+// that may be shared, copied or dragged).
+function registerExportIpc({ ipcMain, runner, projectDir, beforeStart = () => {}, shell = null, onExported = () => {} }) {
   let lastFile = null;
   ipcMain.handle('export:start', async (event, rawOptions) => {
     if (runner.busy()) throw new Error('An export is already in progress.');
@@ -357,6 +359,7 @@ function registerExportIpc({ ipcMain, runner, projectDir, beforeStart = () => {}
       onProgress: (p) => { if (!sender.isDestroyed?.()) sender.send('export:progress', p); }
     });
     lastFile = result.file;
+    onExported(result.file);
     if (subtitles) {
       // The video is saved either way; a subtitle problem is reported beside it.
       try {

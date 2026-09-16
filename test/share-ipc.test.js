@@ -8,7 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { registerShareIpc, createShareService, cleanDetails } = require('../src/main/ipc/share');
 const { ShareError } = require('../src/main/share-client');
-const { checkExportedFile } = require('../src/main/exported-file');
+const { checkExportedFile, createExportedFiles } = require('../src/main/exported-file');
 const { startMockShareServer } = require('./fixtures/mock-share-server');
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'loupe-share-ipc-'));
@@ -181,4 +181,57 @@ test('closing the window that started an upload cancels it', async () => {
   assert.strictEqual((await pending).code, 'cancelled');
   assert.strictEqual(service.busy, false);
   assert.strictEqual(sender.listenerCount('destroyed'), 0, 'listener removed');
+});
+
+test('in the app only files Loupe exported can be shared, copied or dragged', async () => {
+  const dir = fs.mkdtempSync(path.join(tmp, 'rec-'));
+  const made = path.join(dir, 'export-1920x1080.mp4');
+  const earlier = path.join(dir, 'export-1280x720.mp4');
+  const other = path.join(dir, 'someone-elses.mp4');
+  // A "voiceover" dressed up as WebM, the kind of file a page can make main write.
+  const disguised = path.join(dir, 'Voiceover.webm');
+  for (const f of [made, earlier, other, disguised]) fs.writeFileSync(f, 'video');
+  const link = path.join(dir, 'link.mp4');
+  fs.symlinkSync(other, link);
+
+  const files = createExportedFiles({ recent: () => [earlier] });
+  files.remember(made);
+  const codes = (p) => { try { files.check(p); return 'ok'; } catch (e) { return e.code; } };
+  assert.strictEqual(codes(made), 'ok');
+  assert.strictEqual(codes(earlier), 'ok', 'an earlier export of the open recording');
+  assert.strictEqual(codes(other), 'unsupported');
+  assert.strictEqual(codes(disguised), 'unsupported');
+  assert.strictEqual(codes(link), 'unsupported', 'never through a link');
+  assert.strictEqual(codes('/etc/passwd'), 'unsupported');
+  // A link where a made export used to be doesn't count either.
+  fs.rmSync(made);
+  fs.symlinkSync(other, made);
+  assert.strictEqual(codes(made), 'unsupported');
+
+  // Wired into share and file actions.
+  const ipcMain = fakeIpcMain();
+  let uploaded = 0;
+  registerShareIpc(ipcMain, {
+    net: { isOnline: () => true },
+    client: { status: async () => ({ enabled: true }), upload: async () => { uploaded++; return { id: 'a', url: 'b', expiresAt: 0 }; } },
+    checkFile: files.check
+  });
+  const res = await ipcMain.invoke('share:upload', { sender: fakeSender() }, other);
+  assert.strictEqual(res.ok, false);
+  assert.strictEqual(res.code, 'unsupported');
+  assert.strictEqual((await ipcMain.invoke('share:upload', { sender: fakeSender() }, earlier)).ok, true);
+  assert.strictEqual(uploaded, 1);
+
+  const { registerFileActionsIpc } = require('../src/main/ipc/fileActions');
+  const fileIpc = fakeIpcMain();
+  const shown = [];
+  registerFileActionsIpc(fileIpc, {
+    clipboard: { write: async () => {}, writeText: async () => {} }, ClipboardItem: class {},
+    shell: { showItemInFolder: (p) => shown.push(p) }, app: {}, nativeImage: {}
+  }, { checkFile: files.check });
+  assert.strictEqual((await fileIpc.invoke('file:copy', {}, other)).code, 'unsupported');
+  assert.strictEqual((await fileIpc.invoke('file:reveal', {}, other)).code, 'unsupported');
+  assert.strictEqual((await fileIpc.invoke('file:startDrag', { sender: { startDrag: () => assert.fail('dragged') } }, other)).code, 'unsupported');
+  assert.deepStrictEqual(await fileIpc.invoke('file:reveal', {}, earlier), { ok: true });
+  assert.deepStrictEqual(shown, [earlier]);
 });

@@ -155,11 +155,15 @@ function createFileActions({
   return { copyFile, prepareDrag, startDrag, reveal, copyText };
 }
 
-function registerFileActionsIpc(ipcMain, deps) {
-  const actions = createFileActions(deps ?? (() => {
-    const { clipboard, ClipboardItem, shell, app, nativeImage } = require('electron');
-    return { clipboard, ClipboardItem, shell, app, nativeImage };
-  })());
+// `checkFile` (main passes exportedFiles.check) narrows which files count.
+function registerFileActionsIpc(ipcMain, deps, { checkFile } = {}) {
+  const actions = createFileActions({
+    ...(deps ?? (() => {
+      const { clipboard, ClipboardItem, shell, app, nativeImage } = require('electron');
+      return { clipboard, ClipboardItem, shell, app, nativeImage };
+    })()),
+    ...(checkFile ? { checkFile } : {})
+  });
 
   ipcMain.handle('file:copy', (_e, filePath) => actions.copyFile(filePath));
   ipcMain.handle('file:prepareDrag', (_e, filePath) => actions.prepareDrag(filePath));

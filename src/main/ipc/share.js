@@ -96,14 +96,16 @@ function cleanDetails(details) {
   };
 }
 
+// `checkFile` (main passes exportedFiles.check) narrows which files count.
 function registerShareIpc(ipcMain, {
   net = require('electron').net,
   client = createShareClient({
     siteUrl: process.env.LOUPE_SHARE_URL,
     blobApiUrl: process.env.LOUPE_BLOB_API_URL
-  })
+  }),
+  checkFile = checkExportedFile
 } = {}) {
-  const service = createShareService({ client, isOnline: () => net.isOnline() });
+  const service = createShareService({ client, checkFile, isOnline: () => net.isOnline() });
 
   ipcMain.handle('share:status', () => service.status());
 

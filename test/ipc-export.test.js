@@ -212,14 +212,17 @@ test('export:start flushes the pending project save first; export:reveal shows o
     cancel: () => Promise.resolve(false)
   };
   const revealed = [];
+  const exported = [];
   registerExportIpc({
     ipcMain, runner, projectDir: () => dir,
     beforeStart: () => { order.push('flush'); },
-    shell: { showItemInFolder: (f) => revealed.push(f) }
+    shell: { showItemInFolder: (f) => revealed.push(f) },
+    onExported: (f) => exported.push(f)
   });
   assert.strictEqual(await handlers['export:reveal']({}, '/etc/passwd'), false, 'nothing exported yet');
   const result = await handlers['export:start']({ sender: { send() {} } }, {});
   assert.deepStrictEqual(order, ['flush', 'start']);
+  assert.deepStrictEqual(exported, [result.file], 'main hears of the finished export');
   assert.strictEqual(await handlers['export:reveal']({}, '/etc/passwd'), true);
   assert.deepStrictEqual(revealed, [result.file]);
   fs.rmSync(dir, { recursive: true, force: true });
