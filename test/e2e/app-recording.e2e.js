@@ -132,7 +132,7 @@ async function run() {
   const main = project.sources.main;
   console.log('sources.main:', JSON.stringify({ ...main, clicks: main.clicks.length }));
   console.log('clips:', JSON.stringify(project.clips));
-  assert.strictEqual(project.version, 1, 'still readable by the current editor');
+  assert.strictEqual(project.version, 2, 'a version-2 project for the editor');
   assert.strictEqual(main.video, 'raw.mov');
   assert.strictEqual(main.systemAudio, 'system.m4a');
   assert.ok(fs.statSync(path.join(dir, 'system.m4a')).size > 0);
