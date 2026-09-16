@@ -7,6 +7,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 
 function requireProjectDir(getProjectDir) {
   const dir = getProjectDir();
@@ -49,4 +50,26 @@ function openUnique(dir, stem, ext) {
   throw new Error('Too many files with the same name.');
 }
 
-module.exports = { requireProjectDir, resolveProjectFile, openUnique };
+// The music and voiceover files a project names (audio.music.file,
+// audio.voiceover[].file), as file:// URLs for the exporter. project.json can
+// be edited by hand, so only files inside the project's own music/ and
+// voiceover/ folders are handed out; anything else, or a file that is gone,
+// is null and that sound is simply left out of the video.
+function audioFileUrls(projectDir, project) {
+  const url = (subdir, rel) => {
+    try {
+      const full = resolveProjectFile(projectDir, subdir, rel);
+      return fs.existsSync(full) ? pathToFileURL(full).href : null;
+    } catch {
+      return null;
+    }
+  };
+  const audio = project?.audio ?? {};
+  const voiceover = {};
+  for (const take of Array.isArray(audio.voiceover) ? audio.voiceover : []) {
+    if (typeof take?.id === 'string') voiceover[take.id] = url('voiceover', take.file);
+  }
+  return { music: audio.music ? url('music', audio.music.file) : null, voiceover };
+}
+
+module.exports = { requireProjectDir, resolveProjectFile, openUnique, audioFileUrls };

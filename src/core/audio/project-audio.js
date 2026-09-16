@@ -2,7 +2,7 @@
 // editor's preview, so what someone hears while editing is what the video
 // will have:
 //
-//   await renderProjectAudio(project, tl, inputs, options) -> { mix, pending }
+//   await renderProjectAudio(project, tl, inputs, options) -> { mix, pending, cleanUp }
 //
 //   inputs = {
 //     mic:       { [sourceKey]: { channels, sampleRate } },  // inside each recording's video
@@ -18,7 +18,9 @@
 //     sampleRate, onProgress(fraction), denoiseOptions
 //   }
 //
-// `mix` is mixTracks()'s result, or null when there is nothing to hear.
+// `mix` is mixTracks()'s result, or null when there is nothing to hear;
+// `cleanUp` names the noise removal that ran ('rnnoise', or 'spectral' when
+// the wasm couldn't load), or null.
 //
 // The steps:
 //   1. Voice clean-up and levelling ("Clean up background noise", "Even out
@@ -32,7 +34,7 @@
 //   4. Music fitted to the video, lowered while anyone talks (music.js, duck.js).
 //   5. mixTracks().
 
-import { denoise } from './denoise.js';
+import { denoiseWithInfo } from './denoise.js';
 import { level } from './level.js';
 import { recordingTracks } from './tracks.js';
 import { placeVoiceovers } from './voiceover.js';
@@ -58,15 +60,18 @@ async function voice(pcm, settings, { cache, quick, denoiseOptions, onProgress }
   if (hit?.promise) return { pcm: await hit.promise, ready: true };
   const promise = (async () => {
     let channels = pcm.channels;
+    let engine = null;
     if (settings.cleanUp) {
-      channels = await denoise(channels, pcm.sampleRate, {
+      const cleaned = await denoiseWithInfo(channels, pcm.sampleRate, {
         ...denoiseOptions,
         onProgress: (f) => onProgress?.(settings.level ? f * 0.8 : f)
       });
+      channels = cleaned.channels;
+      engine = cleaned.engine;
     }
     if (settings.level) channels = level(channels, pcm.sampleRate).channels;
     onProgress?.(1);
-    return { channels, sampleRate: pcm.sampleRate };
+    return { channels, sampleRate: pcm.sampleRate, engine };
   })();
   const entry = { promise, value: null };
   byKey?.set(key, entry);
@@ -85,6 +90,7 @@ export async function renderProjectAudio(project, tl, inputs = {}, {
   const audio = project.audio;
   const settings = { cleanUp: Boolean(audio.mic.cleanUp), level: Boolean(audio.mic.level) };
   let pending = false;
+  let cleanUp = null;
 
   // Every voice track to process, so progress can be reported across them.
   const jobs = [];
@@ -105,6 +111,7 @@ export async function renderProjectAudio(project, tl, inputs = {}, {
     });
     done += share;
     if (!out.ready) pending = true;
+    cleanUp ??= out.pcm.engine ?? null;
     (job.kind === 'mic' ? mic : voiceover)[job.key] = out.pcm;
   }
   onProgress?.(1);
@@ -117,6 +124,6 @@ export async function renderProjectAudio(project, tl, inputs = {}, {
     tracks.push(musicTrack(audio.music, inputs.music, tl.duration, { voiceTracks: voices }));
   }
   const heard = tracks.filter((t) => t && !t.muted && t.volume !== 0);
-  if (!heard.length || !(tl.duration > 0)) return { mix: null, pending };
-  return { mix: mixTracks(heard, { sampleRate, duration: tl.duration }), pending };
+  if (!heard.length || !(tl.duration > 0)) return { mix: null, pending, cleanUp };
+  return { mix: mixTracks(heard, { sampleRate, duration: tl.duration }), pending, cleanUp };
 }

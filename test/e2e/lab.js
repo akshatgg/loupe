@@ -186,11 +186,28 @@ function frequency(x, a, b, rate) {
   return ups.length > 2 ? ((ups.length - 1) * rate) / (ups.at(-1) - ups[0]) : 0;
 }
 
+// Amplitude of the `freq` sine in x[a, b) (Hann-windowed single DFT bin).
+function toneAmplitude(x, freq, a, b, rate) {
+  let re = 0;
+  let im = 0;
+  let wsum = 0;
+  for (let i = a; i < b; i++) {
+    const w = 0.5 - 0.5 * Math.cos((2 * Math.PI * (i - a)) / (b - a));
+    const ph = (2 * Math.PI * freq * i) / rate;
+    re += (x[i] ?? 0) * w * Math.cos(ph);
+    im += (x[i] ?? 0) * w * Math.sin(ph);
+    wsum += w;
+  }
+  return wsum > 0 ? (2 * Math.hypot(re, im)) / wsum : 0;
+}
+
 // request = {
 //   samples: [{ t, points: [{ x, y }] }],   output seconds / pixels
 //   snapshots: [{ t, name }],               PNGs saved through labHost
 //   sound: [{ from, to }],                  RMS and frequency per window
 //   onsetAfter                              first loud sample after this time
+//   bands: [{ freq, from, to }]             amplitude of one tone per window
+//   envelopes: [{ freq, from, to, step, window }]   that amplitude over time
 // }
 async function inspect(url, request = {}) {
   const buffer = await readFile(url, 'the export');
@@ -282,6 +299,17 @@ async function inspect(url, request = {}) {
         return { from, to, rms: rms(left, a, b), rmsRight: rms(right, a, b), frequency: frequency(left, a, b, rate) };
       })
     };
+    // Tones mixed together are told apart by frequency.
+    result.audio.bands = (request.bands ?? []).map(({ freq, from, to }) =>
+      ({ freq, from, to, amplitude: toneAmplitude(left, freq, Math.round(from * rate), Math.round(to * rate), rate) }));
+    result.audio.envelopes = (request.envelopes ?? []).map(({ freq, from, to, step = 0.005, window = 0.04 }) => {
+      const values = [];
+      for (let t = from; t <= to + 1e-9; t += step) {
+        const a = Math.round((t - window / 2) * rate);
+        values.push(toneAmplitude(left, freq, Math.max(0, a), Math.min(left.length, a + Math.round(window * rate)), rate));
+      }
+      return { freq, from, step, values };
+    });
     if (request.onsetAfter !== undefined) {
       const start = Math.round(request.onsetAfter * rate);
       let i = start;

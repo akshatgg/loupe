@@ -6,7 +6,8 @@
 // That replaces v1's one-handler-per-action IPC: there are only two calls,
 //
 //   project:load -> { project (v2), sources: { [key]: { video, cursor,
-//                    systemAudio, missing } } as file:// URLs, migrated }
+//                    systemAudio, missing } } as file:// URLs, migrated,
+//                    folder (file:// URL of the project folder) }
 //   project:save (project) -> { saved: true }
 //
 // A v1 project.json is migrated in memory on load and written as v2 on the
@@ -87,6 +88,8 @@ function sourceFiles(dir, project) {
   return out;
 }
 
+const folderUrl = (dir) => pathToFileURL(path.join(dir, path.sep)).href;
+
 function writeAtomic(dir, project) {
   const file = path.join(dir, 'project.json');
   const tmp = path.join(dir, `.project.json.${process.pid}.tmp`);
@@ -114,7 +117,9 @@ function createProjectStore({ delayMs = SAVE_DELAY_MS, onError = () => {} } = {}
     flush();
     const { project, migrated } = readProject(dir);
     known.set(dir, project.sources);
-    return { project, sources: sourceFiles(dir, project), migrated };
+    // `folder` (a file:// URL ending in "/") is where the editor finds the
+    // music and voiceover files the project names.
+    return { project, sources: sourceFiles(dir, project), migrated, folder: folderUrl(dir) };
   }
 
   // Checks the project now (so the editor hears about a bad one), writes it

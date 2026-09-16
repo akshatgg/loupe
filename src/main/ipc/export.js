@@ -15,6 +15,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { audioFileUrls } = require('./project-files');
 
 const RESOLUTIONS = ['720p', '1080p', '1440p', '4k'];
 const CODECS = ['h264', 'hevc'];
@@ -113,6 +114,8 @@ function buildJob(dir, rawOptions, { out } = {}) {
   const ex = project.export;
   const job = {
     project, sources, background,
+    // Music and voiceover takes, checked to be inside this project's folder.
+    audioFiles: audioFileUrls(dir, project),
     resolution: ex.resolution, codec: ex.codec, quality: ex.quality, fps: ex.fps
   };
   return { job, project, out: out ?? path.join(dir, `export-${width}x${height}.mp4`) };

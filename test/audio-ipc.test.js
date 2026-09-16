@@ -199,3 +199,32 @@ test('resolveProjectFile under Windows path rules: no drive-relative or stream n
     assert.throws(() => win.resolveProjectFile(dir, 'voiceover', bad), /Invalid file path/, bad);
   }
 });
+
+test('audioFileUrls hands out only existing music and voiceover files inside the project', () => {
+  const { audioFileUrls } = require('../src/main/ipc/project-files');
+  const { pathToFileURL } = require('node:url');
+  const dir = tmpDir('audio-urls');
+  fs.mkdirSync(path.join(dir, 'music'));
+  fs.mkdirSync(path.join(dir, 'voiceover'));
+  fs.writeFileSync(path.join(dir, 'music', 'Song #1.mp3'), 'x');
+  fs.writeFileSync(path.join(dir, 'voiceover', 'Voiceover.webm'), 'x');
+  fs.writeFileSync(path.join(dir, 'secret.webm'), 'x');
+  const urls = audioFileUrls(dir, {
+    audio: {
+      music: { file: 'music/Song #1.mp3' },
+      voiceover: [
+        { id: 'a', file: 'voiceover/Voiceover.webm' },
+        { id: 'b', file: '../secret.webm' },
+        { id: 'c', file: 'voiceover/../secret.webm' },
+        { id: 'd', file: 'voiceover/Gone.webm' }
+      ]
+    }
+  });
+  assert.strictEqual(urls.music, pathToFileURL(path.join(dir, 'music', 'Song #1.mp3')).href);
+  assert.match(urls.voiceover.a, /^file:\/\/.*\/voiceover\/Voiceover\.webm$/);
+  assert.deepStrictEqual([urls.voiceover.b, urls.voiceover.c, urls.voiceover.d], [null, null, null]);
+  assert.deepStrictEqual(audioFileUrls(dir, { audio: { music: { file: 'voiceover/Voiceover.webm' }, voiceover: [] } }),
+    { music: null, voiceover: {} });
+  assert.deepStrictEqual(audioFileUrls(dir, {}), { music: null, voiceover: {} });
+  fs.rmSync(dir, { recursive: true, force: true });
+});

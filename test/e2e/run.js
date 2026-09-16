@@ -107,9 +107,9 @@ async function makeFixtures(lab) {
   return { a, b };
 }
 
-// A 48 kHz stereo 16-bit WAV of the test tone, as native-win/WavFile.cs writes.
-function writeToneWav(file, seconds) {
-  const rate = 48000;
+// A stereo 16-bit WAV of a tone (the test tone unless told otherwise), as
+// native-win/WavFile.cs writes.
+function writeToneWav(file, seconds, { freq = TONE.freq, amp = TONE.amp, rate = 48000 } = {}) {
   const frames = seconds * rate;
   const buf = Buffer.alloc(44 + frames * 4);
   buf.write('RIFF', 0); buf.writeUInt32LE(36 + frames * 4, 4); buf.write('WAVE', 8);
@@ -117,7 +117,7 @@ function writeToneWav(file, seconds) {
   buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 4, 28); buf.writeUInt16LE(4, 32); buf.writeUInt16LE(16, 34);
   buf.write('data', 36); buf.writeUInt32LE(frames * 4, 40);
   for (let i = 0; i < frames; i++) {
-    const v = Math.round(TONE.amp * 32767 * Math.sin((2 * Math.PI * TONE.freq * i) / rate));
+    const v = Math.round(amp * 32767 * Math.sin((2 * Math.PI * freq * i) / rate));
     buf.writeInt16LE(v, 44 + i * 4);
     buf.writeInt16LE(v, 46 + i * 4);
   }
@@ -189,7 +189,9 @@ function frameTimes(inspection, fps, count) {
 // Output time of frame k (sampling exactly on frames).
 const frameAt = (t, fps = 60) => Math.round(t * fps) / fps;
 
-async function exportCase(lab, runner, name, project, { resolution = '720p', codec, samples = [], snapshots = [], sound = [], onsetAfter } = {}) {
+async function exportCase(lab, runner, name, project, {
+  resolution = '720p', codec, samples = [], snapshots = [], sound = [], onsetAfter, bands, envelopes
+} = {}) {
   const dir = path.join(OUT, 'cases', name);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'project.json'), JSON.stringify(project, null, 2));
@@ -218,7 +220,7 @@ async function exportCase(lab, runner, name, project, { resolution = '720p', cod
   const inspection = await lab.call('inspect', pathToFileURL(out).href, {
     samples: resolved.map(({ t, points }) => ({ t, points })),
     snapshots: snapshots.map((t) => ({ t: frameAt(t), name: `${name}-${t}s.png` })),
-    sound, onsetAfter
+    sound, onsetAfter, bands, envelopes
   });
   log(`  ${name}: ${result.width}x${result.height} ${result.codec}${result.hardware ? ' (hardware)' : ''}, ` +
       `${result.duration.toFixed(2)}s in ${seconds.toFixed(2)}s (${(result.duration / seconds).toFixed(1)}x)`);
@@ -447,6 +449,115 @@ const CASES = [
     const c = await exportCase(lab, runner, 'system-wav', p, { sound: [{ from: 0.3, to: 2.7 }] });
     basics(c, { width: 1152, height: 720, duration: 3 });
     checkTone(c.inspection.audio.windows[0], 'computer sound from system.wav');
+  }],
+
+  ['the whole sound: levelled mic, system audio, ducked music and a voiceover, in sync after a cut', async (lab, runner) => {
+    // A recording that talks (a 440 Hz tone) for its first 4 s and is quiet
+    // for the other 6, with computer sound (660 Hz) throughout; music is a
+    // 220 Hz tone at 44.1 kHz and the voiceover take an 880 Hz tone, so each
+    // part of the mix can be measured on its own.
+    const src = path.join(OUT, 'fixtures', 'mix');
+    fs.mkdirSync(src, { recursive: true });
+    await lab.call('makeRecording', {
+      name: 'fixtures/mix/raw.mp4', ...FIXTURE, duration: 10, codec: 'avc', palette: 'a',
+      sound: { ...TONE, silence: [4, 10] }
+    });
+    writeCursor(path.join(src, 'cursor.bin'), 10);
+    writeToneWav(path.join(src, 'system.wav'), 10, { freq: 660, amp: 0.25 });
+    const dir = path.join(OUT, 'cases', 'mix');
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(path.join(dir, 'music'), { recursive: true });
+    fs.mkdirSync(path.join(dir, 'voiceover'), { recursive: true });
+    writeToneWav(path.join(dir, 'music', 'Song.wav'), 20, { freq: 220, amp: 0.5, rate: 44100 });
+    const VO = { t: 7, seconds: 1.5, amp: 0.3 };
+    writeToneWav(path.join(dir, 'voiceover', 'Take.wav'), VO.seconds, { freq: 880, amp: VO.amp });
+
+    let p = P.createProject({
+      main: {
+        dir: src, width: FIXTURE.width, height: FIXTURE.height, duration: 10, fps: FIXTURE.fps,
+        video: 'raw.mp4', mic: true, systemAudio: 'system.wav', cursor: 'cursor.bin'
+      },
+      createdAt: 0
+    });
+    p = P.setStyle(p, { padding: 0, radius: 0, shadow: 0, cursor: { show: false } });
+    // Clean-up stays off: the noise remover (rightly) treats a pure tone as noise.
+    p = P.setAudio(p, {
+      mic: { cleanUp: false, level: true, volume: 1 },
+      system: { volume: 1 },
+      music: { file: 'music/Song.wav', volume: 0.3, duck: true },
+      voiceover: [{ id: 'vo1', file: 'voiceover/Take.wav', source: 'main', t: VO.t, volume: 1 }]
+    });
+    p = P.cutRange(p, 1, 2);
+    const tl = buildTimeline(p);
+    const voAt = tl.toOutput('main', VO.t);
+    const micEnd = tl.toOutput('main', 4);
+    assert.strictEqual(voAt, 6);
+    assert.strictEqual(micEnd, 3);
+
+    // What "Even out volume" makes of the mic tone, worked out by the core.
+    const { level } = require('../../src/core/audio/level.js');
+    const rate = 48000;
+    const micTone = new Float32Array(10 * rate);
+    for (let i = 0; i < 4 * rate; i++) micTone[i] = TONE.amp * Math.sin((2 * Math.PI * TONE.freq * i) / rate);
+    const levelled = level([micTone], rate).channels[0];
+    let peak = 0;
+    for (let i = rate; i < 3 * rate; i++) peak = Math.max(peak, Math.abs(levelled[i]));
+    // The switch evens out voiceover takes too (they are the same voice).
+    const voTone = new Float32Array(VO.seconds * rate);
+    for (let i = 0; i < voTone.length; i++) voTone[i] = VO.amp * Math.sin((2 * Math.PI * 880 * i) / rate);
+    const voLevelled = level([voTone, voTone], rate).channels[0]; // a stereo file
+    let voPeak = 0;
+    for (let i = rate / 4; i < rate; i++) voPeak = Math.max(voPeak, Math.abs(voLevelled[i]));
+
+    const band = (freq, from, to) => ({ freq, from, to });
+    const c = await exportCase(lab, runner, 'mix', p, {
+      bands: [
+        band(440, 0.3, 2.8), band(440, 3.2, 5.6),
+        band(660, 0.3, 2.8), band(660, 6.2, 8.5),
+        band(220, 0.5, 2.5), band(220, 4.4, 5.6),
+        band(880, 6.15, 7.35), band(880, 4.0, 5.9)
+      ],
+      envelopes: [
+        { freq: 880, from: 5.8, to: 6.3 },
+        { freq: 440, from: 2.8, to: 3.3 }
+      ]
+    });
+    basics(c, { width: 1152, height: 720, duration: 9 });
+    const [mic, micAfter, system, systemLate, musicDucked, musicFull, vo, voEarly] = c.inspection.audio.bands.map((b) => b.amplitude);
+    const near = (got, want, tol, what) => assert.ok(Math.abs(got - want) <= tol, `${what}: ${got.toFixed(4)}, expected ${want.toFixed(4)} ±${tol}`);
+    log(`    mic ${mic.toFixed(3)} (levelled from ${TONE.amp} to ${peak.toFixed(3)}), system ${system.toFixed(3)}, ` +
+        `music ${musicFull.toFixed(3)} / ducked ${musicDucked.toFixed(3)} (${(20 * Math.log10(musicDucked / musicFull)).toFixed(1)} dB), voiceover ${vo.toFixed(3)}`);
+    assert.ok(peak < TONE.amp * 0.6, `levelling should turn the loud tone down, got ${peak}`);
+    near(mic, peak, 0.02, 'levelled microphone');
+    assert.ok(micAfter < 0.01, `the mic is quiet after recording 4 s: ${micAfter}`);
+    near(system, 0.25, 0.015, 'computer sound');
+    near(systemLate, 0.25, 0.015, 'computer sound later');
+    near(musicFull, 0.15, 0.012, 'music at 30% while nobody talks');
+    near(20 * Math.log10(musicDucked / musicFull), -12, 1.5, 'music lowered under the voice (dB)');
+    near(vo, voPeak, 0.02, 'levelled voiceover');
+    assert.ok(voEarly < 0.01, `no voiceover before its moment: ${voEarly}`);
+
+    // Sync: where each tone crosses half its level, in output time.
+    const crossing = (env, level, rising) => {
+      const i = env.values.findIndex((v) => (rising ? v >= level : v <= level));
+      assert.ok(i > 0, `no crossing in the ${env.freq} Hz envelope`);
+      return env.from + i * env.step;
+    };
+    const [voEnv, micEnv] = c.inspection.audio.envelopes;
+    const voOnset = crossing(voEnv, voPeak / 2, true);
+    const micOffset = crossing(micEnv, peak / 2, false);
+    log(`    voiceover starts at ${voOnset.toFixed(3)}s (expected ${voAt}), mic stops at ${micOffset.toFixed(3)}s (expected ${micEnd})`);
+    near(voOnset, voAt, 0.03, 'voiceover start');
+    near(micOffset, micEnd, 0.03, 'end of the microphone tone');
+  }],
+
+  ['"Clean up background noise" runs the speech noise remover in the export window', async (lab, runner, fx) => {
+    let p = P.cutRange(baseProject(fx), 2, 8);
+    p = P.setAudio(p, { mic: { cleanUp: true, level: false } });
+    const c = await exportCase(lab, runner, 'clean-up', p);
+    basics(c, { width: 1152, height: 720, duration: 2 });
+    // Not the plain-JS fallback: the page is allowed to run the wasm model.
+    assert.strictEqual(c.result.cleanUp, 'rnnoise');
   }],
 
   ['4K export', async (lab, runner, fx) => {

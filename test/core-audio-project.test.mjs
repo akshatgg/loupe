@@ -131,6 +131,7 @@ test('clean-up runs once per track and settings; quick mode uses the cache or re
   const progress = [];
   const full = await renderProjectAudio(p, tl, inputs, { cache, onProgress: (f) => progress.push(f) });
   assert.strictEqual(full.pending, false);
+  assert.strictEqual(full.cleanUp, 'rnnoise');
   assert.strictEqual(progress.at(-1), 1);
   const rms = (x) => Math.sqrt(x.reduce((s, v) => s + v * v, 0) / x.length);
   assert.ok(rms(full.mix.channels[0]) < rms(noisy) * 0.3, 'steady noise is removed');

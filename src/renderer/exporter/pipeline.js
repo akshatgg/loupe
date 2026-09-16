@@ -10,6 +10,7 @@
 //   project,                       // v2 project (validated again here)
 //   sources: { [key]: { video, cursor, systemAudio } },   // file:// URLs or null
 //   background,                    // file:// URL of a background image, or null
+//   audioFiles: { music, voiceover: { [takeId]: url } },  // file:// URLs or null
 //   resolution, codec, quality, fps
 // }
 
@@ -17,12 +18,12 @@ import { loadProjectData } from '../../core/project.js';
 import { buildTimeline } from '../../core/timeline.js';
 import { drawFrame, exportSize } from '../../core/compose.js';
 import { parseCursorTrack } from '../../core/cursor.js';
-import { exportMix } from '../../core/audio/tracks.js';
+import { renderProjectAudio } from '../../core/audio/project-audio.js';
 import { isWav, parseWav } from '../../core/audio/wav.js';
 import { Muxer, StreamTarget } from '../../vendor/mp4-muxer/mp4-muxer.mjs';
 import { readFile, demux } from './demux.js';
 import { openVideoSource } from './video-source.js';
-import { decodeAudioTrack, encodeAudio } from './audio.js';
+import { decodeAudioTrack, decodeAudioFile, encodeAudio } from './audio.js';
 import { chooseVideoConfig, AUDIO_RATE, AUDIO_CHANNELS, KEYFRAME_SECONDS } from './encode.js';
 
 const WRITE_CHUNK_BYTES = 8 * 1024 * 1024;
@@ -77,6 +78,25 @@ async function openSources(job, project, keys, report) {
   return { opened, decoded };
 }
 
+// The music and voiceover takes the project uses. A take whose file is gone
+// is left out rather than failing the export; music the person chose is
+// expected, so a file that can't be read is an error they should see.
+async function openAddedSound(job, project) {
+  const files = job.audioFiles ?? {};
+  let music = null;
+  if (project.audio.music) {
+    if (!files.music) throw new Error("Couldn't find the music file. Remove the music or add it again.");
+    music = await decodeAudioFile(await readFile(files.music, 'the music'), 'the music');
+  }
+  const voiceover = {};
+  for (const take of project.audio.voiceover) {
+    const url = files.voiceover?.[take.id];
+    if (!url) continue;
+    voiceover[take.id] = await decodeAudioFile(await readFile(url, 'a voiceover'), 'a voiceover');
+  }
+  return { music, voiceover };
+}
+
 export async function exportProject(job, { write, progress = () => {}, signal } = {}) {
   const started = performance.now();
   const project = loadProjectData(job.project);
@@ -98,7 +118,20 @@ export async function exportProject(job, { write, progress = () => {}, signal } 
   };
 
   progress({ phase: 'sound' });
-  const mix = exportMix(project, tl, decoded);
+  // Clean-up, levelling, music with ducking and voiceovers: the same
+  // renderer the editor's preview plays (core/audio/project-audio.js).
+  const added = await openAddedSound(job, project);
+  checkAbort(signal);
+  let lastSound = 0;
+  const { mix, cleanUp } = await renderProjectAudio(project, tl, { ...decoded, ...added }, {
+    onProgress: (fraction) => {
+      const now = performance.now();
+      if (now - lastSound > PROGRESS_EVERY_MS || fraction === 1) {
+        lastSound = now;
+        progress({ phase: 'sound', fraction });
+      }
+    }
+  });
   const audioChunks = mix ? await encodeAudio(mix, { signal }) : [];
   checkAbort(signal);
 
@@ -194,6 +227,7 @@ export async function exportProject(job, { write, progress = () => {}, signal } 
   return {
     frames: plan.length, encoded, width, height, fps, duration: tl.duration,
     codec: video.config.codec, hardware: video.hardware, audio: audioChunks.length > 0,
+    cleanUp: cleanUp ?? 'none',
     seconds, speed: seconds > 0 ? tl.duration / seconds : 0
   };
 }
