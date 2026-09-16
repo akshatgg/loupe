@@ -71,5 +71,28 @@ module.exports = [
       eqeqeq: 'error'
     }
   },
+  // Captions: ES modules (docs/EDITOR-V2.md §2) -- the pure core, the page
+  // side and the module worker. Vendored builds are not ours to lint.
+  {
+    files: ['src/core/captions/**/*.js', 'src/core/layers/captions.js', 'src/renderer/captions/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: {
+        self: 'readonly', window: 'readonly', globalThis: 'readonly', console: 'readonly',
+        fetch: 'readonly', URL: 'readonly', Worker: 'readonly', postMessage: 'readonly',
+        performance: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly',
+        AbortController: 'readonly', OfflineAudioContext: 'readonly', AudioDecoder: 'readonly',
+        EncodedAudioChunk: 'readonly'
+      }
+    },
+    rules: {
+      'no-unused-vars': 'error',
+      'no-undef': 'error',
+      'prefer-const': 'error',
+      eqeqeq: 'error'
+    }
+  },
+  { ignores: ['src/vendor/'] },
   { ignores: ['bin/', 'node_modules/', 'dist/', '.build-native/', 'web/node_modules/'] }
 ];

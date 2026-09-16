@@ -18,6 +18,7 @@ const { transition } = require('./bar-state');
 const { createLiveCamera, stepLiveCamera } = require('./live-camera');
 const { loadSettings, saveSettings, applySettingsPatch, inputTapArgs } = require('./settings');
 const { validateSpeedPaint, paintSpeed, retimePlan, outputDuration } = require('./speed');
+const { registerCaptionsIpc } = require('./ipc/captions');
 
 const rampMsOf = (project) => project.settings?.rampMs ?? 200;
 const outputDurationOf = (project) =>
@@ -799,6 +800,9 @@ function resolveExportSize(preset, source) {
     height: evenRound(source.height * scale)
   };
 }
+
+// Captions: speech model downloads and saving .srt/.vtt (see ipc/captions.js).
+registerCaptionsIpc({ ipcMain, app, dialog, BrowserWindow, getDefaultDir: () => editorDir });
 
 ipcMain.handle('project:load', () => {
   const project = loadProject(editorDir);
