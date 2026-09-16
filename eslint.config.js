@@ -2,7 +2,7 @@
 module.exports = [
   {
     files: ['**/*.js'],
-    ignores: ['src/renderer/**', 'web/**', 'src/core/**', 'test/e2e/lab.js'],
+    ignores: ['src/renderer/**', 'web/**', 'src/core/**', 'test/e2e/lab.js', 'test/e2e/export-lab.js'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'commonjs',
@@ -142,7 +142,7 @@ module.exports = [
   // hidden, sandboxed page: browser and WebCodecs globals, no Node. The e2e
   // lab page is the same kind of page.
   {
-    files: ['src/renderer/exporter/**/*.js', 'test/e2e/lab.js'],
+    files: ['src/renderer/exporter/**/*.js', 'test/e2e/lab.js', 'test/e2e/export-lab.js'],
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: 'module',
@@ -152,7 +152,8 @@ module.exports = [
         performance: 'readonly', OffscreenCanvas: 'readonly', createImageBitmap: 'readonly',
         VideoDecoder: 'readonly', VideoEncoder: 'readonly', VideoFrame: 'readonly',
         AudioDecoder: 'readonly', AudioEncoder: 'readonly', AudioData: 'readonly',
-        EncodedVideoChunk: 'readonly', EncodedAudioChunk: 'readonly', Blob: 'readonly'
+        EncodedVideoChunk: 'readonly', EncodedAudioChunk: 'readonly', Blob: 'readonly',
+        ImageDecoder: 'readonly'
       }
     },
     rules: {
