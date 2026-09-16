@@ -5,6 +5,7 @@
 import { h, icon, segmented } from './ui.js';
 import { exportSize } from '../../core/compose.js';
 import { setExport } from '../../core/project.js';
+import { createExportCaptions } from './export-captions.js';
 
 const RESOLUTIONS = [
   { value: '720p', label: '720p' },
@@ -29,6 +30,7 @@ export function createExportDialog({ store, loupe, player, beforeExport }) {
   document.body.append(dialog);
   let state = 'settings';
   let unlisten = null;
+  const captions = createExportCaptions({ store });
 
   const title = h('h2', { id: 'exportTitle' });
   const body = h('div', { class: 'export-body' });
@@ -62,7 +64,7 @@ export function createExportDialog({ store, loupe, player, beforeExport }) {
     showSize(ex.resolution);
     body.replaceChildren(
       segmented({ label: 'Format', options: [{ value: 'mp4', label: 'MP4 video' }], value: 'mp4', onChange: () => {} }),
-      res, sizeNote, quality);
+      res, sizeNote, quality, captions.fields());
     actions.replaceChildren(
       h('button', { type: 'button', class: 'btn', onclick: () => close() }, 'Cancel'),
       h('button', { type: 'button', class: 'btn primary', id: 'exportStart', onclick: () => run() }, 'Export'));
@@ -97,7 +99,7 @@ export function createExportDialog({ store, loupe, player, beforeExport }) {
     });
     try {
       await beforeExport();
-      const result = await loupe.exportVideo({ resolution: p.export.resolution, quality: p.export.quality, codec: p.export.codec });
+      const result = await loupe.exportVideo({ resolution: p.export.resolution, quality: p.export.quality, codec: p.export.codec, ...captions.options() });
       done(result);
     } catch (err) {
       const message = plainError(err);
@@ -116,7 +118,8 @@ export function createExportDialog({ store, loupe, player, beforeExport }) {
     body.replaceChildren(h('div', { class: 'export-done' },
       h('div', { class: 'done-icon' }, icon('check', { size: 26 })),
       h('div', {}, h('p', { class: 'file-name', id: 'exportFile' }, name),
-        h('p', { class: 'hint' }, `${result.width} × ${result.height} · ${Math.round(result.duration ?? 0)} seconds · made in ${Math.max(1, Math.round(result.seconds ?? 0))} s`))));
+        h('p', { class: 'hint' }, `${result.width} × ${result.height} · ${Math.round(result.duration ?? 0)} seconds · made in ${Math.max(1, Math.round(result.seconds ?? 0))} s`),
+        captions.doneNote(result))));
     actions.replaceChildren(
       h('button', { type: 'button', class: 'btn', id: 'exportReveal', onclick: () => loupe.revealExport() },
         icon('folder'), mac ? 'Show in Finder' : 'Show in Explorer'),

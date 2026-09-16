@@ -28,7 +28,8 @@ export function createStore(project, { save = () => {}, onError = () => {} } = {
       : selection.kind === 'zoom' ? p.zooms.some((z) => z.id === selection.id)
         : selection.kind === 'speed' ? p.speed.some((s) => s.source === selection.source &&
           s.start === selection.start && s.end === selection.end)
-          : false;
+          : selection.kind === 'caption' ? p.captions.segments.some((c) => c.id === selection.id)
+            : false;
     if (!alive) selection = null;
   }
 
