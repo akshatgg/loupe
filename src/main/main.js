@@ -2,7 +2,6 @@
 const electron = require('electron');
 const { app, BrowserWindow, ipcMain, systemPreferences, shell, dialog, globalShortcut } = electron;
 const path = require('node:path');
-const { pathToFileURL } = require('node:url');
 const os = require('node:os');
 const fs = require('node:fs');
 const { execFile } = require('node:child_process');
@@ -10,17 +9,12 @@ const { performance } = require('node:perf_hooks');
 const { createPermissions } = require('./permissions');
 const { createRecorder } = require('./recorder');
 const { spawnHelper, stopHelper } = require('./helpers');
-const { solveCamera } = require('./camera');
-const {
-  zoomSegments, validateSegment, removeZoom, undoRemoveZoom, restoreAllZooms
-} = require('./segments');
-const { loadProject, saveProject, readCursorTrack } = require('./project');
 const { validateRegion, clampRegionToBounds } = require('./region');
 const { transition } = require('./bar-state');
 const { createLiveCamera, stepLiveCamera } = require('./live-camera');
 const { loadSettings, saveSettings, applySettingsPatch, inputTapArgs } = require('./settings');
-const { validateSpeedPaint, paintSpeed, outputDuration } = require('./speed');
 const { createExportRunner, registerExportIpc } = require('./ipc/export');
+const { createProjectStore, registerProjectIpc } = require('./ipc/project');
 const {
   helperCommand, recordingsRoot, coordinateMapper, attachThumbnails
 } = require('./platform');
@@ -37,10 +31,6 @@ const coords = coordinateMapper(() => electron.screen);
 function excludeFromCapture(win) {
   if (IS_WINDOWS) win.setContentProtection(true);
 }
-
-const rampMsOf = (project) => project.settings?.rampMs ?? 200;
-const outputDurationOf = (project) =>
-  outputDuration(project.speedSegments ?? [], project.capture.duration, rampMsOf(project));
 
 const BIN_DIR = app.isPackaged
   ? path.join(process.resourcesPath, 'bin')
@@ -719,7 +709,25 @@ const exporter = createExportRunner({
   preload: path.join(__dirname, '..', 'preload', 'exporter.js'),
   page: path.join(__dirname, '..', 'renderer', 'exporter', 'index.html')
 });
-registerExportIpc({ ipcMain, runner: exporter, projectDir: () => editorDir });
+// The editor's project.json: loaded (v1 migrated) and saved through
+// ipc/project.js, which debounces the writes. Export and closing the editor
+// flush a save still waiting, so neither ever works from a stale file.
+const projects = createProjectStore({
+  onError: (err) => console.error('Loupe: could not save the project:', err)
+});
+registerProjectIpc({ ipcMain, store: projects, projectDir: () => editorDir });
+registerExportIpc({
+  ipcMain, runner: exporter, projectDir: () => editorDir, shell,
+  beforeStart: () => projects.flush()
+});
+
+function flushProject() {
+  try {
+    projects.flush();
+  } catch (err) {
+    console.error('Loupe: could not save the project:', err);
+  }
+}
 
 // editorDir/editorWindow are a single global "current editor" slot, not one per calling window. Two choices were
 // available for fixing the corruption this caused (record, leave the editor
@@ -735,37 +743,18 @@ registerExportIpc({ ipcMain, runner: exporter, projectDir: () => editorDir });
 // need every handler (project:load, deleteZoom, export:start) rewritten to
 // look up its caller's own state instead of a shared global -- a bigger,
 // riskier change for a capability nothing asks for.
-// Chrome below the preview: timeline plus the export row.
-const EDITOR_CHROME_HEIGHT = 150;
-
-function editorWindowSize(dir) {
-  const fallback = { width: 1080, height: 720 };
-  try {
-    const { source } = loadProject(dir);
-    if (!Number.isFinite(source?.width) || !Number.isFinite(source?.height)
-        || source.width <= 0 || source.height <= 0) return fallback;
-    const width = 1080;
-    const height = Math.round(width * (source.height / source.width)) + EDITOR_CHROME_HEIGHT;
-    return { width, height };
-  } catch {
-    // A project that cannot be read is the editor's problem to report, not a
-    // reason to fail before the window even opens.
-    return fallback;
-  }
-}
-
 function openEditorWindow(dir) {
   const prevWin = editorWindow;
   if (prevWin && !prevWin.isDestroyed()) prevWin.close();
+  flushProject();
 
   editorDir = dir;
-  // Size the editor to the recording's own aspect ratio so the preview fills
-  // it. A fixed 16:9 window against a 1.54 display leaves bars either side
-  // that look like a capture defect but are only unused window.
-  const { width: winW, height: winH } = editorWindowSize(dir);
+  // Room for the preview, the sidebar and the timeline; the preview scales
+  // to whatever shape the video has.
   const win = new BrowserWindow({
-    width: winW, height: winH, title: 'Loupe — Edit',
-    webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
+    width: 1280, height: 840, minWidth: 900, minHeight: 600, title: 'Loupe — Edit',
+    backgroundColor: '#161618',
+    webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js'), sandbox: true, contextIsolation: true }
   });
   editorWindow = win;
   win.loadFile(path.join(__dirname, '..', 'renderer', 'editor', 'index.html'));
@@ -778,89 +767,12 @@ function openEditorWindow(dir) {
     // (or worse, leave dangling) the state of the editor that is actually
     // live, which is the exact corruption this fix exists to prevent.
     if (editorWindow === win) editorWindow = null;
+    flushProject();
     // Closing the editor mid-export stops the export: nobody is left to see
     // it finish, and its partial file is removed (ipc/export.js).
     if (exporter.busy()) exporter.cancel();
   });
   return editorWindow;
-}
-
-function cameraFor(dir) {
-  const project = loadProject(dir);
-  const cursorTrack = readCursorTrack(dir);
-  return solveCamera({
-    keyframes: project.zoomKeyframes,
-    cursorTrack,
-    duration: project.capture.duration,
-    width: project.source.width,
-    height: project.source.height
-  });
-}
-
-ipcMain.handle('project:load', () => {
-  const project = loadProject(editorDir);
-  const video = path.join(editorDir, project.capture?.file ?? 'raw.mov');
-  return {
-    dir: editorDir,
-    project,
-    video,
-    // A file:// URL built properly, so Windows paths (C:\...) load too.
-    videoUrl: pathToFileURL(video).href,
-    segments: zoomSegments(project.zoomKeyframes, project.capture.duration),
-    camera: cameraFor(editorDir),
-    // For the preview to draw the cursor the export will draw (the capture
-    // itself never contains it). Shape isn't drawn yet, so it isn't sent.
-    cursor: readCursorTrack(editorDir).map(({ t, x, y }) => ({ t, x, y })),
-    outputDuration: outputDurationOf(project)
-  };
-});
-
-// The editor's speed track: set a stretch of the recording to a speed (1x
-// puts it back to normal). Validated here -- the renderer isn't a trust
-// boundary -- and stored in recording time, so zooms stay glued to their
-// frames whatever the speed around them (PRD FR-24).
-ipcMain.handle('project:paintSpeed', (_e, rawPaint) => {
-  const project = loadProject(editorDir);
-  const paint = validateSpeedPaint(rawPaint, project.capture.duration);
-  project.speedSegments = paintSpeed(project.speedSegments ?? [], paint);
-  saveProject(editorDir, project);
-  return { project, outputDuration: outputDurationOf(project) };
-});
-
-// The editor's "Show cursor" switch. Persisted in project.json, which is
-// what Render.swift reads at export -- so preview and export always agree.
-ipcMain.handle('project:setShowCursor', (_e, show) => {
-  if (typeof show !== 'boolean') {
-    throw new Error(`Invalid showCursor: ${JSON.stringify(show)}`);
-  }
-  const project = loadProject(editorDir);
-  project.settings = { ...project.settings, showCursor: show };
-  saveProject(editorDir, project);
-  return { project };
-});
-
-ipcMain.handle('project:deleteZoom', (_e, rawSegment) => {
-  // The renderer is not a trust boundary, the same as record:start's
-  // rawOpts -- see validateSegment for why. Without this, a malformed
-  // payload like {start: -Infinity, end: Infinity} would wipe every
-  // keyframe and persist it via saveProject below.
-  const segment = validateSegment(rawSegment);
-  return updateZooms((project) => removeZoom(project, segment));
-});
-
-// Zoom removal is non-destructive (segments.js removeZoom), so the editor
-// can take any of it back: the last removal, or all of them.
-ipcMain.handle('project:undoZoomDelete', () => updateZooms(undoRemoveZoom));
-ipcMain.handle('project:restoreZooms', () => updateZooms(restoreAllZooms));
-
-function updateZooms(change) {
-  const project = change(loadProject(editorDir));
-  saveProject(editorDir, project);
-  return {
-    project,
-    segments: zoomSegments(project.zoomKeyframes, project.capture.duration),
-    camera: cameraFor(editorDir)
-  };
 }
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
@@ -883,6 +795,8 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 // than hanging on Cmd+Q forever.
 let quitting = false;
 app.on('before-quit', (event) => {
+  // An edit made just before quitting is still waiting to be written.
+  flushProject();
   // Quitting mid-export is just another way an export never finishes: it is
   // cancelled and its partial file removed before the app goes.
   if (quitting || (!barWindow && !exporter.busy())) return;
@@ -921,6 +835,7 @@ module.exports = {
   __test__: {
     openEditorWindow,
     editorState: () => ({ editorDir, editorWindow }),
+    projects,
     exporter,
     validateStartOptions
   }

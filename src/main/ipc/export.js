@@ -226,18 +226,31 @@ function createExportRunner({ BrowserWindow, preload, page, show = false }) {
 
 // export:start resolves with { file, frames, seconds, ... } once the video is
 // saved; progress goes to the window that asked, as export:progress.
-function registerExportIpc({ ipcMain, runner, projectDir }) {
+// `beforeStart` runs first (main flushes the editor's pending project save,
+// since the job is built from project.json on disk). export:reveal shows the
+// last exported file in Finder/Explorer -- only that file, whatever the
+// renderer asks, so it can't be used to open arbitrary folders.
+function registerExportIpc({ ipcMain, runner, projectDir, beforeStart = () => {}, shell = null }) {
+  let lastFile = null;
   ipcMain.handle('export:start', async (event, rawOptions) => {
     if (runner.busy()) throw new Error('An export is already in progress.');
     const dir = projectDir();
     if (!dir) throw new Error('There is no recording open to export.');
+    await beforeStart();
     const { job, out } = buildJob(dir, rawOptions);
     const sender = event.sender;
-    return runner.start(job, out, {
+    const result = await runner.start(job, out, {
       onProgress: (p) => { if (!sender.isDestroyed?.()) sender.send('export:progress', p); }
     });
+    lastFile = result.file;
+    return result;
   });
   ipcMain.handle('export:cancel', () => runner.cancel());
+  ipcMain.handle('export:reveal', () => {
+    if (!shell || !lastFile || !fs.existsSync(lastFile)) return false;
+    shell.showItemInFolder(lastFile);
+    return true;
+  });
 }
 
 module.exports = {

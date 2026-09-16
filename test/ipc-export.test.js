@@ -199,3 +199,27 @@ test('export:start exports the open recording and sends progress to the editor',
   assert.strictEqual(await handlers['export:cancel'](), false);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('export:start flushes the pending project save first; export:reveal shows only the last export', async () => {
+  const dir = v1Dir('reveal');
+  const handlers = {};
+  const ipcMain = { handle: (ch, fn) => { handlers[ch] = fn; } };
+  const order = [];
+  const runner = {
+    busy: () => false,
+    start: (job, out) => { order.push('start'); fs.writeFileSync(out, 'video'); return Promise.resolve({ file: out }); },
+    cancel: () => Promise.resolve(false)
+  };
+  const revealed = [];
+  registerExportIpc({
+    ipcMain, runner, projectDir: () => dir,
+    beforeStart: () => { order.push('flush'); },
+    shell: { showItemInFolder: (f) => revealed.push(f) }
+  });
+  assert.strictEqual(await handlers['export:reveal']({}, '/etc/passwd'), false, 'nothing exported yet');
+  const result = await handlers['export:start']({ sender: { send() {} } }, {});
+  assert.deepStrictEqual(order, ['flush', 'start']);
+  assert.strictEqual(await handlers['export:reveal']({}, '/etc/passwd'), true);
+  assert.deepStrictEqual(revealed, [result.file]);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
