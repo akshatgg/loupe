@@ -414,10 +414,10 @@ async function listMicrophones() {
     mics = [];
   }
   micSelect.textContent = '';
-  micSelect.append(new Option('Same as your computer', ''));
+  micSelect.append(new window.Option('Same as your computer', ''));
   mics.forEach((mic, i) => {
     // Device labels come from drivers: Option() sets text, never markup.
-    micSelect.append(new Option(mic.label || `Microphone ${i + 1}`, mic.deviceId));
+    micSelect.append(new window.Option(mic.label || `Microphone ${i + 1}`, mic.deviceId));
   });
   const chosen = microphoneChoice && mics.find((m) => m.deviceId === microphoneChoice.id);
   micSelect.value = chosen ? chosen.deviceId : '';
