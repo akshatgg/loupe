@@ -492,7 +492,14 @@ ipcMain.handle('permissions:open', (_e, pane) => permissions.openPane(pane));
 // presets, menus, updates and crash reports: see app-shell.js.
 const appShell = createAppShell({
   electron, openEditorWindow, showPicker, getEditorWindow: () => editorWindow,
-  getEditorDir: () => (editorWindow && !editorWindow.isDestroyed() ? editorDir : null)
+  getEditorDir: () => (editorWindow && !editorWindow.isDestroyed() ? editorDir : null),
+  // Opening a recording from the Library mid-recording would put the editor
+  // on screen (and in the video); mid-export it would close the exporting editor.
+  openBlocked: () => {
+    if (barWindow) return 'Finish or cancel the recording first, then open this one.';
+    if (exportChild) return 'An export is still running. Open this recording when it has finished.';
+    return null;
+  }
 });
 appShell.start();
 const currentSettings = () => appShell.settings.get();
@@ -610,7 +617,7 @@ ipcMain.handle('bar:start', async () => {
       if (!granted) recordMic = false;
     }
 
-    const dir = path.join(appShell.recordingsFolder(), String(Date.now()));
+    const dir = path.join(appShell.usableRecordingsFolder(), String(Date.now()));
     fs.mkdirSync(dir, { recursive: true });
 
     // Every Loupe-owned window that could be on screen right now -- the bar

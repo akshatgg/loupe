@@ -1,6 +1,6 @@
 // What the Library shows, as pure functions (no DOM), so searching, sorting
 // and the wording of dates and lengths are unit-tested
-// (test/library-model.test.js).
+// (test/shell-models.test.js).
 
 // "0:07", "2:05", "1:02:05". Unknown length: an empty string, never "NaN".
 export function formatDuration(seconds) {

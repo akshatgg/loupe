@@ -97,7 +97,9 @@ startBtn.onclick = async () => {
     startBtn.disabled = false;
     backBtn.disabled = false;
     setStartLabel('Start recording');
-    sourceLabelEl.textContent = `Could not start recording: ${err.message}`;
+    // IPC wraps the reason in "Error invoking remote method 'bar:start': Error: ".
+    const reason = String(err.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+    sourceLabelEl.textContent = `Could not start recording: ${reason}`;
   }
 };
 

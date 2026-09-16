@@ -214,7 +214,8 @@ function renameField(rec) {
 
 function render() {
   const now = Date.now();
-  const shown = filterAndSort(recordings, { query, sort, now });
+  // A folder that stopped working shows only the message, not stale cards.
+  const shown = loadError ? [] : filterAndSort(recordings, { query, sort, now });
   const grid = $('grid');
   const scroll = $('main').scrollTop;
   grid.textContent = '';
@@ -351,7 +352,8 @@ $('main').addEventListener('scroll', closeMenu);
 // ---- keyboard ---------------------------------------------------------------
 
 document.addEventListener('keydown', (e) => {
-  if (e.target.closest('input, select') || !$('menu').hidden) return;
+  // A key event sent to the document itself has no closest().
+  if (e.target.closest?.('input, select') || !$('menu').hidden) return;
   const mod = IS_WINDOWS ? e.ctrlKey : e.metaKey;
   const focused = document.activeElement?.closest?.('.card')?.dataset.id;
   const id = focused ?? selectedId;
@@ -407,6 +409,7 @@ $('sort').addEventListener('change', (e) => {
 });
 $('clearSearch').addEventListener('click', () => { $('search').value = ''; query = ''; render(); });
 $('retry').addEventListener('click', refresh);
+$('failedSettings').addEventListener('click', () => window.loupe.app.openSettings('general'));
 for (const b of [$('newRecording'), $('emptyNew')]) b.addEventListener('click', () => api.newRecording());
 
 api.onChanged(refresh);

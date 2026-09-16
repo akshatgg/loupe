@@ -1,5 +1,5 @@
 // The Settings window's wording and choices, as pure functions (no DOM), so
-// they are unit-tested (test/settings-model.test.js).
+// they are unit-tested (test/shell-models.test.js).
 
 export const SECTIONS = ['general', 'recording', 'export', 'updates', 'privacy', 'about'];
 

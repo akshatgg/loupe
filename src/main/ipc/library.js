@@ -18,6 +18,7 @@ const { pathToFileURL } = require('node:url');
 const THUMB = 'thumb.jpg';
 const MAX_TITLE = 120;
 // Export outputs are big and can be made again; a duplicate doesn't need them.
+const ABANDONED_COPY_MS = 60 * 60 * 1000;
 const SKIP_ON_DUPLICATE = /^export-.*\.(mp4|mov|webm|gif)$/i;
 
 function defaultTitle(createdAt, locale) {
@@ -95,12 +96,23 @@ function validTitle(title) {
 // for one) should be app.getLocale(): the windows format dates with it, while
 // the main process's own Intl default follows the system region instead, so
 // without it a title could read "06:06 pm" above a date line saying "18:06".
-function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
-  function rootReal() {
-    const r = root();
-    fs.mkdirSync(r, { recursive: true });
-    return fs.realpathSync(r);
+// Makes sure the recordings folder exists and can be written to, and returns
+// its real path. A folder chosen in Settings can be on a drive that has since
+// been unplugged, or one the user no longer has access to; the raw "EACCES:
+// permission denied, mkdir" means nothing to most people, so say what it is.
+function usableFolder(folder) {
+  try {
+    fs.mkdirSync(folder, { recursive: true });
+    fs.accessSync(folder, fs.constants.W_OK);
+    return fs.realpathSync(folder);
+  } catch {
+    throw new Error(`Loupe can't use the recordings folder ${folder}. If it's on a drive, connect it; or choose another folder in Settings.`);
   }
+}
+
+function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
+  const rootReal = () => usableFolder(root());
+  const copying = new Set();
 
   // The directory for `id`, or an error. See the note at the top.
   function resolve(id) {
@@ -196,6 +208,7 @@ function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
   async function duplicate(id) {
     const dir = resolve(id);
     const base = rootReal();
+    sweepAbandonedCopies(base);
     const source = entry(id, dir);
     let work;
     for (let n = 0; ; n++) {
@@ -210,6 +223,7 @@ function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
     // cp wants a target that doesn't exist yet; `work` only reserves the name.
     const target = path.join(work, 'copy');
     let copyId;
+    copying.add(work);
     try {
       await fs.promises.cp(dir, target, {
         recursive: true, errorOnExist: true, force: false,
@@ -227,10 +241,29 @@ function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
       while (fs.existsSync(path.join(base, String(stamp)))) stamp++;
       copyId = String(stamp);
       fs.renameSync(target, path.join(base, copyId));
+    } catch (err) {
+      if (err.code === 'ENOSPC') throw new Error('There isn’t enough free space on the disk to make a copy.');
+      throw err;
     } finally {
+      copying.delete(work);
       fs.rmSync(work, { recursive: true, force: true });
     }
     return entry(copyId, path.join(base, copyId));
+  }
+
+  // A copy cut short by Loupe quitting or crashing leaves its hidden folder
+  // behind -- possibly gigabytes nobody can see. Any that isn't being made
+  // right now and is over an hour old is removed (the age guards a second
+  // copy of Loupe that might still be working on one).
+  function sweepAbandonedCopies(base) {
+    let names = [];
+    try { names = fs.readdirSync(base); } catch { return; }
+    for (const name of names) {
+      const m = /^\.copying-(\d+)-\d+$/.exec(name);
+      const full = path.join(base, name);
+      if (!m || copying.has(full) || now() - Number(m[1]) < ABANDONED_COPY_MS) continue;
+      try { fs.rmSync(full, { recursive: true, force: true }); } catch { /* try again next time */ }
+    }
   }
 
   return { root, resolve, list, thumbnail, rename, duplicate };
@@ -245,8 +278,14 @@ function displayPath(p, home = os.homedir(), platform = process.platform) {
 
 // IPC for the Library window. `openEditor(dir)` is main.js's
 // openEditorWindow; `showPicker()` brings up the source picker;
-// `editorDir()` is the folder open in the editor right now, or null.
-function registerLibraryIpc({ ipcMain, electron, library, openEditor, showPicker, editorDir = () => null }) {
+// `editorDir()` is the folder open in the editor right now, or null;
+// `focusEditor()` brings that editor to the front; `openBlocked()` is a
+// plain-words reason another recording can't be opened right now (a
+// recording or an export in progress), or null.
+function registerLibraryIpc({
+  ipcMain, electron, library, openEditor, showPicker, editorDir = () => null,
+  focusEditor = () => {}, openBlocked = () => null
+}) {
   const { shell, dialog, BrowserWindow } = electron;
 
   const sameFolder = (a, b) => {
@@ -262,7 +301,20 @@ function registerLibraryIpc({ ipcMain, electron, library, openEditor, showPicker
     return { root, displayRoot: displayPath(root), recordings: library.list() };
   });
   ipcMain.handle('library:thumbnail', (_e, id) => library.thumbnail(id));
-  ipcMain.handle('library:open', (_e, id) => { openEditor(library.resolve(id)); });
+  // Opening replaces the editor, and closing an editor stops its export; so
+  // the recording already open is only brought to the front, and another one
+  // waits until a recording or export in progress has finished.
+  ipcMain.handle('library:open', (_e, id) => {
+    const dir = library.resolve(id);
+    const open = editorDir();
+    if (open && sameFolder(open, dir)) {
+      focusEditor();
+      return;
+    }
+    const blocked = openBlocked();
+    if (blocked) throw new Error(blocked);
+    openEditor(dir);
+  });
   ipcMain.handle('library:rename', (_e, id, title) => library.rename(id, title));
   ipcMain.handle('library:duplicate', (_e, id) => library.duplicate(id));
   ipcMain.handle('library:reveal', (_e, id) => { shell.showItemInFolder(library.resolve(id)); });
@@ -297,6 +349,6 @@ function registerLibraryIpc({ ipcMain, electron, library, openEditor, showPicker
 }
 
 module.exports = {
-  THUMB, MAX_TITLE, createLibrary, registerLibraryIpc,
+  THUMB, MAX_TITLE, createLibrary, registerLibraryIpc, usableFolder,
   defaultTitle, projectDuration, projectVideo, displayPath
 };

@@ -7,7 +7,7 @@ const { startDiagnostics } = require('./diagnostics');
 const { createUpdater } = require('./updates');
 const { buildMenuTemplate, appShortcuts } = require('./menu');
 const { recordingsRoot } = require('./platform');
-const { createLibrary, registerLibraryIpc } = require('./ipc/library');
+const { createLibrary, registerLibraryIpc, usableFolder } = require('./ipc/library');
 const { registerSettingsIpc } = require('./ipc/settings');
 const { registerPresetsIpc } = require('./ipc/presets');
 const { registerUpdatesIpc } = require('./ipc/updates');
@@ -21,17 +21,19 @@ const { registerAboutIpc } = require('./ipc/about');
 //   shell.ready()                 in app.whenReady (menus, launch update check)
 //   shell.settings                the settings store (get / patch / onChange)
 //   shell.recordingsFolder()      where a new recording goes
+//   shell.usableRecordingsFolder() the same, checked usable (throws a plain message)
 //   shell.openLibrary()           the Library window
 //   shell.openSettings(section?)  the Settings window, optionally at a section:
 //                                 general | recording | export | updates | privacy | about
 //   shell.recordingsChanged()     tell an open Library a recording was added
 //
 // `deps` from main.js: openEditorWindow(dir), showPicker(), getEditorWindow(),
-// getEditorDir() (the recording open in the editor, or null).
+// getEditorDir() (the recording open in the editor, or null),
+// openBlocked() (why the Library can't open a recording right now, or null).
 const SECTIONS = ['general', 'recording', 'export', 'updates', 'privacy', 'about'];
 const WINDOW_BG = '#2a2b2e';
 
-function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindow, getEditorDir }) {
+function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindow, getEditorDir, openBlocked }) {
   const { app, ipcMain, BrowserWindow } = electron;
   const preload = path.join(__dirname, '..', 'preload', 'shell.js');
   const renderer = (name) => path.join(__dirname, '..', 'renderer', name, 'index.html');
@@ -148,7 +150,16 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
       }
     });
     registerLibraryIpc({
-      ipcMain, electron, library, openEditor: openEditorWindow, showPicker, editorDir: () => getEditorDir?.() ?? null
+      ipcMain, electron, library, openEditor: openEditorWindow, showPicker,
+      editorDir: () => getEditorDir?.() ?? null,
+      focusEditor: () => {
+        const editor = getEditorWindow?.();
+        if (!editor || editor.isDestroyed()) return;
+        if (editor.isMinimized()) editor.restore();
+        editor.show();
+        editor.focus();
+      },
+      openBlocked: () => openBlocked?.() ?? null
     });
 
     // The Library follows the recordings folder when it changes.
@@ -201,6 +212,9 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
     start: () => { actions = start(); },
     ready,
     recordingsFolder: () => settings.get().recordingsFolder ?? defaultRecordingsFolder(),
+    // The same, created if needed; throws a plain-words error when it can't
+    // be used (an unplugged drive), before any recording starts.
+    usableRecordingsFolder: () => usableFolder(settings.get().recordingsFolder ?? defaultRecordingsFolder()),
     openLibrary,
     openSettings,
     recordingsChanged,

@@ -1,5 +1,7 @@
 'use strict';
 
+const { usableFolder } = require('./library');
+
 // Settings IPC, shared by the picker (zoom shortcuts) and the Settings
 // window. Every change goes through the settings store, which validates it
 // (settings.js) and announces it; this module forwards those announcements to
@@ -33,6 +35,15 @@ function registerSettingsIpc({ ipcMain, electron, store, defaultRecordingsFolder
       properties: ['openDirectory', 'createDirectory']
     });
     if (canceled || !filePaths[0]) return store.get();
+    // A read-only folder (a disk image, another user's folder) would only
+    // fail later, when a recording starts; say so now instead.
+    try {
+      usableFolder(filePaths[0]);
+    } catch {
+      // The user is already in Settings, so the Library's "choose another
+      // folder in Settings" would read oddly here.
+      throw new Error(`Loupe can't save recordings in ${filePaths[0]}. Choose another folder.`);
+    }
     return store.patch({ recordingsFolder: filePaths[0] }, { trusted: true });
   });
 

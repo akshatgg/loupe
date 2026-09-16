@@ -280,6 +280,38 @@ async function run() {
     editor.close();
   });
 
+  await check('a recording open in the editor can\'t be moved to the Trash', async () => {
+    await js(library, `document.querySelector('.card[data-id="${firstId}"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+    const editor = await waitFor('the editor', () => windowTitled('Loupe — Edit'));
+    const trashed = record.trash.length;
+    const asked = record.dialogs.length;
+    await js(library, `document.querySelector('.card[data-id="${firstId}"] .more').click()`);
+    await js(library, 'document.querySelector("#menu [data-action=trash]").click()');
+    await waitFor('the message', () => js(library, 'return /open in the editor/.test(document.getElementById("toast").textContent)'));
+    assert.strictEqual(record.trash.length, trashed);
+    assert.strictEqual(record.dialogs.length, asked, 'no confirmation is shown');
+    assert.ok(fs.existsSync(path.join(RECORDINGS, firstId)));
+    await shot(library, '08-library-trash-open-in-editor');
+    editor.close();
+    await waitFor('the editor to close', () => !windowTitled('Loupe — Edit'));
+  });
+
+  await check('Duplicate pressed twice quickly makes one copy', async () => {
+    const before = fs.readdirSync(RECORDINGS).filter((n) => !n.startsWith('.')).length;
+    await js(library, `
+      const card = document.querySelector('.card[data-id="${firstId}"]');
+      card.focus();
+      for (let i = 0; i < 2; i++) document.dispatchEvent(new KeyboardEvent('keydown', { key: 'd', metaKey: true, ctrlKey: true, bubbles: true }));`);
+    await waitFor('the copy listed', () => js(library, `return document.querySelectorAll('.card').length === ${before + 1}`));
+    await sleep(500);
+    assert.strictEqual(fs.readdirSync(RECORDINGS).filter((n) => !n.startsWith('.')).length, before + 1);
+    // Tidy up so the checks below see the same list as before.
+    const copyId = await js(library, `return [...document.querySelectorAll('.card')].find((c) => c.querySelector('.title').textContent === 'Product tour copy').dataset.id`);
+    fs.rmSync(path.join(RECORDINGS, copyId), { recursive: true, force: true });
+    await js(library, 'window.dispatchEvent(new Event("focus"))');
+    await waitFor('the list', () => js(library, `return document.querySelectorAll('.card').length === ${before}`));
+  });
+
   await check('New recording shows the picker', async () => {
     picker.hide();
     await js(library, 'document.getElementById("newRecording").click()');
@@ -317,6 +349,38 @@ async function run() {
     await js(settingsWin, 'document.getElementById("resetFolder").click()');
     await waitFor('reset', () => readSettings().recordingsFolder === null);
     await waitFor('the default path shown', () => js(settingsWin, `return document.getElementById('folderPath').textContent === ${JSON.stringify(RECORDINGS)}`));
+  });
+
+  await check('choosing a folder that can\'t be used is refused with a plain message', async () => {
+    const blocker = path.join(TMP, 'a file');
+    fs.writeFileSync(blocker, 'x');
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path.join(blocker, 'Loupe')] });
+    await js(settingsWin, 'document.getElementById("changeFolder").click()');
+    await waitFor('the message', () => js(settingsWin, 'return /can\'t save recordings in .*Choose another folder/.test(document.getElementById("toast").textContent)'));
+    assert.strictEqual(readSettings().recordingsFolder, null);
+    assert.doesNotMatch(await js(settingsWin, 'return document.getElementById("toast").textContent'), /invoking remote method/);
+  });
+
+  await check('a recordings folder that can\'t be reached is explained in the Library', async () => {
+    // A folder on a "drive" that is then unplugged: it worked when chosen,
+    // and a file now stands where its parent was, so it can't be made again.
+    const drive = path.join(TMP, 'Drive');
+    const unreachable = path.join(drive, 'Loupe');
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [unreachable] });
+    await js(settingsWin, 'document.getElementById("changeFolder").click()');
+    await waitFor('saved', () => readSettings().recordingsFolder === unreachable);
+    fs.rmSync(drive, { recursive: true, force: true });
+    fs.writeFileSync(drive, 'x');
+    await js(library, 'window.dispatchEvent(new Event("focus"))');
+    await waitFor('the message', () => js(library, 'return !document.getElementById("failed").hidden'));
+    assert.match(await js(library, 'return document.getElementById("failedText").textContent'), /can't use the recordings folder .*connect it/);
+    assert.strictEqual(await js(library, 'return document.querySelectorAll(".card").length'), 0);
+    await shot(library, '09-library-folder-unreachable');
+    await js(library, 'document.getElementById("failedSettings").click()');
+    await js(settingsWin, 'document.getElementById("resetFolder").click()');
+    await waitFor('reset', () => readSettings().recordingsFolder === null);
+    await waitFor('the Library back', () => js(library, 'return document.getElementById("failed").hidden && document.querySelectorAll(".card").length > 0'));
+    dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [EMPTY_FOLDER] });
   });
 
   await check('Recording: zoom shortcuts use the same capture fields as the picker', async () => {

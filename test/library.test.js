@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
-const { createLibrary, registerLibraryIpc, projectDuration, displayPath, THUMB } = require('../src/main/ipc/library');
+const { createLibrary, registerLibraryIpc, projectDuration, displayPath, THUMB, usableFolder } = require('../src/main/ipc/library');
 const { createProject, saveProject } = require('../src/main/project');
 
 function setup() {
@@ -170,6 +170,19 @@ test('two duplicates at once make two complete copies, and a copy in progress is
   assert.strictEqual(slow.list().length, 3);
   await pending;
   assert.strictEqual(slow.list().length, 4);
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
+test('a recordings folder that can\'t be used says so in plain words', () => {
+  const { base } = setup();
+  const file = path.join(base, 'not-a-folder');
+  fs.writeFileSync(file, 'x');
+  const missing = path.join(file, 'Loupe'); // can never be created
+  assert.throws(() => createLibrary({ root: () => missing }).list(),
+    (err) => err.message === `Loupe can't use the recordings folder ${missing}. If it's on a drive, connect it; or choose another folder in Settings.`);
+  assert.throws(() => usableFolder(missing), /connect it/);
+  const fine = path.join(base, 'new', 'Loupe');
+  assert.strictEqual(usableFolder(fine), fs.realpathSync(fine));
   fs.rmSync(base, { recursive: true, force: true });
 });
 
