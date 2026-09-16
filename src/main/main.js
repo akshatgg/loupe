@@ -18,6 +18,8 @@ const { transition } = require('./bar-state');
 const { createLiveCamera, stepLiveCamera } = require('./live-camera');
 const { loadSettings, saveSettings, applySettingsPatch, inputTapArgs } = require('./settings');
 const { validateSpeedPaint, paintSpeed, retimePlan, outputDuration } = require('./speed');
+const { registerShareIpc } = require('./ipc/share');
+const { registerFileActionsIpc } = require('./ipc/fileActions');
 
 const rampMsOf = (project) => project.settings?.rampMs ?? 200;
 const outputDurationOf = (project) =>
@@ -627,6 +629,10 @@ ipcMain.handle('bar:start', async () => {
 });
 
 ipcMain.handle('record:stop', stopRecording);
+
+// Export follow-ups: share links, copy/drag/reveal the exported file.
+registerShareIpc(ipcMain);
+registerFileActionsIpc(ipcMain);
 
 // Whether the Control+Shift+S stop-recording shortcut is actually held by
 // us. globalShortcut.register() returns false (not a rejection/throw) when

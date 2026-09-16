@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shared recording · Loupe</title>
+<meta name="description" content="A screen recording shared with Loupe. Watch it in your browser or download it. Shared links last 7 days.">
+<!-- Shares are private-ish: whoever has the link can watch, nobody else should find it. -->
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#1a1a1c">
+<meta name="color-scheme" content="dark">
+
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
+<!-- Link previews (Slack, iMessage, X...) read these without running any
+     script, so they describe shares in general rather than this one. -->
+<meta property="og:type" content="video.other">
+<meta property="og:site_name" content="Loupe">
+<meta property="og:title" content="A screen recording shared with Loupe">
+<meta property="og:description" content="Watch it in your browser or download it. Shared links last 7 days.">
+<meta property="og:image" content="https://loupeapp.vercel.app/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Loupe: a Mac screen with a blue frame marking the zoomed-in area being recorded.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="A screen recording shared with Loupe">
+<meta name="twitter:description" content="Watch it in your browser or download it. Shared links last 7 days.">
+<meta name="twitter:image" content="https://loupeapp.vercel.app/og.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..800&amp;display=swap">
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/v.css">
+<script src="/v.js" defer></script>
+</head>
+<body class="share">
+
+<header class="top">
+  <div class="wrap top__in">
+    <a class="brand" href="/">
+      <img src="/icon.svg" alt="" width="30" height="30">
+      <span>Loupe</span>
+    </a>
+    <nav class="top__nav" aria-label="Main">
+      <a class="btn btn--small" href="/#download">Get Loupe</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap share__main">
+
+  <section class="share__player" data-state="loading" aria-live="polite">
+    <div class="share__frame" data-frame>
+      <p class="share__msg" data-loading>Loading…</p>
+    </div>
+
+    <div class="share__meta" data-ready hidden>
+      <div class="share__text">
+        <h1 class="share__title" data-title>Screen recording</h1>
+        <p class="share__sub">
+          <span data-expires></span>
+          <span class="share__dot" aria-hidden="true">·</span>
+          <span data-details></span>
+        </p>
+      </div>
+      <div class="share__actions">
+        <a class="btn btn--primary" data-download href="#">Download</a>
+      </div>
+    </div>
+
+    <div class="share__notice" data-notice hidden>
+      <h1 class="share__title" data-notice-title></h1>
+      <p data-notice-text></p>
+      <p><a class="btn" href="/">Go to the Loupe website</a></p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot__in">
+    <a class="brand" href="/">
+      <img src="/icon.svg" alt="" width="26" height="26">
+      <span>Loupe</span>
+    </a>
+    <p class="foot__p">Made with <a href="/">Loupe</a>, a free screen recorder that zooms while you record.</p>
+    <nav class="foot__nav" aria-label="Footer">
+      <a href="/#download">Download Loupe</a>
+      <a href="https://github.com/akshatgg/loupe">Source on GitHub</a>
+    </nav>
+  </div>
+</footer>
+
+<noscript>
+  <p class="wrap share__msg">Turn on JavaScript to watch this recording.</p>
+</noscript>
+</body>
+</html>
