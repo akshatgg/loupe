@@ -119,6 +119,7 @@ export function mixTracks(tracks, {
     for (const c of channels) for (let i = 0; i < n; i++) c[i] = Math.max(-1, Math.min(1, c[i]));
     return { channels, sampleRate, peak, limited: peak > 1 };
   }
-  const { channels: out, reductionDb } = limit(channels, sampleRate, { ceilingDb });
+  // L and R were allocated here, so they are limited in place.
+  const { channels: out, reductionDb } = limit(channels, sampleRate, { ceilingDb, inPlace: true });
   return { channels: out, sampleRate, peak, limited: reductionDb > 0 };
 }

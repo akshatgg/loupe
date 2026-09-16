@@ -69,8 +69,9 @@ export function pickMimeType(MediaRecorderImpl) {
 //
 // Returns {
 //   mimeType,
-//   level(): 0..1 peak of the last ~50 ms, for a input meter (0 without AudioContext),
+//   level(): 0..1 peak of the last ~50 ms, for an input meter (0 without AudioContext),
 //   elapsed(): seconds recorded,
+//   stopped: true once recording has ended (also if the mic went away),
 //   stop(): Promise<{ blob, mimeType, duration }>,
 //   cancel(): stops and discards
 // }
@@ -84,17 +85,35 @@ export async function startVoiceoverRecording({
   if (!mediaDevices?.getUserMedia || !MediaRecorderImpl) {
     throw new Error('Recording from a microphone isn’t available here.');
   }
-  const stream = await mediaDevices.getUserMedia({
-    audio: {
-      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-      echoCancellation: true,
-      noiseSuppression: false,
-      autoGainControl: false,
-      channelCount: 1
-    }
-  });
+  let stream;
+  try {
+    stream = await mediaDevices.getUserMedia({
+      audio: {
+        ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+        echoCancellation: true,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: 1
+      }
+    });
+  } catch (err) {
+    throw friendlyMicError(err);
+  }
+  const release = (ctx) => {
+    for (const track of stream.getTracks()) track.stop();
+    ctx?.close?.();
+  };
+
   const mimeType = pickMimeType(MediaRecorderImpl);
-  const recorder = new MediaRecorderImpl(stream, mimeType ? { mimeType, audioBitsPerSecond: 128000 } : undefined);
+  let recorder;
+  try {
+    recorder = new MediaRecorderImpl(stream, mimeType ? { mimeType, audioBitsPerSecond: 128000 } : undefined);
+  } catch {
+    // Without this the microphone would stay on (and its indicator lit)
+    // after a failure the person can't see.
+    release(null);
+    throw new Error('Recording from a microphone isn’t available here.');
+  }
   const chunks = [];
   recorder.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data); };
 
@@ -109,18 +128,36 @@ export async function startVoiceoverRecording({
       buf = new Float32Array(analyser.fftSize);
       ctx.createMediaStreamSource(stream).connect(analyser);
     } catch {
+      ctx?.close?.();
       ctx = null;
       analyser = null;
     }
   }
 
-  const release = () => {
-    for (const track of stream.getTracks()) track.stop();
-    ctx?.close?.();
-  };
-
   const startedAt = now();
   let stoppedAt = null;
+  let cancelled = false;
+  // The recorder can stop without being asked -- the microphone is unplugged
+  // or another app takes it -- so `finished` settles on the recorder's own
+  // stop event, and stop() hands back whatever was recorded until then
+  // instead of losing the take.
+  const finished = new Promise((resolve, reject) => {
+    recorder.onstop = () => {
+      stoppedAt ??= now();
+      release(ctx);
+      const type = recorder.mimeType || mimeType || 'audio/webm';
+      resolve({ blob: new Blob(chunks, { type }), mimeType: type, duration: (stoppedAt - startedAt) / 1000 });
+    };
+    recorder.onerror = (e) => {
+      stoppedAt ??= now();
+      release(ctx);
+      reject(e?.error ?? new Error('Recording from the microphone stopped unexpectedly.'));
+    };
+  });
+  // Nobody may be waiting yet; a failure is reported when stop() is called.
+  finished.catch(() => {});
+  let stopCalled = false;
+
   // A timeslice makes chunks arrive during recording, so a crash mid-take
   // loses at most a second rather than everything.
   recorder.start(1000);
@@ -128,36 +165,52 @@ export async function startVoiceoverRecording({
   return {
     mimeType: recorder.mimeType || mimeType,
     level() {
-      if (!analyser) return 0;
+      if (!analyser || recorder.state === 'inactive') return 0;
       analyser.getFloatTimeDomainData(buf);
       let p = 0;
       for (let i = 0; i < buf.length; i++) p = Math.max(p, Math.abs(buf[i]));
       return Math.min(1, p);
     },
     elapsed: () => ((stoppedAt ?? now()) - startedAt) / 1000,
+    // True once the recorder stopped by itself (for example the microphone
+    // was unplugged), so the editor can finish the take without a click.
+    get stopped() { return recorder.state === 'inactive'; },
     stop() {
-      return new Promise((resolve, reject) => {
-        if (recorder.state === 'inactive') {
-          reject(new Error('This recording has already stopped.'));
-          return;
-        }
-        recorder.onstop = () => {
-          stoppedAt = now();
-          release();
-          const type = recorder.mimeType || mimeType || 'audio/webm';
-          resolve({ blob: new Blob(chunks, { type }), mimeType: type, duration: (stoppedAt - startedAt) / 1000 });
-        };
-        recorder.onerror = (e) => { release(); reject(e.error ?? new Error('Recording failed.')); };
+      if (stopCalled || cancelled) return Promise.reject(new Error('This recording has already stopped.'));
+      stopCalled = true;
+      if (recorder.state !== 'inactive') {
+        stoppedAt = now();
         recorder.stop();
-      });
+      }
+      return finished;
     },
     cancel() {
-      recorder.onstop = null;
+      if (cancelled) return;
+      cancelled = true;
+      recorder.ondataavailable = null;
       if (recorder.state !== 'inactive') recorder.stop();
       chunks.length = 0;
-      release();
+      release(ctx);
     }
   };
+}
+
+// getUserMedia's errors are DOMExceptions named for the spec; turn the ones a
+// person can do something about into plain words.
+export function friendlyMicError(err) {
+  switch (err?.name) {
+    case 'NotAllowedError':
+    case 'SecurityError':
+      return new Error('Loupe isn’t allowed to use the microphone. Turn it on in your system’s privacy settings, then try again.');
+    case 'NotFoundError':
+    case 'OverconstrainedError':
+      return new Error('No microphone was found. Plug one in or choose another, then try again.');
+    case 'NotReadableError':
+    case 'AbortError':
+      return new Error('The microphone is being used by something else. Close that app and try again.');
+    default:
+      return new Error('The microphone couldn’t be started. Try again.');
+  }
 }
 
 // Sends the take to the main process, which writes it into the project

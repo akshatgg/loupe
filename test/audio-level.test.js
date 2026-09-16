@@ -116,3 +116,36 @@ test('silence stays silent; very quiet input is not raised past maxGainDb', () =
   assert.ok(res.gainDb <= 20);
   assert.ok(res.outputLoudness < -30);
 });
+
+test('streamed K-weighting gives the same loudness as filtering whole copies', () => {
+  // Reference: the textbook form, each biquad run over the whole track.
+  const biquad = (x, { b, a }) => {
+    const y = new Float64Array(x.length);
+    let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+    for (let i = 0; i < x.length; i++) {
+      y[i] = b[0] * x[i] + b[1] * x1 + b[2] * x2 - a[1] * y1 - a[2] * y2;
+      x2 = x1; x1 = x[i]; y2 = y1; y1 = y[i];
+    }
+    return y;
+  };
+  for (const sr of [48000, 44100]) {
+    const ch = [speechLike(6, sr, { seed: 9 }), whiteNoise(6 * sr, 0.05, 2)];
+    const { shelf, highpass } = kWeightingCoefficients(sr);
+    const hop = Math.round(0.1 * sr);
+    const k = ch.map((c) => biquad(biquad(c, shelf), highpass));
+    const blocks = Math.floor((ch[0].length - 4 * hop) / hop) + 1;
+    const powers = [];
+    for (let j = 0; j < blocks; j++) {
+      let acc = 0;
+      for (const kc of k) for (let i = j * hop; i < j * hop + 4 * hop; i++) acc += kc[i] * kc[i];
+      powers.push(acc / Math.round(0.4 * sr));
+    }
+    const lufs = (p) => -0.691 + 10 * Math.log10(p);
+    const abs = powers.filter((p) => lufs(p) > -70);
+    const rel = lufs(abs.reduce((s, p) => s + p, 0) / abs.length) - 10;
+    const kept = abs.filter((p) => lufs(p) > rel);
+    const expected = lufs(kept.reduce((s, p) => s + p, 0) / kept.length);
+    const got = measureLoudness(ch, sr).integrated;
+    assert.ok(Math.abs(got - expected) < 1e-6, `${sr}: ${got} vs ${expected}`);
+  }
+});

@@ -50,11 +50,13 @@ function saveVoiceover(projectDir, payload) {
   const dir = path.join(projectDir, SUBDIR);
   const { fd, name } = openUnique(dir, 'Voiceover', ext);
   try {
-    fs.writeSync(fd, bytes);
+    // writeFileSync keeps writing until every byte is down; a single
+    // writeSync may stop short on a large take.
+    fs.writeFileSync(fd, bytes);
   } catch (err) {
     fs.closeSync(fd);
     fs.rmSync(path.join(dir, name), { force: true });
-    throw err;
+    throw new Error('The voiceover couldn’t be saved. Check that there is free disk space.', { cause: err });
   }
   fs.closeSync(fd);
   return { file: `${SUBDIR}/${name}`, bytes: bytes.length };

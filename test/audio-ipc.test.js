@@ -149,3 +149,26 @@ test('safeStem keeps readable names and never produces a hidden or empty file', 
   assert.strictEqual(safeStem('/a/???.mp3'), 'Music');
   assert.strictEqual(safeStem('/a/Café del Mar.flac'), 'Café del Mar');
 });
+
+test('safeStem: names Windows would refuse are adjusted', () => {
+  assert.strictEqual(safeStem('/a/CON.mp3'), 'CON music');
+  assert.strictEqual(safeStem('/a/lpt1.wav'), 'lpt1 music');
+  assert.strictEqual(safeStem('/a/Song. .mp3'), 'Song');
+  assert.strictEqual(safeStem('/a/. . ..mp3'), 'Music');
+  assert.strictEqual(safeStem('/a/Console.mp3'), 'Console');
+});
+
+test('music:import that fails to copy leaves nothing behind and says so plainly', { skip: process.platform === 'win32' || process.getuid?.() === 0 }, async () => {
+  const project = tmpDir('music-copyfail');
+  const outside = tmpDir('songs-copyfail');
+  const song = path.join(outside, 'locked.mp3');
+  fs.writeFileSync(song, 'ID3 bytes');
+  fs.chmodSync(song, 0o000);
+  try {
+    const { invoke } = harness({ projectDir: project });
+    await assert.rejects(invoke('music:import', song), /couldn’t be copied/);
+    assert.deepStrictEqual(fs.readdirSync(path.join(project, 'music')), []);
+  } finally {
+    fs.chmodSync(song, 0o644);
+  }
+});

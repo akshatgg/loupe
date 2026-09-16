@@ -97,3 +97,34 @@ test('limiter: holds the ceiling, leaves quiet material bit-exact', () => {
   assert.ok(Math.abs(out.channels[0][5000] - loud[0][5000]) < 1e-6);
   assert.ok(Math.abs(out.channels[0][45000] - loud[0][45000]) < 1e-3);
 });
+
+test('slidingMin: ring-buffer deque matches brute force for tiny and window-wider-than-input L', () => {
+  for (const [len, L] of [[300, 1], [300, 3], [50, 600], [1, 5], [1000, 128]]) {
+    const v = whiteNoise(len, 1, len + L);
+    const got = slidingMin(v, L);
+    for (let i = 0; i < len; i++) {
+      let m = Infinity;
+      for (let j = Math.max(0, i - L); j <= Math.min(len - 1, i + L); j++) m = Math.min(m, v[j]);
+      assert.strictEqual(got[i], m, `len ${len} L ${L} i ${i}`);
+    }
+  }
+});
+
+test('limiter: inPlace scales the given arrays and matches the copying result', () => {
+  const sr = 48000;
+  // Dense overs everywhere, long enough for the running sum to be exercised.
+  const make = () => [whiteNoise(sr * 20, 1.8, 5), whiteNoise(sr * 20, 1.2, 6)];
+  const copy = limit(make(), sr, { ceilingDb: -1 });
+  const input = make();
+  const inPlace = limit(input, sr, { ceilingDb: -1, inPlace: true });
+  assert.strictEqual(inPlace.channels[0], input[0], 'same array back');
+  assert.deepStrictEqual(inPlace.channels, copy.channels);
+  assert.strictEqual(inPlace.reductionDb, copy.reductionDb);
+  assert.ok(peak(inPlace.channels) <= dbToGain(-1) + 1e-6, `peak ${peak(inPlace.channels)}`);
+  // Nothing over the ceiling: inPlace leaves the arrays untouched.
+  const quiet = [sine(sr, sr, 440, 0.5)];
+  const before = Float32Array.from(quiet[0]);
+  const q = limit(quiet, sr, { inPlace: true });
+  assert.strictEqual(q.channels[0], quiet[0]);
+  assert.deepStrictEqual(quiet[0], before);
+});

@@ -49,18 +49,6 @@ export function kWeightingCoefficients(sampleRate) {
   return { shelf, highpass };
 }
 
-function biquad(input, { b, a }) {
-  const out = new Float64Array(input.length);
-  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
-  for (let i = 0; i < input.length; i++) {
-    const x = input[i];
-    const y = b[0] * x + b[1] * x1 + b[2] * x2 - a[1] * y1 - a[2] * y2;
-    x2 = x1; x1 = x; y2 = y1; y1 = y;
-    out[i] = y;
-  }
-  return out;
-}
-
 // Channel weights: L, R, C at 1; the surround pair (indices 3, 4 in the
 // 5-channel layout BS.1770 assumes) at +1.5 dB. Mono and stereo -- all a
 // screen recording has -- are just 1s.
@@ -89,11 +77,23 @@ export function measureLoudness(channels, sampleRate) {
   const sub = new Float64Array(subBlocks);
   channels.forEach((ch, c) => {
     const w = channelWeight(c);
-    const k = biquad(biquad(ch, shelf), highpass);
+    // The two biquads run sample by sample into the sums rather than into
+    // filtered copies of the track: those copies were two 64-bit arrays per
+    // channel, ~2.8 GB for an hour of mono.
+    const sb = shelf.b, sa = shelf.a, hb = highpass.b, ha = highpass.a;
+    let x1 = 0, x2 = 0, y1 = 0, y2 = 0, z1 = 0, z2 = 0;
     for (let s = 0; s < subBlocks; s++) {
       let acc = 0;
       const end = (s + 1) * hop;
-      for (let i = s * hop; i < end; i++) acc += k[i] * k[i];
+      for (let i = s * hop; i < end; i++) {
+        const x = ch[i];
+        const y = sb[0] * x + sb[1] * x1 + sb[2] * x2 - sa[1] * y1 - sa[2] * y2;
+        x2 = x1; x1 = x;
+        const k = hb[0] * y + hb[1] * y1 + hb[2] * y2 - ha[1] * z1 - ha[2] * z2;
+        y2 = y1; y1 = y;
+        z2 = z1; z1 = k;
+        acc += k * k;
+      }
       sub[s] += acc * w;
     }
   });
@@ -173,7 +173,7 @@ export function level(channels, sampleRate, {
     : channels;
   const shapedLoudness = compressor ? measureLoudness(shaped, sampleRate).integrated : inputLoudness;
   let gainDb = Math.min(maxGainDb, target - shapedLoudness);
-  let result = limit(scale(shaped, dbToGain(gainDb)), sampleRate, { ceilingDb }).channels;
+  let result = limit(scale(shaped, dbToGain(gainDb)), sampleRate, { ceilingDb, inPlace: true }).channels;
   let outputLoudness = measureLoudness(result, sampleRate).integrated;
   // Limiting lowers loudness a little on peaky material; make up the
   // shortfall once (more gain pushes more into the limiter, so the second
@@ -181,7 +181,8 @@ export function level(channels, sampleRate, {
   const shortfall = target - outputLoudness;
   if (shortfall > 0.3 && gainDb < maxGainDb) {
     gainDb = Math.min(maxGainDb, gainDb + shortfall);
-    result = limit(scale(shaped, dbToGain(gainDb)), sampleRate, { ceilingDb }).channels;
+    result = null; // let the first attempt be freed before the second is built
+    result = limit(scale(shaped, dbToGain(gainDb)), sampleRate, { ceilingDb, inPlace: true }).channels;
     outputLoudness = measureLoudness(result, sampleRate).integrated;
   }
   return { channels: result, inputLoudness, outputLoudness, gainDb };

@@ -210,10 +210,18 @@ export function fft(re, im, inverse = false) {
 // "True peak" is estimated cheaply by also checking the midpoint between
 // neighbouring samples with a 4-point cubic; that catches most of the
 // inter-sample overs a D/A converter or AAC encoder would produce.
+//
+// inPlace: true scales `channels` themselves instead of copies, for callers
+// that own a buffer they no longer need unlimited (the mix, levelling).
 
-export function limit(channels, sampleRate, { ceilingDb = -1, lookaheadMs = 5, releaseMs = 80 } = {}) {
+export function limit(channels, sampleRate, {
+  ceilingDb = -1, lookaheadMs = 5, releaseMs = 80, inPlace = false
+} = {}) {
   const n = channels[0].length;
   const ceiling = dbToGain(ceilingDb);
+  // req holds the required gain per sample, and is then overwritten with the
+  // gain actually applied: an hour of 48 kHz audio is 173 million samples,
+  // so every extra full-length array here costs the export ~700 MB.
   const req = new Float32Array(n);
   let over = false;
   for (let i = 0; i < n; i++) {
@@ -230,20 +238,28 @@ export function limit(channels, sampleRate, { ceilingDb = -1, lookaheadMs = 5, r
     req[i] = p > ceiling ? ceiling / p : 1;
     if (req[i] < 1) over = true;
   }
-  if (!over) return { channels: channels.map((c) => new Float32Array(c)), reductionDb: 0 };
+  const output = () => (inPlace ? channels : channels.map((c) => new Float32Array(c)));
+  if (!over) return { channels: output(), reductionDb: 0 };
 
   const L = Math.max(1, Math.round((lookaheadMs / 1000) * sampleRate));
   const minned = slidingMin(req, L);
-  // Centred moving average of width 2L+1 via prefix sums (truncated at the
-  // ends -- the bound above holds for any subset of the window).
-  const prefix = new Float64Array(n + 1);
-  for (let i = 0; i < n; i++) prefix[i + 1] = prefix[i] + minned[i];
-  const gain = new Float32Array(n);
+  // Centred moving average of width 2L+1 as a running sum (truncated at the
+  // ends -- the bound above holds for any subset of the window). Rounding in
+  // the running sum could leave the average a hair above the required gain,
+  // so it is clamped to req[i], which the exact average never exceeds; req[i]
+  // is read before this loop overwrites it.
+  let sum = 0;
+  let a = 0;
+  let b = 0;
   for (let i = 0; i < n; i++) {
-    const a = Math.max(0, i - L);
-    const b = Math.min(n, i + L + 1);
-    gain[i] = (prefix[b] - prefix[a]) / (b - a);
+    const hi = Math.min(n, i + L + 1);
+    while (b < hi) sum += minned[b++];
+    const lo = Math.max(0, i - L);
+    while (a < lo) sum -= minned[a++];
+    const avg = sum / (b - a);
+    req[i] = avg < req[i] ? avg : req[i];
   }
+  const gain = req;
   const rel = Math.exp(-1 / ((releaseMs / 1000) * sampleRate));
   let g = 1;
   let minGain = 1;
@@ -254,29 +270,32 @@ export function limit(channels, sampleRate, { ceilingDb = -1, lookaheadMs = 5, r
     gain[i] = g;
     if (g < minGain) minGain = g;
   }
-  const out = channels.map((c) => {
-    const o = new Float32Array(n);
-    for (let i = 0; i < n; i++) o[i] = c[i] * gain[i];
-    return o;
-  });
+  const out = output();
+  for (const o of out) {
+    for (let i = 0; i < n; i++) o[i] *= gain[i];
+  }
   return { channels: out, reductionDb: -gainToDb(minGain) };
 }
 
-// Minimum over the window [i-L, i+L], O(n) with a monotonic deque.
+// Minimum over the window [i-L, i+L], O(n) with a monotonic deque. The deque
+// never holds more than the window, so it is a ring of 2L+2 slots rather than
+// a full-length array.
 export function slidingMin(values, L) {
   const n = values.length;
   const out = new Float32Array(n);
-  const dq = new Int32Array(n);
-  let head = 0;
-  let tail = 0;
+  const cap = 2 * L + 2;
+  const dq = new Int32Array(cap);
+  let head = 0; // ring index of the front
+  let size = 0;
   let next = 0;
   for (let i = 0; i < n; i++) {
     const hi = Math.min(n - 1, i + L);
     while (next <= hi) {
-      while (tail > head && values[dq[tail - 1]] >= values[next]) tail--;
-      dq[tail++] = next++;
+      while (size > 0 && values[dq[(head + size - 1) % cap]] >= values[next]) size--;
+      dq[(head + size) % cap] = next++;
+      size++;
     }
-    while (dq[head] < i - L) head++;
+    while (dq[head] < i - L) { head = (head + 1) % cap; size--; }
     out[i] = values[dq[head]];
   }
   return out;

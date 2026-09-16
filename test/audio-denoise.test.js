@@ -214,3 +214,14 @@ test('very short input passes through safely', async () => {
   assert.strictEqual(spectralGate([x], SR)[0].length, 100);
   assert.strictEqual((await denoise([x], SR))[0].length, 100);
 });
+
+test('progress is reported steadily through a long take, not once per channel', async () => {
+  const input = [speechLike(30, SR, { seed: 4 })];
+  const seen = [];
+  await denoiseWithInfo(input, SR, { engine: 'rnnoise', onProgress: (p) => seen.push(p) });
+  // 30 s is 3000 frames: a report every 5 s plus the final one.
+  assert.ok(seen.length >= 6, `only ${seen.length} progress reports`);
+  for (let i = 1; i < seen.length; i++) assert.ok(seen[i] >= seen[i - 1], 'never goes backwards');
+  assert.ok(seen.every((p) => p >= 0 && p <= 1));
+  assert.strictEqual(seen.at(-1), 1);
+});

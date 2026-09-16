@@ -48,22 +48,28 @@ function safeStem(p) {
     .normalize('NFC')
     .replace(/[\\/:*?"<>|\0-\x1f]/g, '')
     .replace(/^\.+/, '')
-    .trim()
-    .slice(0, 100);
-  return stem || 'Music';
+    .slice(0, 100)
+    // Windows drops trailing dots and spaces from names.
+    .replace(/[. ]+$/, '')
+    .trim();
+  if (!stem) return 'Music';
+  // Device names Windows won't create a file under, with any extension.
+  return /^(con|prn|aux|nul|com[0-9]|lpt[0-9])$/i.test(stem) ? `${stem} music` : stem;
 }
 
-function importMusic(projectDir, sourcePath) {
+// The copy is asynchronous: a song can be hundreds of megabytes (or sit on a
+// slow network drive), and a synchronous copy would freeze every window.
+async function importMusic(projectDir, sourcePath) {
   const { ext } = validateMusicPath(sourcePath);
   const dir = path.join(projectDir, SUBDIR);
   const { fd, name } = openUnique(dir, safeStem(sourcePath), ext);
   const dest = path.join(dir, name);
   fs.closeSync(fd);
   try {
-    fs.copyFileSync(sourcePath, dest);
+    await fs.promises.copyFile(sourcePath, dest);
   } catch (err) {
     fs.rmSync(dest, { force: true });
-    throw err;
+    throw new Error('That music file couldn’t be copied into the project.', { cause: err });
   }
   return { file: `${SUBDIR}/${name}`, name: path.basename(sourcePath) };
 }

@@ -55,6 +55,11 @@ export async function denoiseWithInfo(channels, sampleRate, {
 
 const clamp01 = (v) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1);
 
+// How often (in frames, 10 ms each) progress is reported: a long recording
+// takes a minute or more to clean up, and one report per channel would leave
+// the export's progress bar standing still that whole time.
+const PROGRESS_FRAMES = 500;
+
 function rnnoiseDenoise(rn, channels, sampleRate, strength, onProgress) {
   const total = channels.length * channels[0].length;
   let done = 0;
@@ -63,24 +68,31 @@ function rnnoiseDenoise(rn, channels, sampleRate, strength, onProgress) {
     const n = at48.length;
     // Feed enough extra silence to flush the delayed tail out of the model.
     const frames = Math.ceil((n + RNNOISE_DELAY) / RNNOISE_FRAME);
-    const wet = new Float32Array(frames * RNNOISE_FRAME);
+    // Output sample i comes out of the model RNNOISE_DELAY samples after
+    // input sample i, so it is written straight to its aligned place instead
+    // of keeping a second, delayed copy of the whole track.
+    const aligned = new Float32Array(n);
     const frame = new Float32Array(RNNOISE_FRAME);
     const state = rn.createState();
+    const toInput = input.length / Math.max(1, n);
     try {
       for (let f = 0; f < frames; f++) {
         const start = f * RNNOISE_FRAME;
         frame.fill(0);
         if (start < n) frame.set(at48.subarray(start, Math.min(n, start + RNNOISE_FRAME)));
         state.process(frame);
-        wet.set(frame, start);
+        const from = Math.max(0, RNNOISE_DELAY - start);
+        const to = Math.min(RNNOISE_FRAME, n + RNNOISE_DELAY - start);
+        for (let k = from; k < to; k++) {
+          const i = start + k - RNNOISE_DELAY;
+          aligned[i] = strength === 1 ? frame[k] : frame[k] * strength + at48[i] * (1 - strength);
+        }
+        if (onProgress && f % PROGRESS_FRAMES === PROGRESS_FRAMES - 1) {
+          onProgress(Math.min(1, (done + Math.min(n, start + RNNOISE_FRAME) * toInput) / total));
+        }
       }
     } finally {
       state.destroy();
-    }
-    const aligned = new Float32Array(n);
-    for (let i = 0; i < n; i++) {
-      const w = wet[i + RNNOISE_DELAY];
-      aligned[i] = strength === 1 ? w : w * strength + at48[i] * (1 - strength);
     }
     done += input.length;
     onProgress?.(done / total);

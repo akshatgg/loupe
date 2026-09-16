@@ -4,7 +4,8 @@ const assert = require('node:assert');
 const { Blob } = require('node:buffer');
 const { fitMusic, musicTrack, MUSIC_EXTENSIONS } = require('../src/core/audio/music.js');
 const {
-  anchorAt, createVoiceover, placeVoiceovers, pickMimeType, startVoiceoverRecording, saveVoiceover
+  anchorAt, createVoiceover, placeVoiceovers, pickMimeType, startVoiceoverRecording, saveVoiceover,
+  friendlyMicError
 } = require('../src/core/audio/voiceover.js');
 const { mixTracks, gainAt } = require('../src/core/audio/mix.js');
 const { speechLike, rmsDb } = require('./audio-fixtures');
@@ -118,13 +119,22 @@ test('voiceovers are anchored to source time and placed through the timeline', (
 // ---------------------------------------------------------------------------
 // Recording, against fake browser media APIs.
 
-function fakeMedia({ supported = ['audio/webm;codecs=opus'] } = {}) {
+function fakeMedia({ supported = ['audio/webm;codecs=opus'], getUserMediaError, recorderThrows } = {}) {
   const log = { constraints: null, stoppedTracks: 0, closed: 0 };
   const stream = { getTracks: () => [{ stop: () => { log.stoppedTracks++; } }] };
-  const mediaDevices = { getUserMedia: async (c) => { log.constraints = c; return stream; } };
+  const mediaDevices = {
+    getUserMedia: async (c) => {
+      log.constraints = c;
+      if (getUserMediaError) throw getUserMediaError;
+      return stream;
+    }
+  };
   class FakeRecorder {
     static isTypeSupported(t) { return supported.includes(t); }
-    constructor(s, opts) { this.stream = s; this.opts = opts; this.state = 'inactive'; this.mimeType = opts?.mimeType ?? ''; log.recorder = this; }
+    constructor(s, opts) {
+      if (recorderThrows) throw new Error('NotSupportedError');
+      this.stream = s; this.opts = opts; this.state = 'inactive'; this.mimeType = opts?.mimeType ?? ''; log.recorder = this;
+    }
     start(slice) { this.state = 'recording'; this.slice = slice; }
     stop() {
       this.state = 'inactive';
@@ -187,4 +197,45 @@ test('saveVoiceover sends the bytes through window.loupe', async () => {
   assert.deepStrictEqual([...sent.data], [1, 2, 3]);
   assert.strictEqual(sent.mimeType, 'audio/webm');
   await assert.rejects(saveVoiceover(new Blob([]), {}));
+});
+
+test('the mic going away mid-take still gives back what was recorded', async () => {
+  const media = fakeMedia();
+  let clock = 0;
+  const rec = await startVoiceoverRecording({ ...media, now: () => clock });
+  clock = 4000;
+  // The recorder stops by itself (device unplugged), before anyone asks.
+  media.log.recorder.stop();
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(rec.stopped, true);
+  assert.strictEqual(rec.level(), 0);
+  assert.strictEqual(media.log.stoppedTracks, 1, 'mic released right away');
+  clock = 9000;
+  const take = await rec.stop();
+  assert.strictEqual(take.blob.size, 6);
+  assert.strictEqual(take.duration, 4, 'length is up to when it actually stopped');
+  await assert.rejects(rec.stop(), /already stopped/);
+});
+
+test('failures starting the mic are explained in plain words and never leave it on', async () => {
+  const denied = Object.assign(new Error('Permission denied'), { name: 'NotAllowedError' });
+  await assert.rejects(startVoiceoverRecording(fakeMedia({ getUserMediaError: denied })), /isn’t allowed to use the microphone/);
+  const missing = Object.assign(new Error('Requested device not found'), { name: 'NotFoundError' });
+  await assert.rejects(startVoiceoverRecording(fakeMedia({ getUserMediaError: missing })), /No microphone was found/);
+  assert.match(friendlyMicError({ name: 'NotReadableError' }).message, /being used by something else/);
+  assert.match(friendlyMicError(new Error('odd')).message, /couldn’t be started/);
+
+  const media = fakeMedia({ recorderThrows: true });
+  await assert.rejects(startVoiceoverRecording(media), /isn’t available/);
+  assert.strictEqual(media.log.stoppedTracks, 1, 'the stream opened before the failure was stopped');
+});
+
+test('stop after cancel is refused and cancel twice is harmless', async () => {
+  const media = fakeMedia();
+  const rec = await startVoiceoverRecording(media);
+  rec.cancel();
+  rec.cancel();
+  assert.strictEqual(media.log.stoppedTracks, 1);
+  assert.strictEqual(media.log.closed, 1);
+  await assert.rejects(rec.stop(), /already stopped/);
 });
