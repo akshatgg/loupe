@@ -6,7 +6,8 @@
 // That replaces v1's one-handler-per-action IPC: there are only two calls,
 //
 //   project:load -> { project (v2), sources: { [key]: { video, cursor,
-//                    systemAudio, missing } } as file:// URLs, migrated }
+//                    systemAudio, webcam, keys, missing } } as file:// URLs,
+//                    migrated }
 //   project:save (project) -> { saved: true }
 //
 // A v1 project.json is migrated in memory on load and written as v2 on the
@@ -81,6 +82,8 @@ function sourceFiles(dir, project) {
       video: fileUrl(video),
       cursor: meta.cursor ? fileUrl(recordingFile(base, meta.cursor)) : null,
       systemAudio: meta.systemAudio ? fileUrl(recordingFile(base, meta.systemAudio)) : null,
+      webcam: meta.webcam?.file ? fileUrl(recordingFile(base, meta.webcam.file)) : null,
+      keys: meta.keys ? fileUrl(recordingFile(base, meta.keys)) : null,
       missing: !video || !fs.existsSync(video)
     };
   }

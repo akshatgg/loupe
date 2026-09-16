@@ -12,6 +12,7 @@ import { drawFrame, exportSize } from '../../core/compose.js';
 import { parseCursorTrack } from '../../core/cursor.js';
 import { clipLayout, clipIndexAt, rateAt } from './timeline-math.js';
 import { createAudioPreview } from './audio-preview.js';
+import { createVisualMedia } from './visual-media.js';
 
 // Beyond this the video is seeked rather than sped up or slowed down.
 const SEEK_DRIFT = 0.25;
@@ -34,6 +35,8 @@ export function createPlayer({ canvas, store, sources }) {
   let raf = 0;
   let size = { width: 2, height: 2 };
   let lastState = null;
+  // Webcam, crossfade pictures, shortcuts and the background picture.
+  const visuals = createVisualMedia({ sources, loupe: window.loupe, onChange: () => { dirty = true; } });
 
   for (const [key, files] of Object.entries(sources)) {
     if (!files.video) continue;
@@ -132,10 +135,10 @@ export function createPlayer({ canvas, store, sources }) {
     const rate = rateAt(p, layout, outT);
     syncVideo(at, rate, jumped);
     audio.sync({ project: p, at, rate, playing, jumped });
-    const frames = {};
+    const frames = visuals.sync({ project: p, tl, outT, at, rate, playing });
     const v = videos[at.source];
     if (v && v.readyState >= 2) frames[at.source] = v;
-    lastState = drawFrame(ctx, { project: p, tl, outT, frames, size, assets: { cursors } });
+    lastState = drawFrame(ctx, { project: p, tl, outT, frames, size, assets: { ...visuals.assets, cursors } });
     // Seeks land asynchronously; keep drawing until the frame has arrived.
     if (!playing && v && (v.seeking || v.readyState < 2)) dirty = true;
   }
@@ -178,6 +181,7 @@ export function createPlayer({ canvas, store, sources }) {
     get videos() { return videos; },
     get audio() { return audio; },
     get cursors() { return cursors; },
+    get visuals() { return visuals; },
     play: () => setPlaying(true),
     pause: () => setPlaying(false),
     toggle: () => setPlaying(!playing),
@@ -203,6 +207,7 @@ export function createPlayer({ canvas, store, sources }) {
       cancelAnimationFrame(raf);
       observer.disconnect();
       audio.stop();
+      visuals.destroy();
       for (const v of Object.values(videos)) { v.pause(); v.removeAttribute('src'); v.load(); }
     }
   };

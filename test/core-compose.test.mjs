@@ -235,10 +235,11 @@ test('hide when idle fades the cursor out after it sits still', () => {
   assert.strictEqual(at(5).length, 0);
 });
 
-test('every section 5 layer is registered in order; extension points draw nothing yet', () => {
+test('every section 5 layer is registered in order', () => {
   assert.deepStrictEqual(LAYERS.map((l) => l.layer.name),
     ['background', 'shadow', 'frame', 'cursor', 'annotations', 'keystrokes', 'webcam', 'captions', 'transitions']);
-  assert.deepStrictEqual(LAYERS.map((l) => l.clip), [false, false, true, true, true, false, false, false, false]);
+  // Annotations clip themselves: a title card covers the whole output.
+  assert.deepStrictEqual(LAYERS.map((l) => l.clip), [false, false, true, true, false, false, false, false, false]);
   let p = P.createProject({ main: MAIN });
   p = P.addAnnotation(p, { type: 'box', start: 0, end: 5 });
   assert.doesNotThrow(() => render(p));

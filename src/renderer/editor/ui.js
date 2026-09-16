@@ -52,7 +52,17 @@ const ICONS = {
   folder: ['M3.5 6.5h6l2 2h9v10h-17z'],
   cursor: ['M6 3.5v15l4-4 2.8 6 2.4-1.1-2.8-5.9H18z'],
   target: ['M12 4v4M12 16v4M4 12h4M16 12h4M12 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z'],
-  alert: ['M12 4 2.5 20h19zM12 10v4.5M12 17.2h.01']
+  alert: ['M12 4 2.5 20h19zM12 10v4.5M12 17.2h.01'],
+  // Visuals: annotations, webcam, transitions, pictures, presets.
+  text: ['M5 6.5V5h14v1.5M12 5v14M9.5 19h5'],
+  titleCard: ['M3.5 5.5h17v13h-17zM8 10.5h8M9.5 13.5h5'],
+  arrow: ['M5 19 18 6M10 6h8v8'],
+  box: ['M5 6.5h14v11H5z'],
+  blur: ['M4.5 4.5h4v4h-4zM10 4.5h4v4h-4zM15.5 4.5h4v4h-4zM4.5 10h4v4h-4zM15.5 10h4v4h-4zM4.5 15.5h4v4h-4zM10 15.5h4v4h-4zM15.5 15.5h4v4h-4zM10 10h4v4h-4z'],
+  webcam: ['M12 4a6 6 0 1 0 0 12 6 6 0 0 0 0-12zM12 8a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM8 20h8M12 16v4'],
+  transition: ['M4 6h7v12H4zM13 6h7v12h-7zM9 12h6M13.5 10l1.5 2-1.5 2'],
+  image: ['M4 5.5h16v13H4zM4 15.5l4.5-4.5 4 4 2.5-2.5 5 5M15.5 9.5h.01'],
+  star: ['M12 4l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 16.4 7.2 18.9l.9-5.4-3.9-3.8 5.4-.8z']
 };
 
 export function icon(name, { size = 18 } = {}) {

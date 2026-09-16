@@ -15,6 +15,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { resolveBackgroundFile } = require('./background');
 
 const RESOLUTIONS = ['720p', '1080p', '1440p', '4k'];
 const CODECS = ['h264', 'hevc'];
@@ -101,13 +102,17 @@ function buildJob(dir, rawOptions, { out } = {}) {
     sources[key] = {
       video: pathToFileURL(video).href,
       cursor: meta.cursor ? fileUrlIfExists(recordingFile(base, meta.cursor, 'cursor')) : null,
-      systemAudio: meta.systemAudio ? fileUrlIfExists(recordingFile(base, meta.systemAudio, 'sound')) : null
+      systemAudio: meta.systemAudio ? fileUrlIfExists(recordingFile(base, meta.systemAudio, 'sound')) : null,
+      webcam: meta.webcam?.file ? fileUrlIfExists(recordingFile(base, meta.webcam.file, 'webcam')) : null,
+      keys: meta.keys ? fileUrlIfExists(recordingFile(base, meta.keys, 'keyboard shortcuts')) : null
     };
   }
 
+  // Only a bundled wallpaper or a picture copied into this project (see
+  // ipc/background.js), never any other path project.json might name.
   const bg = project.style.background;
-  const background = bg.type === 'image' && typeof bg.value === 'string'
-    ? fileUrlIfExists(path.resolve(dir, bg.value)) : null;
+  const bgFile = bg.type === 'image' ? resolveBackgroundFile(dir, bg.value) : null;
+  const background = bgFile ? pathToFileURL(bgFile).href : null;
 
   const { width, height } = compose.exportSize(project);
   const ex = project.export;

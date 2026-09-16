@@ -235,13 +235,24 @@ export function migrate(v1, { createdAt = null } = {}) {
     clicks: (v1.clicks ?? []).filter((c) => isNum(c?.t) && isNum(c?.x) && isNum(c?.y))
       .map((c) => ({ t: c.t, x: c.x, y: c.y, button: typeof c.button === 'string' ? c.button : 'left' }))
   };
+  // A recording made by this version also wrote its v2 source fields
+  // (src/main/recording-v2.js): sound, webcam, shortcuts and pauses.
+  const recorded = isObj(v1.sources?.main) ? v1.sources.main : null;
+  if (recorded) {
+    if (typeof recorded.systemAudio === 'string') main.systemAudio = recorded.systemAudio;
+    if (isObj(recorded.webcam) && typeof recorded.webcam.file === 'string') main.webcam = { ...recorded.webcam };
+    if (typeof recorded.keys === 'string') main.keys = recorded.keys;
+    if (Array.isArray(recorded.pauses)) main.pauses = recorded.pauses.filter((q) => isNum(q?.start) && isNum(q?.end));
+  }
   const exp = v1.export ?? {};
   const project = {
     version: VERSION,
     title: defaultTitle(createdAt),
     createdAt,
     sources: { main },
-    clips: [{ id: 'c1', source: 'main', start: 0, end: duration }],
+    clips: main.pauses.length && isNum(duration)
+      ? clipsAround({ ...main, duration }, 'main', [])
+      : [{ id: 'c1', source: 'main', start: 0, end: duration }],
     speed: (v1.speedSegments ?? []).map((s) => ({ source: 'main', start: s.srcStart, end: s.srcEnd, rate: s.rate })),
     zooms: zoomsFromKeyframes(v1.zoomKeyframes, duration),
     // Everything v1 had no notion of is off, so a migrated project exports
@@ -254,7 +265,9 @@ export function migrate(v1, { createdAt = null } = {}) {
       cursor: {
         show: settings.showCursor !== false, size: 1, hideWhenIdle: false, smooth: false,
         highlight: 'none', clicks: settings.clickHighlights !== false
-      }
+      },
+      // Shortcuts are only recorded when the user asked to show them.
+      keystrokes: { show: main.keys !== null, position: 'bottom' }
     },
     annotations: [],
     transitions: [],
@@ -267,6 +280,15 @@ export function migrate(v1, { createdAt = null } = {}) {
       codec: EXPORT_CODECS.includes(exp.codec) ? exp.codec : 'h264'
     }
   };
+  // A new recording starts from the default style preset, which the
+  // recorder writes as `style` (older recordings have none).
+  if (isObj(v1.style)) {
+    try {
+      project.style = validateStyle(mergeStyle(project.style, v1.style));
+    } catch {
+      // A preset from a newer or hand-edited settings file: the plain look.
+    }
+  }
   return validateProject(project);
 }
 

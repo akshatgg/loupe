@@ -36,7 +36,8 @@ export const LAYERS = [
   { layer: { name: 'shadow', draw: frame.drawShadow }, clip: false },
   { layer: frame, clip: true },
   { layer: cursor, clip: true },
-  { layer: annotations, clip: true },
+  // Unclipped: title cards cover the whole output; the layer clips the rest.
+  { layer: annotations, clip: false },
   { layer: keystrokes, clip: false },
   { layer: webcam, clip: false },
   { layer: captions, clip: false },
@@ -155,7 +156,42 @@ export function frameState({ project, tl, outT, frames = {}, size, assets = {} }
   };
 }
 
+// A second canvas per output context, for a crossfade's other picture.
+const blendCanvases = new WeakMap();
+function blendCanvasFor(ctx, { width, height }) {
+  if (typeof globalThis.OffscreenCanvas !== 'function') return null;
+  let c = blendCanvases.get(ctx);
+  if (!c || c.canvas.width !== width || c.canvas.height !== height) {
+    const canvas = new globalThis.OffscreenCanvas(width, height);
+    c = { canvas, ctx: canvas.getContext('2d', { alpha: false }) };
+    blendCanvases.set(ctx, c);
+  }
+  return c;
+}
+
 export function drawFrame(ctx, options) {
+  const state = drawLayers(ctx, options);
+  // A crossfade: the other side's held picture (transitions.js), drawn as a
+  // whole frame of its own and blended over this one.
+  const other = options.frames?.[transitions.TRANSITION_FRAME];
+  if (other && !options.nested) {
+    const tr = transitions.transitionAt(state.project, state.tl, state.outT);
+    const blend = tr?.type === 'crossfade' ? blendCanvasFor(ctx, state.size) : null;
+    if (blend) {
+      drawLayers(blend.ctx, {
+        ...options, outT: tr.other.outT, nested: true,
+        frames: { ...options.frames, [tr.other.source]: other }
+      });
+      ctx.save();
+      ctx.globalAlpha = transitions.crossfadeMix(tr, state.outT);
+      ctx.drawImage(blend.canvas, 0, 0);
+      ctx.restore();
+    }
+  }
+  return state;
+}
+
+function drawLayers(ctx, options) {
   const state = frameState(options);
   let clipped = false;
   for (const { layer, clip } of LAYERS) {

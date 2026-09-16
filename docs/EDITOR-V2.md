@@ -110,6 +110,8 @@ item is attached to.
                                  // v1 in/out it replays; editing its time or level drops them
   style: {
     background: { type: "none"|"color"|"gradient"|"image", value },
+                                 // image value: "wallpaper:<id>" (src/core/wallpapers.js) or
+                                 // "background/<file>" copied into the project folder
     padding: 0.06,               // fraction of the output's short side
     radius: 12, shadow: 0.5,     // px at 1080p, 0..1
     aspect: "source"|"16:9"|"9:16"|"1:1"|"4:5",
@@ -119,7 +121,10 @@ item is attached to.
     webcam: { show: true, shape: "circle"|"rounded", size: 0.22, corner: "bottom-right" }
   },
   annotations: [{ id, type: "text"|"title"|"arrow"|"box"|"blur", source, start, end,
-                  x, y, w, h, x2, y2, text, color, size }],   // x..h are 0..1 of the content area
+                  x, y, w, h, x2, y2, text, color, size }],
+                                 // text: x,y = centre, 0..1 of the content area; arrow/box/blur:
+                                 // 0..1 of the recording's picture (they follow zooms); title:
+                                 // full frame, `color` is its background
   transitions: [{ after: clipId, type: "fade"|"crossfade"|"dip", duration: 0.5 }],
   audio: {
     mic:    { volume: 1, muted: false, cleanUp: true, level: true },
@@ -358,6 +363,40 @@ and the whole app recording with every addition on).
   saveSubtitles }`. Check: `npm run test:e2e:captions`.
 - Not yet: the editor's Captions panel is still the placeholder
   (`panels/captions.js`).
+
+### Visuals (wired)
+
+- Layers: `layers/annotations.js` (unclipped in `LAYERS` so title cards
+  cover the output; clips the rest itself; hidden areas pixelate by halving
+  steps and never fade), `layers/keystrokes.js` (`assets.keys[source]` =
+  keys.json, `normalizeKeys`, `badgesAt`), `layers/webcam.js` (picture in
+  `frames["<source>:webcam"]` for webcam time `t - offset`, `bubbleRect`),
+  `layers/transitions.js` (`transitionAt(project, tl, outT)`; fade/dip drawn
+  by the layer; crossfade blended in `drawFrame` from a second full frame of
+  the other side's held picture, passed as `frames["@transition"]`).
+- New recordings: `recorder.stop({ style })` writes the default preset's
+  style (main.js reads it with `presets.defaultPresetStyle`); `migrate` takes
+  `v1.style`, and the v2 source fields `webcam`, `keys`, `systemAudio`,
+  `pauses` (clips around pauses); shortcut badges start on when keys.json
+  was recorded.
+- Main: `ipc/background.js` (`background:choose` copies a picture into
+  `<project>/background/`, `background:url`, `resolveBackgroundFile` used by
+  the export job, so only wallpapers and project pictures are ever read).
+  `project:load` and the export job add `webcam` and `keys` URLs.
+  Preload: `window.loupe.background.{ choose, url }`.
+- Exporter: `visuals.js` (keys, webcam, held crossfade pictures) and
+  `webm-demux.js` (MediaRecorder WebM with unknown sizes, no Cues) feeding
+  the same `VideoSource`.
+- Editor: `visual-media.js` (webcam `<video>`, two held-picture videos for
+  crossfades, keys, background image) used by `player.js`;
+  `panels/annotations.js`, `panels/webcam.js`, `panels/style-extras.js`
+  (presets, pictures, keyboard); `annotation-overlay.js` (select, drag,
+  resize, double-click to type on the preview); `timeline-visuals.js`
+  (Notes track in lanes, transition buttons on clip joins);
+  `annotation-math.js`; `visuals.css`. Wallpapers: `src/assets/wallpapers`,
+  made by `electron packaging/make-wallpapers.js`.
+- Checks: `npm run test:e2e:visuals` (export pixels for each feature, then
+  the editor driven with the real mouse).
 
 ## 9. Share links
 

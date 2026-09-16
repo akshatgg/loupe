@@ -13,8 +13,9 @@ import zoom from './zoom.js';
 import audio from './audio.js';
 import captions from './captions.js';
 import annotations from './annotations.js';
+import webcam from './webcam.js';
 
-export const PANELS = [style, zoom, audio, captions, annotations];
+export const PANELS = [style, zoom, audio, captions, annotations, webcam];
 
 export function panelById(id) {
   return PANELS.find((p) => p.id === id) ?? null;
