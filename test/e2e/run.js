@@ -21,7 +21,7 @@ const { pathToFileURL } = require('node:url');
 
 const ROOT = path.join(__dirname, '..', '..');
 const OUT = path.join(__dirname, 'out');
-const { createExportRunner, buildJob } = require('../../src/main/ipc/export');
+const { createExportRunner, buildJob, registerExportIpc } = require('../../src/main/ipc/export');
 
 const P = require('../../src/core/project.js');
 const { buildTimeline } = require('../../src/core/timeline.js');
@@ -419,8 +419,73 @@ const CASES = [
     });
     basics(c, { width: 3456, height: 2160, duration: 1.5 });
     checkSamples(c, [plainAt(c.tl)]);
+  }],
+
+  ["the editor's Export and Cancel (preload + IPC) on a v1 project", async (lab, runner, fx) => {
+    // A v1 project as the current editor saves it, with a 2x stretch.
+    const v1 = require('../../src/main/project');
+    const { outputDuration } = require('../../src/main/speed');
+    const dir = path.join(OUT, 'cases', 'editor-v1');
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.mkdirSync(dir, { recursive: true });
+    fs.copyFileSync(path.join(fx.a, 'raw.mp4'), path.join(dir, 'raw.mp4'));
+    fs.copyFileSync(path.join(fx.a, 'cursor.bin'), path.join(dir, 'cursor.bin'));
+    const project = v1.createProject({ kind: 'display', width: 640, height: 400 },
+      { file: 'raw.mp4', fps: 60, duration: 8, hasMicTrack: true });
+    project.speedSegments = [{ srcStart: 2, srcEnd: 6, rate: 2 }];
+    v1.saveProject(dir, project);
+
+    const editor = await editorWindow(runner, dir);
+    const result = await editor.executeJavaScript(`new Promise((resolve) => {
+      const progress = [];
+      window.loupe.onExportProgress((p) => progress.push(p));
+      window.loupe.exportVideo({ resolution: '720p', codec: 'h264' })
+        .then((r) => resolve({ r, progress }), (e) => resolve({ error: e.message, progress }));
+    })`);
+    assert.ok(!result.error, result.error);
+    assert.strictEqual(result.r.file, path.join(dir, 'export-1152x720.mp4'));
+    const video = result.progress.filter((p) => p.phase === 'video');
+    assert.ok(video.length > 0 && video.at(-1).frame === video.at(-1).total, 'progress reaches the last frame');
+    const duration = outputDuration(project.speedSegments, 8, 200);
+    const inspection = await lab.call('inspect', pathToFileURL(result.r.file).href, { sound: [{ from: 0.2, to: 1.8 }] });
+    assert.strictEqual(inspection.frames, Math.ceil(duration * 60 - 1e-6));
+    checkTone(inspection.audio.windows[0], 'editor export tone');
+    log(`    v1 project with a 2x stretch: ${duration.toFixed(3)}s, ${inspection.frames} frames`);
+
+    fs.rmSync(result.r.file);
+    const cancelled = await editor.executeJavaScript(`new Promise((resolve) => {
+      let asked = false;
+      window.loupe.onExportProgress((p) => {
+        if (p.phase === 'video' && !asked) { asked = true; window.loupe.cancelExport(); }
+      });
+      window.loupe.exportVideo({ resolution: '720p' }).then(() => resolve('finished'), (e) => resolve(e.message));
+    })`);
+    assert.match(cancelled, /cancelled/);
+    const left = fs.readdirSync(dir).filter((f) => f.startsWith('export-'));
+    assert.deepStrictEqual(left, [], 'a cancelled export leaves nothing behind');
+    await editor.close();
   }]
 ];
+
+// A window with the app's own preload and the export IPC registered as
+// main.js registers it, standing in for the editor.
+let exportIpcDir = null;
+async function editorWindow(runner, dir) {
+  if (!editorWindow.registered) {
+    registerExportIpc({ ipcMain, runner, projectDir: () => exportIpcDir });
+    editorWindow.registered = true;
+  }
+  exportIpcDir = dir;
+  const win = new BrowserWindow({
+    show: false,
+    webPreferences: { preload: path.join(ROOT, 'src', 'preload', 'preload.js'), backgroundThrottling: false }
+  });
+  await win.loadFile(path.join(__dirname, 'lab.html'));
+  return {
+    executeJavaScript: (code) => win.webContents.executeJavaScript(code),
+    close: () => win.destroy()
+  };
+}
 
 function cursorPoint(c, at) {
   const meta = c.project.sources[at.source];
@@ -474,15 +539,19 @@ async function exportReal(lab, runner, source) {
 
 async function main() {
   fs.mkdirSync(OUT, { recursive: true });
-  // Snapshots from an earlier run would be mistaken for this one's.
-  for (const f of fs.readdirSync(OUT)) if (f.endsWith('.png')) fs.rmSync(path.join(OUT, f));
+  // Snapshots from an earlier run would be mistaken for this one's (those of
+  // other real recordings are kept).
+  const real = argValue('--real');
+  const mine = real ? `real-${path.basename(real)}-` : null;
+  for (const f of fs.readdirSync(OUT)) {
+    if (f.endsWith('.png') && (mine ? f.startsWith(mine) : !f.startsWith('real-'))) fs.rmSync(path.join(OUT, f));
+  }
   const runner = createExportRunner({
     BrowserWindow,
     preload: path.join(ROOT, 'src', 'preload', 'exporter.js'),
     page: path.join(ROOT, 'src', 'renderer', 'exporter', 'index.html')
   });
   const lab = await openLab();
-  const real = argValue('--real');
   if (real) {
     await exportReal(lab, runner, path.resolve(real));
     return 0;

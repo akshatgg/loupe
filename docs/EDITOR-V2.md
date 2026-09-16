@@ -199,6 +199,27 @@ or `AudioDecoder`), apply clean-up/levelling, follow `tl.audioPlan()` with WSOLA
 (MP4) or Opus (WebM). GIF: vendored gifenc, at most 15 fps and 960px wide by
 default.
 
+How it is wired (wave 1): `src/main/ipc/export.js` builds the job (project
+loaded and migrated, every file as a `file://` URL), opens
+`src/renderer/exporter/index.html` in a hidden sandboxed window with
+`src/preload/exporter.js`, and writes the positioned byte ranges the page
+sends to `<out>.part`, renamed when done; failure, cancel, closing the editor
+and quitting remove it. The editor calls `window.loupe.exportVideo(opts)`
+(`export:start`, resolves `{ file, frames, seconds, ... }`),
+`cancelExport()` and `onExportProgress` (`{ phase: 'reading'|'sound'|'video',
+frame, total }`). The page: `demux.js` (mp4box), `video-source.js` (newest
+frame at or before t, VFR-safe, resets the decoder on jumps), `audio.js`,
+`encode.js` (H.264 High/Main/Baseline, hardware then software; HEVC Main),
+`pipeline.js`. The sound of each recording is placed by `core/audio/tracks.js`
+(mic + system audio through `follow.js`/`wsola.js`, then `mix.js`).
+
+Two things WebCodecs does that the pipeline corrects (both covered by e2e):
+Chromium's `AudioDecoder` starts its output timestamps at 0 whatever the first
+packet's time, so decoded sound is placed from the first packet's
+(edit-list-adjusted) time; and AAC encoders prepend priming samples while
+mp4-muxer writes no edit list, so the encoder's delay is measured once per
+export (a noise burst round trip) and that many samples are skipped.
+
 Formats and quality: MP4 (H.264; HEVC optional), WebM (VP9 + Opus), GIF.
 Quality `high | balanced | small`, plus "Fit a size limit" (for Slack/email:
 25 MB, 10 MB, or custom) which picks the bitrate from the duration.
@@ -266,6 +287,8 @@ owner confirms.
   cursor track and tone audio), exports, and checks the output by decoding it
   (duration, frame count, dimensions, sampled pixel colours, audio RMS).
   Screenshots of key states go to `test/e2e/out/` for visual review.
+  `electron test/e2e/run.js --real <recording folder>` exports a copy of a
+  real recording and saves snapshots (at each zoom, or `--at 3,7.5`).
 - Windows: CI build-only run.
 
 ## 11. Work plan
