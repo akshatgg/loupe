@@ -240,3 +240,16 @@ test('a preset that is not a valid style never loses the recording', async () =>
   assert.strictEqual(project.style.padding, 0.06);
   h.cleanup();
 });
+
+test('the microphone chosen in Settings is passed to capture by name, only with the mic on', async () => {
+  const h = harness();
+  await h.rec.start({ source: 'display:1', mic: true, micName: 'USB Mic', dir: h.dir, width: 800, height: 600 });
+  const args = h.argsFor.capture;
+  assert.strictEqual(args[args.indexOf('--mic-name') + 1], 'USB Mic');
+  h.cleanup();
+
+  const off = harness();
+  await off.rec.start({ source: 'display:1', mic: false, micName: 'USB Mic', dir: off.dir, width: 800, height: 600 });
+  assert.ok(!off.argsFor.capture.includes('--mic-name'));
+  off.cleanup();
+});

@@ -52,9 +52,10 @@ static class Capture
         var sourceId = Args.Get(argv, "--source");
         var outPath = Args.Get(argv, "--out");
         if (sourceId == null || outPath == null)
-            return Out.Fail("usage: capture --source <id> --out <path> --mic <0|1> [--system-audio <0|1>] [--crop-x N --crop-y N --crop-w N --crop-h N]");
+            return Out.Fail("usage: capture --source <id> --out <path> --mic <0|1> [--mic-name <name>] [--system-audio <0|1>] [--crop-x N --crop-y N --crop-w N --crop-h N]");
         bool withMic = Args.Get(argv, "--mic") == "1";
         bool withSystemAudio = Args.Get(argv, "--system-audio") == "1";
+        var micName = Args.Get(argv, "--mic-name");
 
         var parts = sourceId.Split(':');
         if (parts.Length != 2 || !ulong.TryParse(parts[1], out var handleValue))
@@ -86,7 +87,7 @@ static class Capture
         bool cropped = cx != null && cy != null && cw != null && ch != null;
 
         MediaFactory.MFStartup(true).CheckError();
-        using var session = new Session(outPath, withMic, withSystemAudio);
+        using var session = new Session(outPath, withMic, withSystemAudio, micName);
         try
         {
             session.Start(parts[0] == "display", handle, origin,
@@ -141,8 +142,11 @@ static class Capture
         IMFMediaSource? micSource;
         Thread? micThread;
 
-        public Session(string outPath, bool withMic, bool withSystemAudio)
+        readonly string? micName;
+
+        public Session(string outPath, bool withMic, bool withSystemAudio, string? micName = null)
         {
+            this.micName = micName;
             this.outPath = outPath;
             this.withMic = withMic;
             this.withSystemAudio = withSystemAudio;
@@ -271,10 +275,34 @@ static class Capture
             writer.BeginWriting();
         }
 
+        // The microphone chosen in Settings, by the name the app showed for it
+        // (Chromium's label, e.g. "Default - Microphone (Realtek Audio)", which
+        // contains the device's friendly name); else the first (default) one,
+        // so an unplugged choice still records.
+        static IMFActivate? ChooseMicrophone(List<IMFActivate> devices, string? name)
+        {
+            if (!string.IsNullOrEmpty(name))
+            {
+                IMFActivate? best = null;
+                int bestLength = 0;
+                foreach (var d in devices)
+                {
+                    string? friendly;
+                    try { friendly = d.GetAllocatedString(CaptureDeviceAttributeKeys.FriendlyName); }
+                    catch { continue; }
+                    if (string.IsNullOrEmpty(friendly)) continue;
+                    if (friendly == name) return d;
+                    if (name.Contains(friendly) && friendly.Length > bestLength) { best = d; bestLength = friendly.Length; }
+                }
+                if (best != null) return best;
+            }
+            return devices.FirstOrDefault();
+        }
+
         void AddMicrophone()
         {
             IMFActivate? activate;
-            try { activate = MediaFactory.MFEnumAudioDeviceSources(Vortice.Multimedia.AudioEndpointRole.Console).FirstOrDefault(); }
+            try { activate = ChooseMicrophone(MediaFactory.MFEnumAudioDeviceSources(Vortice.Multimedia.AudioEndpointRole.Console).ToList(), micName); }
             catch { activate = null; }
             if (activate == null) throw new InvalidOperationException("no microphone available");
             try { micSource = activate.ActivateObject<IMFMediaSource>(); }

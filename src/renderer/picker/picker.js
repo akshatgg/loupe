@@ -382,10 +382,63 @@ for (const id of recordingSwitches) {
 }
 
 // The Settings window changes the same choices; the switches follow it.
-window.loupe.onSettingsChanged?.(async () => {
+window.loupe.onSettingsChanged?.(async (settings) => {
   const s = await window.loupe.getRecordingSettings();
   for (const id of recordingSwitches) document.getElementById(id).checked = s[id];
+  if (cameraSwitch.checked !== s.camera) {
+    cameraSwitch.checked = s.camera;
+    if (s.camera) await turnCameraOn(s.cameraDeviceId);
+    else { cameraSelect.hidden = true; setCameraNote(''); }
+  } else if (s.cameraDeviceId && [...cameraSelect.options].some((o) => o.value === s.cameraDeviceId)) {
+    cameraSelect.value = s.cameraDeviceId;
+  }
+  microphoneChoice = settings?.microphone ?? null;
+  listMicrophones();
 });
+
+// ---- which microphone ---------------------------------------------------------
+// The same choice as Settings > Recording (settings.microphone, { id, label }
+// or null for the computer's default). Only offered when there is more than
+// one to choose from; the recorder finds the chosen one by its name.
+
+const micSwitch = document.getElementById('mic');
+const micSelect = document.getElementById('micDevice');
+let microphoneChoice = null;
+
+async function listMicrophones() {
+  let mics = [];
+  try {
+    mics = (await navigator.mediaDevices.enumerateDevices())
+      .filter((d) => d.kind === 'audioinput' && d.deviceId !== 'default' && d.deviceId !== 'communications');
+  } catch {
+    mics = [];
+  }
+  micSelect.textContent = '';
+  micSelect.append(new Option('Same as your computer', ''));
+  mics.forEach((mic, i) => {
+    // Device labels come from drivers: Option() sets text, never markup.
+    micSelect.append(new Option(mic.label || `Microphone ${i + 1}`, mic.deviceId));
+  });
+  const chosen = microphoneChoice && mics.find((m) => m.deviceId === microphoneChoice.id);
+  micSelect.value = chosen ? chosen.deviceId : '';
+  // Names are only known once the page may use a microphone; without them a
+  // list of "Microphone 1, 2" helps nobody, so it stays hidden.
+  micSelect.hidden = !micSwitch.checked || mics.length < 2 || mics.every((m) => !m.label);
+}
+
+micSwitch.addEventListener('change', listMicrophones);
+micSelect.addEventListener('change', async () => {
+  const option = micSelect.selectedOptions[0];
+  const value = micSelect.value ? { id: micSelect.value, label: option.textContent } : null;
+  try {
+    await window.loupe.setSettings({ microphone: value });
+    microphoneChoice = value;
+  } catch (err) {
+    showBanner(`Could not save that choice: ${err.message}`);
+  }
+});
+navigator.mediaDevices?.addEventListener?.('devicechange', listMicrophones);
+window.loupe.getSettings().then((s) => { microphoneChoice = s.microphone ?? null; listMicrophones(); });
 
 window.loupe.getRecordingSettings().then(async (s) => {
   for (const id of recordingSwitches) document.getElementById(id).checked = s[id];

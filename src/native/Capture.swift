@@ -199,7 +199,13 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
     // recording. Read/written only from `queue`.
     private var writerFailureReported = false
 
-    init(outURL: URL, width: Int, height: Int, withMic: Bool, systemAudioURL: URL?) throws {
+    // The microphone chosen in Settings, by the name the app showed for it
+    // (the browser's label for the device); nil for the system default.
+    private let micName: String?
+
+    init(outURL: URL, width: Int, height: Int, withMic: Bool, micName: String? = nil,
+         systemAudioURL: URL?) throws {
+        self.micName = micName
         writer = try AVAssetWriter(outputURL: outURL, fileType: .mov)
 
         videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
@@ -250,13 +256,32 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
         super.init()
     }
 
+    // The microphone called `name`, else the system default. Chromium's label
+    // for a device is its Core Audio name, sometimes with extra words around
+    // it ("Default - MacBook Pro Microphone"), so a label that contains a
+    // device's name matches it too -- the longest such name wins. A chosen
+    // microphone that was unplugged records from the default rather than not
+    // at all.
+    static func microphone(named name: String?) -> AVCaptureDevice? {
+        let fallback = AVCaptureDevice.default(for: .audio)
+        guard let name, !name.isEmpty else { return fallback }
+        let devices = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified
+        ).devices
+        if let exact = devices.first(where: { $0.localizedName == name }) { return exact }
+        let contained = devices.filter { !$0.localizedName.isEmpty && name.contains($0.localizedName) }
+        if let best = contained.max(by: { $0.localizedName.count < $1.localizedName.count }) { return best }
+        emit(["type": "warning", "message": "microphone \"\(name)\" not found; using the default"])
+        return fallback
+    }
+
     func start(filter: SCContentFilter, config: SCStreamConfiguration) async throws {
         writer.startWriting()
         systemWriter?.startWriting()
 
         if audioInput != nil {
             let session = AVCaptureSession()
-            guard let device = AVCaptureDevice.default(for: .audio),
+            guard let device = Self.microphone(named: micName),
                   let input = try? AVCaptureDeviceInput(device: device),
                   session.canAddInput(input) else {
                 fail("no microphone available")
@@ -537,10 +562,11 @@ struct CaptureTool {
         _ = NSApplication.shared
 
         guard let sourceId = arg("--source"), let out = arg("--out") else {
-            fail("usage: capture --source <id> --out <path> --mic <0|1> [--system-audio <0|1>] " +
+            fail("usage: capture --source <id> --out <path> --mic <0|1> [--mic-name <name>] [--system-audio <0|1>] " +
                  "[--exclude-window <id>]... [--crop-x N --crop-y N --crop-w N --crop-h N]")
         }
         let withMic = arg("--mic") == "1"
+        let micName = arg("--mic-name")
         // Computer sound goes to system.m4a beside the video file.
         let withSystemAudio = arg("--system-audio") == "1"
         // The control-bar redesign puts TWO Loupe windows on screen while
@@ -657,7 +683,7 @@ struct CaptureTool {
                 systemAudioURL = systemURL
             }
             let capture = try Capture(outURL: url, width: width, height: height, withMic: withMic,
-                                      systemAudioURL: systemAudioURL)
+                                      micName: micName, systemAudioURL: systemAudioURL)
             try await capture.start(filter: filter, config: config)
 
             // Ignore the default SIGTERM disposition *before* creating and

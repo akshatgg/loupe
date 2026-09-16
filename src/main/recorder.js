@@ -249,6 +249,9 @@ function createRecorder({
     // Computer sound goes into its own file beside the video (system.m4a);
     // capture reports the name it wrote with {"type":"system_audio","file"}.
     if (systemAudioRequested) args.push('--system-audio', '1');
+    // The microphone chosen in Settings, by name (the helper falls back to
+    // the system default when it isn't there).
+    if (hasMic && typeof opts.micName === 'string' && opts.micName) args.push('--mic-name', opts.micName);
     // Every Loupe-owned overlay window that could be on screen when capture
     // starts -- the control bar (always) and, with the outline still
     // open, the region-selection overlay -- must be excluded.
