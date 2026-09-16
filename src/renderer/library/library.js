@@ -27,13 +27,14 @@ $('trashItem').textContent = IS_WINDOWS ? 'Move to Recycle Bin' : 'Move to Trash
 // ---- messages ---------------------------------------------------------------
 
 let toastTimer = null;
-function toast(text, { error = false } = {}) {
+// `stay` keeps it up until the next message replaces it (work in progress).
+function toast(text, { error = false, stay = false } = {}) {
   const el = $('toast');
   el.textContent = text;
   el.classList.toggle('error', error);
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), error ? 4500 : 2200);
+  if (!stay) toastTimer = setTimeout(() => el.classList.remove('show'), error ? 4500 : 2200);
 }
 
 // IPC errors arrive as "Error invoking remote method 'x': Error: message".
@@ -277,6 +278,8 @@ async function run(action, id) {
         render();
         break;
       case 'duplicate': {
+        // A long recording takes a while to copy; say something is happening.
+        toast(`Copying “${rec.title}”…`, { stay: true });
         const copy = await api.duplicate(id);
         await refresh();
         select(copy.id);

@@ -243,6 +243,8 @@ function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
       fs.renameSync(target, path.join(base, copyId));
     } catch (err) {
       if (err.code === 'ENOSPC') throw new Error('There isn’t enough free space on the disk to make a copy.');
+      // Moved to the Trash (or its drive unplugged) while it was being copied.
+      if (err.code === 'ENOENT') throw new Error('That recording was moved or deleted while it was being copied.');
       throw err;
     } finally {
       copying.delete(work);

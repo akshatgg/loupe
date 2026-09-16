@@ -255,6 +255,8 @@ async function run() {
     await waitFor('the copy listed', () => js(library, `return document.querySelectorAll('.card').length === ${before + 1}`));
     const titles = await js(library, 'return [...document.querySelectorAll(".card .title")].map((t) => t.textContent)');
     assert.ok(titles.includes('Product tour copy'), titles.join(', '));
+    // "Copying…" stays up while it works, then gives way to the result.
+    await waitFor('the result message', () => js(library, 'return /^Made “Product tour copy”$/.test(document.getElementById("toast").textContent)'));
     await shot(library, '06-library-duplicated');
   });
 

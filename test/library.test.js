@@ -173,6 +173,31 @@ test('two duplicates at once make two complete copies, and a copy in progress is
   fs.rmSync(base, { recursive: true, force: true });
 });
 
+test('a copy abandoned by a crash is cleaned up after an hour, a recent one is left alone', async () => {
+  const { base, root } = setup();
+  v1(root, '1788954728479');
+  const t = 1790000000000;
+  const old = path.join(root, `.copying-${t - 2 * 60 * 60 * 1000}-0`);
+  const recent = path.join(root, `.copying-${t - 60 * 1000}-0`);
+  for (const d of [old, recent]) fs.mkdirSync(path.join(d, 'copy'), { recursive: true });
+  const lib = createLibrary({ root: () => root, now: () => t });
+  await lib.duplicate('1788954728479');
+  assert.ok(!fs.existsSync(old));
+  assert.ok(fs.existsSync(recent));
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
+test('a recording deleted while it is being copied gives a plain message and leaves nothing behind', async () => {
+  const { base, root } = setup();
+  const dir = v1(root, '1788954728479');
+  const lib = createLibrary({ root: () => root });
+  const pending = lib.duplicate('1788954728479');
+  fs.rmSync(dir, { recursive: true, force: true });
+  await assert.rejects(pending, { message: 'That recording was moved or deleted while it was being copied.' });
+  assert.deepStrictEqual(fs.readdirSync(root), []);
+  fs.rmSync(base, { recursive: true, force: true });
+});
+
 test('a recordings folder that can\'t be used says so in plain words', () => {
   const { base } = setup();
   const file = path.join(base, 'not-a-folder');

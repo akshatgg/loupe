@@ -201,7 +201,7 @@ async function downloadVerifiedInstaller({
   fs.mkdirSync(dir, { recursive: true });
   const target = path.join(dir, `Loupe-Setup-${release.version}-x64.exe`);
   // Already downloaded (a previous launch)? Reuse it if it still verifies.
-  if (fs.existsSync(target) && await sha512OfFile(target) === entry.sha512) return target;
+  if (fs.existsSync(target) && await sha512OfFile(target) === entry.sha512) return removeOthers(dir, target);
 
   const partial = `${target}.partial`;
   const exeRes = await fetchWithTimeout(fetchImpl, exeAsset.url, { headers: { 'User-Agent': 'Loupe' } }, timeoutMs);
@@ -228,7 +228,18 @@ async function downloadVerifiedInstaller({
     throw new Error('The downloaded installer did not match its checksum, so it was discarded');
   }
   fs.renameSync(partial, target);
-  return target;
+  return removeOthers(dir, target);
+}
+
+// Installers of older versions (each one about 100 MB) would otherwise pile
+// up in the temp folder, one per update, since nothing else removes them.
+// Only files this code names are touched, whatever folder it was given.
+function removeOthers(dir, keep) {
+  for (const name of fs.readdirSync(dir)) {
+    const full = path.join(dir, name);
+    if (full !== keep && /^Loupe-Setup-[^/\\]+-x64\.exe(\.partial)?$/.test(name)) fs.rmSync(full, { force: true });
+  }
+  return keep;
 }
 
 // ---- install kinds ----------------------------------------------------------

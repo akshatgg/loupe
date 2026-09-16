@@ -109,6 +109,9 @@ test('startDiagnostics: local-only crash reporter, and every kind of failure is 
   const exc = process.listeners('uncaughtException').find((l) => !before.exc.includes(l));
   exc(new Error('kaboom'));
   assert.strictEqual(boxes.length, 1, 'the user still sees an error');
+  exc(new Error('kaboom again'));
+  assert.strictEqual(boxes.length, 1, 'a repeat right away is logged, not shown again');
+  assert.match(fs.readFileSync(path.join(dir, 'loupe.log'), 'utf8'), /kaboom again/);
   const rej = process.listeners('unhandledRejection').find((l) => !before.rej.includes(l));
   rej(new Error('lost promise'));
   electron.handlers['render-process-gone']({}, { getURL: () => 'file:///app/src/renderer/editor/index.html' }, { reason: 'crashed', exitCode: 5 });

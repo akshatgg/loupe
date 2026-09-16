@@ -134,6 +134,19 @@ test('packaging/latest-yml.js hashes the real installer file', async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('downloading a new installer removes older ones, and nothing else in the folder', async () => {
+  const dir = tmpDir();
+  const exe = crypto.randomBytes(1000);
+  const good = formatLatestYml({ version: '0.3.0', file: 'Loupe-Setup-x64.exe', sha512: sha512(exe), size: exe.length, releaseDate: 'x' });
+  const rel = await fetchLatestRelease(fakeFetch({ [RELEASES_API]: release() }));
+  fs.writeFileSync(path.join(dir, 'Loupe-Setup-0.2.0-x64.exe'), 'old');
+  fs.writeFileSync(path.join(dir, 'Loupe-Setup-0.2.1-x64.exe.partial'), 'cut short');
+  fs.writeFileSync(path.join(dir, 'something-else.txt'), 'not ours');
+  await downloadVerifiedInstaller({ release: rel, fetchImpl: fakeFetch({ [YML_URL]: good, [EXE_URL]: exe }), dir });
+  assert.deepStrictEqual(fs.readdirSync(dir).sort(), ['Loupe-Setup-0.3.0-x64.exe', 'something-else.txt']);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('the Windows installer is kept only when its sha512 matches latest.yml', async () => {
   const dir = tmpDir();
   const exe = crypto.randomBytes(300000);

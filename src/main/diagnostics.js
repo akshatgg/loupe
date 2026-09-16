@@ -134,7 +134,7 @@ function reportProblemUrl({ version, platform, osVersion, arch, logLines = [], h
 // `enabled` is the saveCrashReports setting; turning it off stops the log and
 // crash dumps from being written (it takes effect the next time Loupe opens,
 // since the crash reporter can't be stopped once started).
-function startDiagnostics({ electron, logDir, enabled, showErrorBox }) {
+function startDiagnostics({ electron, logDir, enabled, showErrorBox, now = Date.now }) {
   const { app, crashReporter } = electron;
   const logger = createLogger({ dir: logDir });
   if (!enabled) {
@@ -159,8 +159,14 @@ function startDiagnostics({ electron, logDir, enabled, showErrorBox }) {
     };
   }
 
+  // A fault that repeats (a timer that throws every frame) would otherwise
+  // stack up error boxes faster than they can be closed; each one is still
+  // logged.
+  let lastBox = -Infinity;
   process.on('uncaughtException', (err) => {
     logger.error('uncaught exception:', err);
+    if (now() - lastBox < 30 * 1000) return;
+    lastBox = now();
     // Adding this listener replaces Electron's own error dialog, so show one:
     // the user should still hear that something went wrong.
     try {
