@@ -192,7 +192,11 @@ code {
 }
 .brand img { margin: -2px; }
 .top__nav { display: flex; align-items: center; gap: 26px; }
-.top__link { color: var(--ink-2); text-decoration: none; font-size: .9375rem; }
+.top__link { color: var(--ink-2); text-decoration: none; font-size: .9375rem; white-space: nowrap; }
+/* The extra section links go first when the bar gets narrow. */
+@media (max-width: 1040px) {
+  .top__link--wide { display: none; }
+}
 .top__link:hover { color: var(--ink); text-decoration: underline; }
 @media (max-width: 760px) {
   .top__link { display: none; }
@@ -990,7 +994,7 @@ html:not(.js) .demo__screenwrap { max-width: 920px; }
   background: #111113;
   container-type: size;
 }
-@media (max-width: 719px) { .look__stage { aspect-ratio: 4 / 5; padding: 12px; } }
+@media (max-width: 719px) { .look__stage { aspect-ratio: 1 / 1; padding: 12px; } }
 .look { --ar: 16 / 9; --arn: 1.7778; }
 .look[data-aspect="9:16"] { --ar: 9 / 16; --arn: .5625; }
 .look[data-aspect="1:1"] { --ar: 1 / 1; --arn: 1; }
@@ -1059,7 +1063,7 @@ html:not(.js) .demo__screenwrap { max-width: 920px; }
 .lp-list li.lp-blur {
   position: absolute;
   left: 23.4cqw; top: .8cqw; bottom: .8cqw;
-  width: 17cqw; height: auto;
+  width: 19.5cqw; height: auto;
   border: 0;
   border-radius: 1cqw;
   background: rgba(236, 238, 242, .55);
