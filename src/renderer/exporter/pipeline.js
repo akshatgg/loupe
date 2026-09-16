@@ -18,6 +18,7 @@ import { buildTimeline } from '../../core/timeline.js';
 import { drawFrame, exportSize } from '../../core/compose.js';
 import { parseCursorTrack } from '../../core/cursor.js';
 import { exportMix } from '../../core/audio/tracks.js';
+import { isWav, parseWav } from '../../core/audio/wav.js';
 import { Muxer, StreamTarget } from '../../vendor/mp4-muxer/mp4-muxer.mjs';
 import { readFile, demux } from './demux.js';
 import { openVideoSource } from './video-source.js';
@@ -66,8 +67,10 @@ async function openSources(job, project, keys, report) {
       decoded.mic[key] = await decodeAudioTrack(demuxed, label);
     }
     if (files.systemAudio && !project.audio.system.muted) {
-      const sys = demux(await readFile(files.systemAudio, `the system sound of ${label}`));
-      const pcm = await decodeAudioTrack(sys, `the system sound of ${label}`);
+      const what = `the system sound of ${label}`;
+      const bytes = await readFile(files.systemAudio, what);
+      // Windows records it as system.wav, which WebCodecs has no decoder for.
+      const pcm = isWav(bytes) ? parseWav(bytes) : await decodeAudioTrack(demux(bytes), what);
       if (pcm) decoded.system[key] = pcm;
     }
   }

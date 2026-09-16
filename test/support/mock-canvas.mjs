@@ -20,7 +20,9 @@ export function mockContext() {
   const target = {
     calls,
     get depth() { return depth; },
-    named: (name) => calls.filter((c) => c.name === name)
+    named: (name) => calls.filter((c) => c.name === name),
+    // Text is 0.5 em per character in whatever font was last set.
+    measureText: (text) => ({ width: String(text).length * 0.5 * (Number(/(\d+)px/.exec(state.font ?? '')?.[1]) || 10) })
   };
   return new Proxy(target, {
     get(obj, key) {

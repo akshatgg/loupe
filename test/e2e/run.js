@@ -107,6 +107,23 @@ async function makeFixtures(lab) {
   return { a, b };
 }
 
+// A 48 kHz stereo 16-bit WAV of the test tone, as native-win/WavFile.cs writes.
+function writeToneWav(file, seconds) {
+  const rate = 48000;
+  const frames = seconds * rate;
+  const buf = Buffer.alloc(44 + frames * 4);
+  buf.write('RIFF', 0); buf.writeUInt32LE(36 + frames * 4, 4); buf.write('WAVE', 8);
+  buf.write('fmt ', 12); buf.writeUInt32LE(16, 16); buf.writeUInt16LE(1, 20); buf.writeUInt16LE(2, 22);
+  buf.writeUInt32LE(rate, 24); buf.writeUInt32LE(rate * 4, 28); buf.writeUInt16LE(4, 32); buf.writeUInt16LE(16, 34);
+  buf.write('data', 36); buf.writeUInt32LE(frames * 4, 40);
+  for (let i = 0; i < frames; i++) {
+    const v = Math.round(TONE.amp * 32767 * Math.sin((2 * Math.PI * TONE.freq * i) / rate));
+    buf.writeInt16LE(v, 44 + i * 4);
+    buf.writeInt16LE(v, 46 + i * 4);
+  }
+  fs.writeFileSync(file, buf);
+}
+
 function baseProject(fx) {
   let p = P.createProject({
     main: {
@@ -410,6 +427,26 @@ const CASES = [
     assert.match(c.inspection.codec, /^hvc1/);
     basics(c, { width: 1728, height: 1080, duration: 3, audio: false });
     checkSamples(c, [plainAt(c.tl), plainAt(c.tl)]);
+  }],
+
+  ['Windows computer sound (system.wav, 16-bit PCM) is mixed in', async (lab, runner, fx) => {
+    // The HEVC fixture has no microphone, so any sound comes from the WAV.
+    const dir = path.join(OUT, 'fixtures', 'wav');
+    fs.mkdirSync(dir, { recursive: true });
+    for (const f of ['raw.mov', 'cursor.bin']) fs.copyFileSync(path.join(fx.b, f), path.join(dir, f));
+    writeToneWav(path.join(dir, 'system.wav'), 3);
+    let p = P.createProject({
+      main: {
+        dir, width: FIXTURE.width, height: FIXTURE.height, duration: 3, fps: FIXTURE.fps,
+        video: 'raw.mov', mic: false, systemAudio: 'system.wav', cursor: 'cursor.bin'
+      },
+      createdAt: 0
+    });
+    p = P.setStyle(p, { padding: 0, radius: 0, shadow: 0, cursor: { show: false } });
+    p = P.setAudio(p, { system: { volume: 1 }, mic: { cleanUp: false, level: false } });
+    const c = await exportCase(lab, runner, 'system-wav', p, { sound: [{ from: 0.3, to: 2.7 }] });
+    basics(c, { width: 1152, height: 720, duration: 3 });
+    checkTone(c.inspection.audio.windows[0], 'computer sound from system.wav');
   }],
 
   ['4K export', async (lab, runner, fx) => {

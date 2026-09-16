@@ -293,3 +293,20 @@ test('cursor sampling: nearest, smoothed and idle', () => {
   assert.strictEqual(cursorOpacity(prep, 5), 0);
   assert.strictEqual(cursorOpacity(prep, 5, [{ t: 4.5 }]), 1, 'a click wakes it');
 });
+
+test('captions are drawn over the whole frame at their output time, only when shown', () => {
+  let p = P.createProject({ main: MAIN });
+  p = P.setCaptions(p, {
+    show: true,
+    segments: [{ id: 'c1', source: 'main', start: 4, end: 6, text: 'Hello there' }]
+  });
+  // A cut before the caption moves it 2 s earlier in the output.
+  p = P.cutRange(p, 1, 3);
+  const size = { width: 1920, height: 1080 };
+  const texts = (project, outT) => render(project, { outT, size }).ctx.named('fillText').map((c) => c.args[0]);
+  assert.deepStrictEqual(texts(p, 2.5), ['Hello there']);
+  assert.deepStrictEqual(texts(p, 4.5), []);
+  const drawn = render(p, { outT: 2.5, size }).ctx.named('fillText')[0];
+  assert.ok(drawn.args[2] > 540, 'at the bottom by default');
+  assert.deepStrictEqual(texts(P.setCaptions(p, { show: false }), 2.5), []);
+});
