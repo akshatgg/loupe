@@ -20,6 +20,7 @@ const { registerFileActionsIpc } = require('./ipc/fileActions');
 const { registerVoiceoverIpc } = require('./ipc/voiceover');
 const { registerMusicIpc } = require('./ipc/music');
 const { registerCaptionsIpc } = require('./ipc/captions');
+const { registerAppendRecordingIpc } = require('./ipc/append-recording');
 const {
   helperCommand, coordinateMapper, attachThumbnails
 } = require('./platform');
@@ -836,6 +837,8 @@ registerExportIpc({
   ipcMain, runner: exporter, projectDir: () => editorDir, shell,
   beforeStart: () => projects.flush()
 });
+// Add recording: another recording from the Library, played after this one.
+registerAppendRecordingIpc({ ipcMain, library: appShell.library, store: projects, projectDir: () => editorDir });
 
 function flushProject() {
   try {

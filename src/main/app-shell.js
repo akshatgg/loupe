@@ -30,6 +30,7 @@ const { createWindowState } = require('./window-state');
 //   shell.windowOptions(name, o)  BrowserWindow options with the remembered
 //                                 place of window `name` and the app icon
 //   shell.trackWindow(win, name)  remember where that window is left
+//   shell.library()               the recordings library (after start())
 //
 // `deps` from main.js: openEditorWindow(dir), showPicker(), getEditorWindow(),
 // getEditorDir() (the recording open in the editor, or null),
@@ -62,6 +63,7 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
     })
   });
 
+  let library = null;
   let libraryWindow = null;
   let settingsWindow = null;
   let updater = null;
@@ -182,7 +184,7 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
     const settingsIpc = registerSettingsIpc({ ipcMain, electron, store: settings, defaultRecordingsFolder });
     registerPresetsIpc({ ipcMain, store: settings });
 
-    const library = createLibrary({
+    library = createLibrary({
       root: settingsIpc.recordingsFolder,
       locale: () => app.getLocale(),
       createThumbnail: async (video) => {
@@ -267,6 +269,8 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
     recordingsChanged,
     windowOptions,
     trackWindow: (win, name) => windowState.track(win, name),
+    // The recordings library (ipc/library.js createLibrary), once started.
+    library: () => library,
     updater: getUpdater
   };
 }
