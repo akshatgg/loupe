@@ -299,7 +299,7 @@ async function start() {
     $('redo').disabled = !store.canRedo;
     $('deleteBtn').disabled = !store.selection;
     if (document.activeElement !== title) title.value = store.project.title;
-    document.title = `${store.project.title} — Loupe`;
+    document.title = store.project.title || 'Loupe';
     for (const [id, m] of mounted) if (id === currentPanel) m.api.update(what);
   }
   store.subscribe(refresh);

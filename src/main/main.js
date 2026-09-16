@@ -80,10 +80,11 @@ const recorder = createRecorder({
 let pickerWindow = null;
 
 function createPickerWindow() {
-  pickerWindow = new BrowserWindow({
-    width: 940, height: 800, title: 'Loupe',
+  pickerWindow = new BrowserWindow(appShell.windowOptions('picker', {
+    width: 940, height: 800, minWidth: 720, minHeight: 560, title: 'New recording', backgroundColor: '#2a2b2e',
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
-  });
+  }));
+  appShell.trackWindow(pickerWindow, 'picker');
   // Only windows on the active Space are listed, so choosing a window that
   // lives on another desktop means switching to it. A picker pinned to its own
   // Space would be left behind at exactly that moment, so it follows instead --
@@ -866,11 +867,12 @@ function openEditorWindow(dir) {
   editorDir = dir;
   // Room for the preview, the sidebar and the timeline; the preview scales
   // to whatever shape the video has.
-  const win = new BrowserWindow({
-    width: 1280, height: 840, minWidth: 900, minHeight: 600, title: 'Loupe — Edit',
+  const win = new BrowserWindow(appShell.windowOptions('editor', {
+    width: 1280, height: 840, minWidth: 900, minHeight: 600, title: 'Loupe',
     backgroundColor: '#161618',
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js'), sandbox: true, contextIsolation: true }
-  });
+  }));
+  appShell.trackWindow(win, 'editor');
   editorWindow = win;
   win.loadFile(path.join(__dirname, '..', 'renderer', 'editor', 'index.html'));
   win.on('closed', () => {
