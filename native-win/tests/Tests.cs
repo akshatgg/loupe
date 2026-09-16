@@ -14,6 +14,29 @@ var tests = new (string name, Action run)[]
     ("the time map follows the plan and extends past it", TimeMapExtends),
 };
 
+if (args.Length > 0 && args[0] == "bench")
+{
+    // Export speed of the picture work: a Retina-size recording to 1080p and 4K.
+    int sw = 2880, sh = 1800;
+    var src = Pattern(sw, sh, (x, y) => ((byte)x, (byte)y, (byte)(x ^ y)));
+    foreach (var (ow, oh) in new[] { (1728, 1080), (3456, 2160) })
+    {
+        var dst = new byte[ow * oh * 4];
+        foreach (var zoom in new[] { 1.0, 2.5 })
+        {
+            Compositor.Crop(src, sw, sh, dst, ow, oh, 1440, 900, new Compositor.Camera(zoom, 720, 450));
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 0; i < 10; i++)
+            {
+                Compositor.Crop(src, sw, sh, dst, ow, oh, 1440, 900, new Compositor.Camera(zoom, 720, 450));
+                Compositor.DrawCursor(dst, ow, oh, ow / 2.0, oh / 2.0, 2 * zoom);
+            }
+            Console.WriteLine($"{ow}x{oh} at {zoom}x: {watch.Elapsed.TotalMilliseconds / 10:F1} ms/frame");
+        }
+    }
+    return 0;
+}
+
 int failed = 0;
 foreach (var (name, run) in tests)
 {
