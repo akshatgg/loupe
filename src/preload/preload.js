@@ -58,5 +58,23 @@ contextBridge.exposeInMainWorld('loupe', {
     const listener = (_e, d) => cb(d);
     ipcRenderer.on('export:progress', listener);
     return () => ipcRenderer.removeListener('export:progress', listener);
-  }
+  },
+  // After export (src/main/ipc/share.js, src/main/ipc/fileActions.js document
+  // the shapes). Share: hide the button unless shareStatus().enabled;
+  // shareUpload resolves {ok, url | code, message}, never throws for
+  // offline/too big/cancelled.
+  shareStatus: () => ipcRenderer.invoke('share:status'),
+  shareUpload: (filePath, details) => ipcRenderer.invoke('share:upload', filePath, details),
+  shareCancel: () => ipcRenderer.invoke('share:cancel'),
+  onShareProgress: (cb) => {
+    const listener = (_e, d) => cb(d);
+    ipcRenderer.on('share:progress', listener);
+    return () => ipcRenderer.removeListener('share:progress', listener);
+  },
+  copyText: (text) => ipcRenderer.invoke('clipboard:writeText', text),
+  copyFile: (filePath) => ipcRenderer.invoke('file:copy', filePath),
+  revealFile: (filePath) => ipcRenderer.invoke('file:reveal', filePath),
+  prepareFileDrag: (filePath) => ipcRenderer.invoke('file:prepareDrag', filePath),
+  // Call from dragstart (after preventDefault); the OS carries the file.
+  startFileDrag: (filePath) => { ipcRenderer.invoke('file:startDrag', filePath); }
 });

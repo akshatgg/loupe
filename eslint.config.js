@@ -143,6 +143,15 @@ module.exports = [
       eqeqeq: 'error'
     }
   },
+  // The website's Vercel Functions (web/api/) are CommonJS Node, not browser code.
+  {
+    files: ['web/api/**/*.js'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: { require: 'readonly', module: 'writable', process: 'readonly',
+                 Buffer: 'readonly', globalThis: 'readonly' }
+    }
+  },
   // Local git worktrees of this repo are checked out under it; each lints itself.
   { ignores: ['src/vendor/', 'test/e2e/out/', 'bin/', 'node_modules/', 'dist/', '.build-native/', 'web/node_modules/'] }
 ];

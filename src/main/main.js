@@ -15,6 +15,8 @@ const { inputTapArgs } = require('./settings');
 const { createAppShell } = require('./app-shell');
 const { createExportRunner, registerExportIpc } = require('./ipc/export');
 const { createProjectStore, registerProjectIpc } = require('./ipc/project');
+const { registerShareIpc } = require('./ipc/share');
+const { registerFileActionsIpc } = require('./ipc/fileActions');
 const {
   helperCommand, coordinateMapper, attachThumbnails
 } = require('./platform');
@@ -673,6 +675,10 @@ ipcMain.handle('bar:start', async () => {
 });
 
 ipcMain.handle('record:stop', stopRecording);
+
+// Export follow-ups: share links, copy/drag/reveal the exported file.
+registerShareIpc(ipcMain);
+registerFileActionsIpc(ipcMain);
 
 // Whether the Control+Shift+S stop-recording shortcut is actually held by
 // us. globalShortcut.register() returns false (not a rejection/throw) when
