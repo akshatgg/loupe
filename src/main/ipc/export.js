@@ -11,6 +11,9 @@
 // The file is written as "<name>.part" and renamed only once the export has
 // finished, so a failed, cancelled or crashed export never leaves a file
 // behind that looks like a finished video.
+//
+// Each finished export is remembered in the recording's folder
+// (exports.json, newest first) so the editor can list "Recent exports".
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -19,10 +22,16 @@ const { resolveBackgroundFile } = require('./background');
 const { audioFileUrls } = require('./project-files');
 const { writeSubtitlesBeside } = require('./captions');
 
+const FORMATS = ['mp4', 'webm', 'gif'];
 const RESOLUTIONS = ['720p', '1080p', '1440p', '4k'];
 const CODECS = ['h264', 'hevc'];
 const QUALITIES = ['high', 'balanced', 'small'];
 const FRAME_RATES = [24, 25, 30, 50, 60];
+const GIF_WIDTHS = [480, 720, 960];
+const GIF_FRAME_RATES = [10, 15, 20];
+const SIZE_LIMIT_MB = [1, 4000];
+const RECENT_FILE = 'exports.json';
+const MAX_RECENT = 10;
 // Limits on what the export page may ask main to write: positions inside a
 // (very generous) file size, chunks no bigger than the muxer ever sends.
 const MAX_FILE_BYTES = 256 * 1024 ** 3;
@@ -35,6 +44,9 @@ const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArr
 function validateExportOptions(raw) {
   if (raw !== undefined && !isPlainObject(raw)) throw new Error('Export options must be an object.');
   const opts = raw ?? {};
+  if (opts.format !== undefined && !FORMATS.includes(opts.format)) {
+    throw new Error(`Unknown export format: ${JSON.stringify(opts.format)}`);
+  }
   const resolution = opts.resolution ?? opts.preset;
   if (resolution !== undefined && !RESOLUTIONS.includes(resolution)) {
     throw new Error(`Unknown export size: ${JSON.stringify(resolution)}`);
@@ -55,11 +67,27 @@ function validateExportOptions(raw) {
       throw new Error(`Export option ${key} must be true or false.`);
     }
   }
-  return {
-    resolution, codec: opts.codec, quality: opts.quality, fps: opts.fps,
-    ...(opts.burnCaptions !== undefined ? { burnCaptions: opts.burnCaptions } : {}),
-    ...(opts.subtitles ? { subtitles: true } : {})
-  };
+  if (opts.sizeLimit !== undefined && opts.sizeLimit !== null &&
+      !(Number.isFinite(opts.sizeLimit) && opts.sizeLimit >= SIZE_LIMIT_MB[0] && opts.sizeLimit <= SIZE_LIMIT_MB[1])) {
+    throw new Error(`The size limit must be from ${SIZE_LIMIT_MB[0]} to ${SIZE_LIMIT_MB[1]} MB.`);
+  }
+  if (opts.gifWidth !== undefined && !GIF_WIDTHS.includes(opts.gifWidth)) {
+    throw new Error(`Unsupported GIF width: ${JSON.stringify(opts.gifWidth)}`);
+  }
+  if (opts.gifFps !== undefined && !GIF_FRAME_RATES.includes(opts.gifFps)) {
+    throw new Error(`Unsupported GIF frame rate: ${JSON.stringify(opts.gifFps)}`);
+  }
+  if (opts.dither !== undefined && typeof opts.dither !== 'boolean') {
+    throw new Error('Dithering must be on or off.');
+  }
+  const out = { resolution, codec: opts.codec, quality: opts.quality, fps: opts.fps };
+  // Only named when given, so callers that predate them see the same shape.
+  for (const key of ['format', 'sizeLimit', 'gifWidth', 'gifFps', 'dither']) {
+    if (opts[key] !== undefined) out[key] = opts[key];
+  }
+  if (opts.burnCaptions !== undefined) out.burnCaptions = opts.burnCaptions;
+  if (opts.subtitles) out.subtitles = true;
+  return out;
 }
 
 // src/core is ES modules; require() of them works in this Node, but only
@@ -68,7 +96,7 @@ let core = null;
 function loadCore() {
   core ??= {
     project: require('../../core/project.js'),
-    compose: require('../../core/compose.js')
+    plan: require('../../core/export-plan.js')
   };
   return core;
 }
@@ -89,7 +117,7 @@ const fileUrlIfExists = (file) => (fs.existsSync(file) ? pathToFileURL(file).hre
 // `job` is everything the export page needs, with every file as a file://
 // URL so Windows paths load too; `out` is where the video goes.
 function buildJob(dir, rawOptions, { out } = {}) {
-  const { project: P, compose } = loadCore();
+  const { project: P, plan } = loadCore();
   const opts = validateExportOptions(rawOptions);
   let raw;
   try {
@@ -99,7 +127,7 @@ function buildJob(dir, rawOptions, { out } = {}) {
   }
   let project = P.loadProjectData(raw);
   const exportPatch = {};
-  for (const key of ['resolution', 'codec', 'quality', 'fps']) {
+  for (const key of ['format', 'resolution', 'codec', 'quality', 'fps', 'sizeLimit', 'gifWidth', 'gifFps', 'dither']) {
     if (opts[key] !== undefined) exportPatch[key] = opts[key];
   }
   project = P.setExport(project, exportPatch);
@@ -128,15 +156,16 @@ function buildJob(dir, rawOptions, { out } = {}) {
   const bgFile = bg.type === 'image' ? resolveBackgroundFile(dir, bg.value) : null;
   const background = bgFile ? pathToFileURL(bgFile).href : null;
 
-  const { width, height } = compose.exportSize(project);
   const ex = project.export;
+  const size = plan.outputSize(project, ex);
   const job = {
     project, sources, background,
     // Music and voiceover takes, checked to be inside this project's folder.
     audioFiles: audioFileUrls(dir, project),
-    resolution: ex.resolution, codec: ex.codec, quality: ex.quality, fps: ex.fps
+    format: ex.format, resolution: ex.resolution, codec: ex.codec, quality: ex.quality, fps: ex.fps,
+    sizeLimit: ex.sizeLimit, gifWidth: ex.gifWidth, gifFps: ex.gifFps, dither: ex.dither
   };
-  return { job, project, subtitles: opts.subtitles === true, out: out ?? path.join(dir, `export-${width}x${height}.mp4`) };
+  return { job, project, subtitles: opts.subtitles === true, out: out ?? path.join(dir, plan.exportFileName(ex, size)) };
 }
 
 function cancelledError() {
@@ -172,6 +201,11 @@ function createExportRunner({ BrowserWindow, preload, page, show = false }) {
         state.settled = true;
         // Let writes already under way land (or fail) before closing the file.
         await state.writes.catch(() => {});
+        // A size-limited export may have run twice, the second pass shorter:
+        // the file ends where the page says the last pass ended.
+        if (!err && Number.isSafeInteger(summary?.bytes) && summary.bytes > 0 && state.handle) {
+          await state.handle.truncate(summary.bytes).catch((e) => { err = new Error(`Couldn't save the video (${e.message}).`); });
+        }
         await state.handle?.close().catch(() => {});
         if (state.win && !state.win.isDestroyed()) state.win.destroy();
         if (!err) {
@@ -245,6 +279,65 @@ function createExportRunner({ BrowserWindow, preload, page, show = false }) {
   return { start, cancel, busy: () => active !== null };
 }
 
+// ---------------------------------------------------------------- recent exports
+
+// exports.json holds [{ name, format, width, height, duration, bytes, at }],
+// newest first. Only a plain file name is kept: the list travels with the
+// recording's folder and can't point anywhere outside it.
+function readRecentFile(dir) {
+  try {
+    const list = JSON.parse(fs.readFileSync(path.join(dir, RECENT_FILE), 'utf8'));
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+const isPlainName = (name) => typeof name === 'string' && name.length > 0 && name.length <= 255 &&
+  path.basename(name) === name && !name.includes('\\') && name !== '..' && name !== '.';
+
+// The exports that still exist, with their full paths, newest first.
+function recentExports(dir) {
+  const out = [];
+  for (const e of readRecentFile(dir)) {
+    if (!isPlainName(e?.name) || !FORMATS.includes(e.format)) continue;
+    const file = path.join(dir, e.name);
+    let stat;
+    try {
+      stat = fs.statSync(file);
+    } catch {
+      continue;
+    }
+    if (!stat.isFile()) continue;
+    const num = (v) => (Number.isFinite(v) ? v : null);
+    out.push({
+      file, name: e.name, format: e.format, width: num(e.width), height: num(e.height),
+      duration: num(e.duration), bytes: stat.size, at: num(e.at)
+    });
+  }
+  return out;
+}
+
+// Adds a finished export to the front (an export over the same file replaces
+// its old entry). A folder that can't be written only loses the list.
+function rememberExport(dir, result, { now = Date.now() } = {}) {
+  const name = path.basename(result.file);
+  const entry = {
+    name, format: result.format ?? path.extname(name).slice(1),
+    width: result.width, height: result.height, duration: result.duration,
+    bytes: result.bytes, at: now
+  };
+  const list = [entry, ...readRecentFile(dir).filter((e) => e?.name !== name)].slice(0, MAX_RECENT);
+  try {
+    const tmp = path.join(dir, `${RECENT_FILE}.tmp`);
+    fs.writeFileSync(tmp, JSON.stringify(list, null, 2));
+    fs.renameSync(tmp, path.join(dir, RECENT_FILE));
+  } catch (e) {
+    console.warn('Loupe: could not remember the export:', e.message);
+  }
+  return entry;
+}
+
 // export:start resolves with { file, frames, seconds, ... } once the video is
 // saved; progress goes to the window that asked, as export:progress.
 // `beforeStart` runs first (main flushes the editor's pending project save,
@@ -272,7 +365,13 @@ function registerExportIpc({ ipcMain, runner, projectDir, beforeStart = () => {}
         result.subtitlesError = `Couldn't save the subtitles (${err.message}).`;
       }
     }
+    if (path.dirname(result.file) === dir) rememberExport(dir, result);
     return result;
+  });
+  // The open recording's earlier exports that still exist, newest first.
+  ipcMain.handle('export:recent', () => {
+    const dir = projectDir();
+    return dir ? recentExports(dir) : [];
   });
   ipcMain.handle('export:cancel', () => runner.cancel());
   ipcMain.handle('export:reveal', () => {
@@ -284,5 +383,6 @@ function registerExportIpc({ ipcMain, runner, projectDir, beforeStart = () => {}
 
 module.exports = {
   validateExportOptions, buildJob, createExportRunner, registerExportIpc,
-  RESOLUTIONS, CODECS, QUALITIES
+  recentExports, rememberExport,
+  FORMATS, RESOLUTIONS, CODECS, QUALITIES
 };

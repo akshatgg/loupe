@@ -34,6 +34,8 @@ export const EXPORT_FORMATS = ['mp4', 'webm', 'gif'];
 export const EXPORT_RESOLUTIONS = ['720p', '1080p', '1440p', '4k'];
 export const EXPORT_QUALITIES = ['high', 'balanced', 'small'];
 export const EXPORT_CODECS = ['h264', 'hevc'];
+export const EXPORT_GIF_WIDTHS = [480, 720, 960];
+export const EXPORT_GIF_FRAME_RATES = [10, 15, 20];
 export const WEBCAM_SHAPES = ['circle', 'rounded'];
 export const CORNERS = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
 export const POSITIONS = ['top', 'bottom'];
@@ -124,7 +126,12 @@ function mergeCaptions(c) {
 }
 
 export function defaultExport() {
-  return { format: 'mp4', resolution: '1080p', quality: 'balanced', fps: 60, codec: 'h264' };
+  // sizeLimit: null or MB for "Fit a size limit" (videos only); gifWidth,
+  // gifFps and dither apply to GIFs.
+  return {
+    format: 'mp4', resolution: '1080p', quality: 'balanced', fps: 60, codec: 'h264',
+    sizeLimit: null, gifWidth: 960, gifFps: 15, dither: true
+  };
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -523,6 +530,10 @@ function validateExport(e) {
   oneOf(e.quality, EXPORT_QUALITIES, 'Export quality');
   num(e.fps, 'Export frame rate', 1, 120);
   oneOf(e.codec, EXPORT_CODECS, 'Export codec');
+  if (e.sizeLimit !== null) num(e.sizeLimit, 'Export size limit', 1, 4000);
+  oneOf(e.gifWidth, EXPORT_GIF_WIDTHS, 'GIF width');
+  oneOf(e.gifFps, EXPORT_GIF_FRAME_RATES, 'GIF frame rate');
+  bool(e.dither, 'GIF dithering');
   return e;
 }
 

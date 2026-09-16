@@ -110,7 +110,7 @@ export async function decodeAudioFile(bytes, label) {
 const NOISE_START = 9600;
 const NOISE_LENGTH = 9600;
 const MAX_DELAY = 4096;
-let delayMeasured = null;
+const delayMeasured = new Map();
 
 function noiseBurst() {
   const out = new Float32Array(NOISE_START + NOISE_LENGTH + MAX_DELAY + 4800);
@@ -171,27 +171,30 @@ export function bestLag(reference, decoded, start, length, maxLag) {
   return best;
 }
 
-export async function encoderDelay() {
-  if (delayMeasured === null) {
+// Per format: Opus has its own look-ahead, measured the same way.
+export async function encoderDelay(format = 'mp4') {
+  if (!delayMeasured.has(format)) {
+    let lag = 0;
     try {
       const reference = noiseBurst();
-      const decoded = await roundTrip(reference, await chooseAudioConfig());
-      delayMeasured = bestLag(reference, decoded, NOISE_START, 2400, MAX_DELAY);
+      const decoded = await roundTrip(reference, await chooseAudioConfig(format));
+      lag = bestLag(reference, decoded, NOISE_START, 2400, MAX_DELAY);
     } catch {
       // Unmeasurable. Guessing wrong would be as bad as not correcting, so
       // the sound is left as it comes out.
-      delayMeasured = 0;
     }
+    delayMeasured.set(format, lag);
   }
-  return delayMeasured;
+  return delayMeasured.get(format);
 }
 
-// A mixTracks() result -> [{ chunk, meta }] AAC, timestamps from 0. The
+// A mixTracks() result -> [{ chunk, meta }] AAC (Opus for WebM), timestamps
+// from 0. The
 // first `encoderDelay()` samples of the mix are left out so that, after
 // the encoder's priming, the sound lines up with the picture again.
-export async function encodeAudio(mix, { signal } = {}) {
-  const config = await chooseAudioConfig();
-  const skip = await encoderDelay();
+export async function encodeAudio(mix, { signal, format = 'mp4' } = {}) {
+  const config = await chooseAudioConfig(format);
+  const skip = await encoderDelay(format);
   const out = [];
   let error = null;
   const encoder = new AudioEncoder({

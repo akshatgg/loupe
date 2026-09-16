@@ -47,7 +47,10 @@ test('a migrated project keeps v1 looks: no background, padding, corners or shad
   assert.deepStrictEqual(p.style.cursor, { show: true, size: 1, hideWhenIdle: false, smooth: false, highlight: 'none', clicks: true });
   assert.strictEqual(p.audio.mic.cleanUp, false);
   assert.strictEqual(p.audio.mic.level, false);
-  assert.deepStrictEqual(p.export, { format: 'mp4', resolution: '1080p', quality: 'balanced', fps: 60, codec: 'h264' });
+  assert.deepStrictEqual(p.export, {
+    format: 'mp4', resolution: '1080p', quality: 'balanced', fps: 60, codec: 'h264',
+    sizeLimit: null, gifWidth: 960, gifFps: 15, dither: true
+  });
 });
 
 test('v1 settings map onto the cursor style', () => {
