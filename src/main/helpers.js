@@ -22,7 +22,14 @@ function createLineSplitter(onLine) {
 }
 
 function spawnHelper(binPath, args, { onMessage, onMalformed, onExit, onError }) {
-  const child = spawn(binPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  // Windows has no SIGTERM to ask a helper to finish up -- child.kill() there
+  // is TerminateProcess, which would leave a half-written recording -- so the
+  // Windows helpers stop when their stdin closes instead (see stopHelper).
+  const stdin = process.platform === 'win32' ? 'pipe' : 'ignore';
+  const child = spawn(binPath, args, { stdio: [stdin, 'pipe', 'pipe'], windowsHide: true });
+  // Writing "stop" to a helper that has already exited is not an error
+  // anyone needs to hear about.
+  child.stdin?.on('error', () => {});
 
   const push = createLineSplitter((line) => {
     try {
@@ -121,7 +128,8 @@ function stopHelper(child, timeoutMs = 3000) {
       resolve(code ?? 0);
     });
     if (child.exitCode === null && child.signalCode === null) {
-      child.kill('SIGTERM');
+      if (child.stdin && !child.stdin.destroyed) child.stdin.end('stop\n');
+      else child.kill('SIGTERM');
     }
   });
 }

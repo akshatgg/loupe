@@ -4,8 +4,21 @@ const path = require('node:path');
 const { createZoomState, applyScroll } = require('./zoom');
 const { createProject, saveProject, writeCursorTrack } = require('./project');
 const { buildExcludeWindowArgs } = require('./exclude-args');
+const { helperCommand, captureFileName } = require('./platform');
 
-function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
+const identity = (v) => v;
+
+// `platform` picks the helper binaries and capture file (platform.js).
+// `toDipPoint` maps inputtap's coordinates into the space sources and regions
+// are measured in, and `toCaptureRect` maps a region the other way for
+// bin/capture -- both identities on macOS, where every helper speaks points;
+// on Windows the helpers speak physical pixels and main.js supplies
+// Electron's DIP conversions.
+function createRecorder({
+  binDir, spawnHelper, stopHelper, onError,
+  platform = process.platform, toDipPoint = identity, toCaptureRect = identity
+}) {
+  const captureFile = captureFileName(platform);
   let captureChild = null;
   let inputChild = null;
   let captureClock = null;
@@ -52,6 +65,10 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
   function consume(msg) {
     const t = msg.clock - captureClock;
     if (t < 0) return; // happened before the first frame
+    if (msg.type === 'zoom' || msg.type === 'click' || msg.type === 'cursor') {
+      const p = toDipPoint({ x: msg.x, y: msg.y });
+      msg = { ...msg, x: p.x, y: p.y };
+    }
     switch (msg.type) {
       case 'zoom':
         if (zoomEnabled) {
@@ -185,7 +202,7 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
     captureChild = null;
     inputChild = null;
 
-    const args = ['--source', source, '--out', path.join(dir, 'raw.mov'),
+    const args = ['--source', source, '--out', path.join(dir, captureFile),
                   '--mic', hasMic ? '1' : '0'];
     // Every Loupe-owned overlay window that could be on screen when capture
     // starts -- the control bar (always) and, with the outline still
@@ -201,11 +218,13 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
     // one that knows which display SCStreamConfiguration.sourceRect is
     // relative to.
     if (region) {
-      args.push('--crop-x', String(region.x), '--crop-y', String(region.y),
-                 '--crop-w', String(region.width), '--crop-h', String(region.height));
+      const crop = toCaptureRect(region);
+      args.push('--crop-x', String(crop.x), '--crop-y', String(crop.y),
+                 '--crop-w', String(crop.width), '--crop-h', String(crop.height));
     }
 
-    captureChild = spawnHelper(path.join(binDir, 'capture'), args, {
+    const capture = helperCommand(binDir, 'capture', platform);
+    captureChild = spawnHelper(capture.file, [...capture.args, ...args], {
       onMessage: (msg) => { if (gen === generation) onCapture(msg); },
       onMalformed: (l) => console.error('capture malformed:', l),
       onExit: () => { if (gen === generation) recording = false; },
@@ -215,7 +234,8 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
     if (zoomEnabled) {
       // How zooming is triggered (modifier key / mouse side button) --
       // settings.js's inputTapArgs, from the user's saved choice.
-      inputChild = spawnHelper(path.join(binDir, 'inputtap'), opts.inputTapArgs ?? [], {
+      const inputtap = helperCommand(binDir, 'inputtap', platform);
+      inputChild = spawnHelper(inputtap.file, [...inputtap.args, ...(opts.inputTapArgs ?? [])], {
         onMessage: (msg) => { if (gen === generation) onInput(msg); },
         onMalformed: (l) => console.error('inputtap malformed:', l),
         // A non-zero exit here (e.g. Accessibility revoked mid-recording,
@@ -277,7 +297,7 @@ function createRecorder({ binDir, spawnHelper, stopHelper, onError }) {
         // camera.js, Render.swift and the editor preview never need to read
         // these back out.
         originX: sourceOriginX, originY: sourceOriginY },
-      { file: 'raw.mov', fps: 60, duration, hasMicTrack: hasMic }
+      { file: captureFile, fps: 60, duration, hasMicTrack: hasMic }
     );
     project.zoomKeyframes = zoomState.keyframes;
     // The editor's zoom removal is non-destructive (segments.js removeZoom):

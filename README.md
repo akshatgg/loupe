@@ -1,10 +1,12 @@
 # Loupe
 
-**A Mac screen recorder that zooms in while you record** — for demo and tutorial videos where the viewer has to see the detail.
+**A screen recorder for Mac and Windows that zooms in while you record** — for demo and tutorial videos where the viewer has to see the detail.
 
 Website: **https://loupeapp.vercel.app**
 
 ## Install
+
+### Mac
 
 macOS 14 Sonoma or later, Apple Silicon or Intel.
 
@@ -23,6 +25,17 @@ System Settings → Privacy & Security → **Open Anyway**.
 On first launch Loupe asks for **Screen Recording** (required) and
 **Accessibility** (for the zoom gesture). Recordings are saved to `~/Movies/Loupe`.
 
+### Windows
+
+Windows 10 (version 2004 or later) or Windows 11, 64-bit.
+
+Download [**Loupe-Setup-x64.exe**](https://github.com/akshatgg/loupe/releases/latest/download/Loupe-Setup-x64.exe)
+and run it. It installs for your account (no administrator prompt) and adds
+Loupe to the Start menu. The installer isn't code-signed yet, so SmartScreen
+may say "Windows protected your PC": click **More info**, then **Run anyway**.
+There are no permissions to grant. Recordings are saved to `Videos\Loupe`;
+the zoom key is Alt by default.
+
 ## What it does
 
 - **Record** the entire screen, one window, or part of one (drag a rectangle — e.g. a browser window without its toolbar).
@@ -30,7 +43,7 @@ On first launch Loupe asks for **Screen Recording** (required) and
 - **See what's in shot:** while zoomed, a frame on your screen shows exactly what the video will show, and its zoom level. It is never recorded, and neither is the control bar.
 - **Edit:** jump to, remove, undo or restore zooms; speed up or slow down any stretch (0.25×–8×, voices keep a natural pitch); show or hide the cursor.
 - **Export** MP4 at 1080p, 1440p or 4K, 60 fps.
-- Everything stays on your Mac — no account, no upload.
+- Everything stays on your computer — no account, no upload.
 
 ## Develop
 
@@ -41,15 +54,28 @@ npm start
 npm test               # lint + tests
 ```
 
-The Electron app (`src/main`, `src/renderer`) drives four Swift helpers in
-`src/native`: `sources` (list displays/windows), `capture` (ScreenCaptureKit),
-`inputtap` (zoom gesture, clicks, cursor) and `render` (export). `docs/` has the
-product and technical design.
+The Electron app (`src/main`, `src/renderer`) drives four native helpers:
+`sources` (list displays/windows), `capture`, `inputtap` (zoom gesture, clicks,
+cursor) and `render` (export). On macOS they are Swift, in `src/native`
+(ScreenCaptureKit, CGEventTap, AVFoundation). On Windows they are one .NET 8
+program, `native-win` (Windows.Graphics.Capture, low-level input hooks, Media
+Foundation), speaking the same protocol. `src/main/platform.js` picks between
+them. `docs/` has the product and technical design.
+
+On Windows, with the .NET 8 SDK:
+
+```sh
+npm install
+npm run build:native:win   # native-win -> bin-win/loupe-native.exe
+npm run test:native:win    # picture and sound processing tests (any OS)
+node packaging/smoke-win.js   # record, stop and export on this PC
+npm run dist:win           # dist/Loupe-Setup-x64.exe
+```
 
 ## Release
 
-Cutting a release builds both DMGs, publishes a GitHub Release, and updates
-the Homebrew cask ([`.github/workflows/release.yml`](.github/workflows/release.yml)):
+Cutting a release builds both DMGs and the Windows installer, publishes a
+GitHub Release, and updates the Homebrew cask ([`.github/workflows/release.yml`](.github/workflows/release.yml)):
 
 ```sh
 npm run release:patch   # or release:minor / release:major

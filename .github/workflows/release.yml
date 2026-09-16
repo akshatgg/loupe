@@ -1,10 +1,11 @@
 name: Release
 
-# Builds the macOS installers (Apple Silicon + Intel DMGs), publishes them as
-# a GitHub Release, and points the Homebrew cask at them. This is the APP
-# release only -- the website (web/) deploys separately, on every push to
-# master, and needs no change per release: its download buttons use
-# /releases/latest/download/Loupe-<arch>.dmg, which always serves the newest.
+# Builds the installers -- macOS (Apple Silicon + Intel DMGs) and Windows
+# (Loupe-Setup-x64.exe) -- publishes them as a GitHub Release, and points the
+# Homebrew cask at the DMGs. This is the APP release only -- the website (web/)
+# deploys separately, on every push to master, and needs no change per
+# release: its download buttons use /releases/latest/download/<file>, which
+# always serves the newest.
 #
 # Two ways to cut one, and you pick the version either way:
 #
@@ -27,6 +28,10 @@ name: Release
 #   APPLE_TEAM_ID        Developer ID signing + notarization (see
 #                        electron-builder.config.js). Without them the app is
 #                        ad-hoc signed, which Homebrew installs cleanly.
+#   WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD
+#                        Authenticode signing for the Windows installer.
+#                        Without them it is unsigned and SmartScreen asks
+#                        once ("More info" -> "Run anyway").
 on:
   push:
     tags: ['v*']
@@ -157,8 +162,70 @@ jobs:
           path: dist/*.dmg
           if-no-files-found: error
 
+  windows:
+    needs: [prepare]
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Set version to ${{ needs.prepare.outputs.version }}
+        run: npm version "${{ needs.prepare.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - run: npm ci
+
+      - name: Test the picture and sound processing
+        run: npm run test:native:win
+
+      - name: Build the native helper (loupe-native.exe)
+        run: npm run build:native:win
+
+      # Records the runner's screen, stops, and exports the recording with a
+      # zoom, cursor and speed change -- the helper working end to end on a
+      # real Windows desktop, before any installer is built around it.
+      - name: Smoke-test the native helper
+        run: node packaging/smoke-win.js bin-win/loupe-native.exe
+
+      - name: Build the installer
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: npx electron-builder --win --config electron-builder.config.js --publish never
+
+      - name: Verify the installer
+        shell: pwsh
+        run: |
+          $exe = "dist/Loupe-Setup-x64.exe"
+          if (-not (Test-Path $exe)) { Write-Error "$exe was not produced"; exit 1 }
+          Get-Item $exe | Format-List Name, Length
+          $helper = "dist/win-unpacked/resources/bin/loupe-native.exe"
+          if (-not (Test-Path $helper)) { Write-Error "$helper is missing from the app"; exit 1 }
+          # Install silently, check the app and its helper landed, uninstall.
+          $proc = Start-Process $exe -ArgumentList "/S" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { Write-Error "installer exited $($proc.ExitCode)"; exit 1 }
+          $app = Join-Path $env:LOCALAPPDATA "Programs/Loupe"
+          if (-not (Test-Path "$app/Loupe.exe")) { Write-Error "Loupe.exe not installed in $app"; exit 1 }
+          if (-not (Test-Path "$app/resources/bin/loupe-native.exe")) { Write-Error "helper not installed"; exit 1 }
+          & "$app/resources/bin/loupe-native.exe" sources | Out-Null
+          if ($LASTEXITCODE -ne 0) { Write-Error "installed helper failed"; exit 1 }
+          $uninstaller = Get-ChildItem $app -Filter "Uninstall Loupe.exe" | Select-Object -First 1
+          if ($uninstaller) { Start-Process $uninstaller.FullName -ArgumentList "/S" -Wait }
+          Write-Host "installer verified"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/Loupe-Setup-x64.exe
+          if-no-files-found: error
+
   release:
-    needs: [prepare, macos]
+    needs: [prepare, macos, windows]
     if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -172,9 +239,10 @@ jobs:
 
       - name: Verify artifacts arrived
         run: |
-          find artifacts -type f -name '*.dmg' -print
+          find artifacts -type f \( -name '*.dmg' -o -name '*.exe' \) -print
           count=$(find artifacts -type f -name '*.dmg' | wc -l)
           test "$count" -eq 2 || { echo "::error::expected 2 DMGs, found $count"; exit 1; }
+          test -f artifacts/windows/Loupe-Setup-x64.exe || { echo "::error::the Windows installer is missing"; exit 1; }
 
       # A manual run chose the version, so write it back to the repository and
       # create the tag. Pushes made with GITHUB_TOKEN do not trigger workflows,
@@ -199,7 +267,9 @@ jobs:
         with:
           tag_name: v${{ needs.prepare.outputs.version }}
           name: Loupe ${{ needs.prepare.outputs.version }}
-          files: artifacts/**/*.dmg
+          files: |
+            artifacts/**/*.dmg
+            artifacts/windows/Loupe-Setup-x64.exe
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
@@ -225,6 +295,12 @@ jobs:
 
             On first launch, grant **Screen Recording** (required) and
             **Accessibility** (for the zoom gesture).
+
+            **Windows 10 (version 2004) or Windows 11, 64-bit** — download
+            **Loupe-Setup-x64.exe** below and run it. The installer isn't
+            code-signed yet, so SmartScreen may say "Windows protected your
+            PC": click **More info**, then **Run anyway**. No permissions to
+            grant; recordings are saved to `Videos\Loupe`.
 
             Website: https://loupeapp.vercel.app
 

@@ -8,7 +8,8 @@ function harness({ onError } = {}) {
   const sinks = {};
   const children = {};
   const spawnHelper = (bin, args, opts) => {
-    const name = bin.endsWith('capture') ? 'capture' : 'inputtap';
+    // The helper name is the binary (macOS) or its first argument (Windows).
+    const name = bin.endsWith('capture') || args[0] === 'capture' ? 'capture' : 'inputtap';
     sinks[name] = opts.onMessage;
     if (onError && onError[name]) {
       // Simulate spawnHelper's real contract: onError fires, then onExit(null, null) exactly once.

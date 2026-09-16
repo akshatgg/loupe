@@ -4,19 +4,106 @@
 (function () {
   'use strict';
 
-  document.documentElement.classList.add('js');
+  var root = document.documentElement;
+  root.classList.add('js');
+
+  // Mac or Windows: chosen from the visitor's system before first paint (so
+  // the other platform's panel never flashes), changeable with the tabs.
+  var platform = detectPlatform();
+  root.setAttribute('data-platform', platform);
+  var platformListeners = [];
+
+  function detectPlatform() {
+    var nav = window.navigator || {};
+    var hint = (nav.userAgentData && nav.userAgentData.platform) || nav.platform || nav.userAgent || '';
+    return /win/i.test(hint) ? 'win' : 'mac';
+  }
 
   var ready = function (fn) {
-    if (document.readyState !== 'loading') fn();
+    // Always after this whole file has run, so every table below is defined.
+    if (document.readyState !== 'loading') setTimeout(fn, 0);
     else document.addEventListener('DOMContentLoaded', fn);
   };
 
   ready(function () {
+    initPlatform();
     initCopyButtons();
     initRelease();
     var demo = document.querySelector('[data-demo]');
     if (demo) initDemo(demo);
   });
+
+  /* ------------------------------------------------------------ platform */
+
+  // How each system names the zoom keys. The saved setting is the same on
+  // both; only the labels change.
+  var KEYS = {
+    mac: {
+      glyph: { option: '⌥', control: '⌃', command: '⌘', shift: '⇧' },
+      // option-after follows the key itself: "⌥ Option" on a Mac, just "Alt" on Windows.
+      name: { option: 'Option', 'option-after': '\u00a0Option', control: 'Control', command: 'Command' },
+      cap: { option: 'option', control: 'control', command: 'command', shift: 'shift' }
+    },
+    win: {
+      glyph: { option: 'Alt', control: 'Ctrl', command: '⊞', shift: 'Shift' },
+      name: { option: 'Alt', 'option-after': '', control: 'Ctrl', command: 'the Windows key' },
+      // A PC keycap is labelled with the word itself; only the logo key needs a name.
+      cap: { option: '', control: '', command: 'windows', shift: '' }
+    }
+  };
+
+  function keyGlyph(key) { return KEYS[platform].glyph[key]; }
+
+  function initPlatform() {
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('[data-platform-tab]'));
+    var list = document.querySelector('[data-os-tabs]');
+    if (list) list.hidden = false;
+
+    function select(next, focus) {
+      platform = next;
+      root.setAttribute('data-platform', next);
+      tabs.forEach(function (tab) {
+        var on = tab.getAttribute('data-platform-tab') === next;
+        tab.setAttribute('aria-selected', on ? 'true' : 'false');
+        tab.tabIndex = on ? 0 : -1;
+        if (on && focus) tab.focus();
+      });
+      var k = KEYS[next];
+      each('[data-keyglyph]', function (el) {
+        var g = k.glyph[el.getAttribute('data-keyglyph')];
+        if (g) { el.textContent = g; el.classList.toggle('is-word', g.length > 1); }
+      });
+      each('[data-key-name]', function (el) {
+        var n = k.name[el.getAttribute('data-key-name')];
+        if (typeof n === 'string') el.textContent = n;
+      });
+      each('[data-key-cap]', function (el) {
+        var c = k.cap[el.getAttribute('data-key-cap')];
+        if (typeof c === 'string') el.textContent = c;
+      });
+      each('[data-os-cta]', function (el) {
+        el.textContent = next === 'win' ? 'Download for Windows' : 'Download for Mac';
+      });
+      platformListeners.forEach(function (fn) { fn(next); });
+    }
+
+    tabs.forEach(function (tab, i) {
+      tab.addEventListener('click', function () { select(tab.getAttribute('data-platform-tab'), false); });
+      tab.addEventListener('keydown', function (e) {
+        var step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+        if (!step) return;
+        e.preventDefault();
+        var to = tabs[(i + step + tabs.length) % tabs.length];
+        select(to.getAttribute('data-platform-tab'), true);
+      });
+    });
+
+    select(platform, false);
+  }
+
+  function each(selector, fn) {
+    Array.prototype.forEach.call(document.querySelectorAll(selector), fn);
+  }
 
   /* ---------------------------------------------------------------- copy */
 
@@ -105,6 +192,15 @@
           link.href = rel.html_url;
         }
         line.hidden = false;
+        // The newest release may predate Windows builds: then say so rather
+        // than offer a link that would not download anything.
+        var hasWindows = Array.isArray(rel.assets) && rel.assets.some(function (a) {
+          return a && a.name === 'Loupe-Setup-x64.exe';
+        });
+        if (!hasWindows) {
+          each('[data-win-download]', function (el) { el.hidden = true; });
+          each('[data-win-pending]', function (el) { el.hidden = false; });
+        }
       })
       .catch(function () { /* no release yet, offline, or rate-limited: say nothing */ });
   }
@@ -144,7 +240,7 @@
     var PRESS = 8.05, SENT = 8.2;
     var LINES = [
       [0, 'Point at what you want to show'],
-      [1.7, 'Hold ⌥ and scroll up to zoom in'],
+      [1.7, function () { return 'Hold ' + keyGlyph('option') + ' and scroll up to zoom in'; }],
       [3.45, 'Typing? Small movements don’t shake the shot'],
       [6.3, 'Move somewhere new and the shot follows'],
       [10.15, 'Scroll back down to zoom out'],
@@ -304,7 +400,7 @@
       setText(timeEl, Math.floor(s / 60) + ':' + (s % 60 < 10 ? '0' : '') + (s % 60));
       var line = LINES[0][1];
       for (var k = 0; k < LINES.length; k++) if (t >= LINES[k][0]) line = LINES[k][1];
-      setText(gestureEl, line);
+      setText(gestureEl, typeof line === 'function' ? line() : line);
     }
 
     // One still frame for reduced motion: zoomed in on the invite row.
@@ -317,7 +413,7 @@
       ['out', 'idle', 'ibeam', 'key', 'scroll', 'press', 'click', 'sent', 'focus'].forEach(function (n) { flag(n, false); });
       setTyped(EMAIL);
       setText(timeEl, '0:08');
-      setText(gestureEl, 'Hold ⌥ and scroll up to zoom in');
+      setText(gestureEl, 'Hold ' + keyGlyph('option') + ' and scroll up to zoom in');
     }
 
     var raf = 0, running = false, last = 0, userPaused = false, onScreen = true;

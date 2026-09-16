@@ -1,6 +1,8 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, systemPreferences, shell, dialog, globalShortcut } = require('electron');
+const electron = require('electron');
+const { app, BrowserWindow, ipcMain, systemPreferences, shell, dialog, globalShortcut } = electron;
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const os = require('node:os');
 const fs = require('node:fs');
 const { execFile } = require('node:child_process');
@@ -19,6 +21,22 @@ const { createLiveCamera, stepLiveCamera } = require('./live-camera');
 const { loadSettings, saveSettings, applySettingsPatch, inputTapArgs } = require('./settings');
 const { validateSpeedPaint, paintSpeed, retimePlan, outputDuration } = require('./speed');
 const { registerCaptionsIpc } = require('./ipc/captions');
+const {
+  helperCommand, recordingsRoot, coordinateMapper, attachThumbnails
+} = require('./platform');
+
+const IS_WINDOWS = process.platform === 'win32';
+// Physical pixels <-> DIPs on Windows; identities on macOS (platform.js).
+const coords = coordinateMapper(() => electron.screen);
+
+// Keeps one of Loupe's own windows (the bar, the area outline, the zoom frame)
+// out of the recording. macOS does this in bin/capture from window ids (see
+// bar:start); on Windows the window itself opts out of capture
+// (WDA_EXCLUDEFROMCAPTURE, Windows 10 2004 and later), which
+// Windows.Graphics.Capture honours.
+function excludeFromCapture(win) {
+  if (IS_WINDOWS) win.setContentProtection(true);
+}
 
 const rampMsOf = (project) => project.settings?.rampMs ?? 200;
 const outputDurationOf = (project) =>
@@ -58,7 +76,8 @@ function onRecorderError(err) {
 }
 
 const recorder = createRecorder({
-  binDir: BIN_DIR, spawnHelper, stopHelper, onError: onRecorderError
+  binDir: BIN_DIR, spawnHelper, stopHelper, onError: onRecorderError,
+  toDipPoint: coords.toDipPoint, toCaptureRect: coords.toScreenRect
 });
 
 let pickerWindow = null;
@@ -180,6 +199,7 @@ function createShotWindow(area) {
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
   });
   shotWindow = win;
+  excludeFromCapture(win);
   win.setIgnoreMouseEvents(true);
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setAlwaysOnTop(true, 'screen-saver');
@@ -241,6 +261,7 @@ function createBarWindow() {
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
   });
   barWindow = win;
+  excludeFromCapture(win);
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   // One level above the region overlay ('screen-saver', see
   // createOverlayWindow): the overlay covers the whole target, and the bar
@@ -282,6 +303,7 @@ function createOverlayWindow(target) {
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
   });
   overlayWindow = win;
+  excludeFromCapture(win);
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   // 'screen-saver' puts the overlay above whatever else is on screen; the
   // bar sits one level higher still (createBarWindow) so it stays clickable.
@@ -388,15 +410,38 @@ async function stopRecording() {
   }
 }
 
-ipcMain.handle('sources:list', () =>
-  new Promise((resolve, reject) => {
-    const args = ['--exclude-pid', String(process.pid)];
-    execFile(path.join(BIN_DIR, 'sources'), args, { maxBuffer: 64 * 1024 * 1024 },
+function listNativeSources() {
+  return new Promise((resolve, reject) => {
+    const { file, args } = helperCommand(BIN_DIR, 'sources');
+    args.push('--exclude-pid', String(process.pid));
+    execFile(file, args, { maxBuffer: 64 * 1024 * 1024, windowsHide: true },
       (err, stdout) => {
         if (err) return reject(new Error(stdout || err.message));
         try { resolve(JSON.parse(stdout)); } catch (e) { reject(e); }
       });
-  }));
+  });
+}
+
+ipcMain.handle('sources:list', async () => {
+  const sources = await listNativeSources();
+  if (!IS_WINDOWS) return sources;
+  // bin/sources on Windows reports physical pixels and no thumbnails: bring
+  // the rects into DIPs like everything else, and borrow Chromium's
+  // thumbnails for the pictures.
+  const inDips = sources.map((s) => {
+    const r = coords.toDipRect({ x: s.x, y: s.y, width: s.width, height: s.height });
+    return { ...s, x: r.x, y: r.y, width: r.width, height: r.height };
+  });
+  try {
+    const captured = await electron.desktopCapturer.getSources({
+      types: ['screen', 'window'], thumbnailSize: { width: 320, height: 200 }
+    });
+    return attachThumbnails(inDips, captured, electron.screen.getAllDisplays());
+  } catch (err) {
+    console.error('Loupe: could not load source thumbnails:', err);
+    return inDips;
+  }
+});
 
 ipcMain.handle('region:init', () => overlayInitData);
 
@@ -563,7 +608,7 @@ ipcMain.handle('bar:start', async () => {
       if (!granted) recordMic = false;
     }
 
-    const dir = path.join(os.homedir(), 'Movies', 'Loupe', String(Date.now()));
+    const dir = path.join(recordingsRoot((name) => app.getPath(name), os.homedir()), String(Date.now()));
     fs.mkdirSync(dir, { recursive: true });
 
     // Every Loupe-owned window that could be on screen right now -- the bar
@@ -642,6 +687,8 @@ ipcMain.handle('record:stop', stopRecording);
 let stopShortcutRegistered = false;
 
 app.whenReady().then(() => {
+  // Groups Loupe's windows under one taskbar button with the right name.
+  if (IS_WINDOWS) app.setAppUserModelId('tech.markai.loupe');
   createPickerWindow();
   stopShortcutRegistered = globalShortcut.register('Control+Shift+S', () => {
     // Unlike ipcMain.handle('record:stop', stopRecording), Electron has no
@@ -806,10 +853,13 @@ registerCaptionsIpc({ ipcMain, app, dialog, BrowserWindow, getDefaultDir: () => 
 
 ipcMain.handle('project:load', () => {
   const project = loadProject(editorDir);
+  const video = path.join(editorDir, project.capture?.file ?? 'raw.mov');
   return {
     dir: editorDir,
     project,
-    video: path.join(editorDir, 'raw.mov'),
+    video,
+    // A file:// URL built properly, so Windows paths (C:\...) load too.
+    videoUrl: pathToFileURL(video).href,
     segments: zoomSegments(project.zoomKeyframes, project.capture.duration),
     camera: cameraFor(editorDir),
     // For the preview to draw the cursor the export will draw (the capture
@@ -915,7 +965,9 @@ ipcMain.handle('export:start', async (_e, { preset, codec }) => {
       if (fn === reject) fs.promises.unlink(out).catch(() => {});
       fn(arg);
     };
-    exportChild = spawnHelper(path.join(BIN_DIR, 'render'), [
+    const render = helperCommand(BIN_DIR, 'render');
+    exportChild = spawnHelper(render.file, [
+      ...render.args,
       '--project', editorDir, '--out', out,
       '--width', String(width), '--height', String(height), '--codec', codec || 'h264'
     ], {

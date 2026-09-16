@@ -1,4 +1,7 @@
 bin/
+bin-win/
+native-win/**/bin/
+native-win/**/obj/
 node_modules/
 dist/
 .DS_Store
