@@ -82,13 +82,14 @@ export function videoBitrate(exp, { width, height, fps, duration, audio = true }
 }
 
 // A GIF's size depends on how much of the picture changes, which isn't known
-// before encoding; these per-pixel figures are typical of screen recordings
-// (a still frame costs almost nothing, a scroll or zoom a lot).
-const GIF_FIRST_BYTES_PER_PIXEL = 0.45;
-const GIF_BYTES_PER_PIXEL_SECOND = 0.9;
-const GIF_DITHER_FACTOR = 1.35;
+// before encoding: a quiet recording can be a tenth of this. These figures
+// (bytes per output pixel) come from real recordings with zooms and scrolling,
+// so the estimate reads as "up to about".
+const GIF_FIRST_BYTES_PER_PIXEL = 0.5;
+const GIF_BYTES_PER_PIXEL_SECOND = 0.75;
+const GIF_DITHER_FACTOR = 1.15;
 
-// A rough file size in bytes, for "About 12 MB" in the export dialog.
+// A rough upper estimate of the file size in bytes, for the export dialog.
 export function estimateBytes(exp, { width, height, fps, duration, audio = true }) {
   if (exp.format === 'gif') {
     const pixels = width * height;
@@ -96,8 +97,8 @@ export function estimateBytes(exp, { width, height, fps, duration, audio = true 
     const bytes = pixels * GIF_FIRST_BYTES_PER_PIXEL + perSecond * duration;
     return Math.round(bytes * (exp.dither ? GIF_DITHER_FACTOR : 1));
   }
-  // Screen recordings rarely use the whole target bitrate; about 60% is typical.
-  const video = videoBitrate(exp, { width, height, fps, duration, audio }) * (exp.sizeLimit ? 0.9 : 0.6);
+  // Busy recordings use about the whole target bitrate; quiet ones far less.
+  const video = videoBitrate(exp, { width, height, fps, duration, audio });
   const sound = audio ? AUDIO_BITRATES[exp.format] ?? AUDIO_BITRATES.mp4 : 0;
   return Math.round(((video + sound) * duration) / 8);
 }

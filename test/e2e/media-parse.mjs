@@ -101,8 +101,8 @@ export function parseWebm(input) {
 // ------------------------------------------------------------------- GIF
 
 // -> { width, height, loops (null when no NETSCAPE block), globalPalette
-//      (entries), frames: [{ delayCs, localPalette (entries or 0), x, y,
-//      width, height }] }
+//      (entries), frames: [{ delayCs, transparent (index or null), dispose,
+//      localPalette (entries or 0), x, y, width, height, bytes }] }
 export function parseGif(input) {
   const b = input instanceof Uint8Array ? input : new Uint8Array(input);
   if (text(b, 0, 6) !== 'GIF89a' && text(b, 0, 6) !== 'GIF87a') throw new Error('not a GIF');
@@ -118,6 +118,8 @@ export function parseGif(input) {
     at++;
   };
   let delay = 0;
+  let transparent = null;
+  let dispose = 0;
   for (;;) {
     const kind = b[at++];
     if (kind === 0x3b) break;
@@ -125,22 +127,28 @@ export function parseGif(input) {
       const label = b[at++];
       if (label === 0xf9) {
         delay = u16(at + 2);
+        dispose = (b[at + 1] >> 2) & 7;
+        transparent = b[at + 1] & 1 ? b[at + 4] : null;
       } else if (label === 0xff && text(b, at + 1, 8) === 'NETSCAPE') {
         out.loops = u16(at + 12 + 2);
       }
       skipSubBlocks();
     } else if (kind === 0x2c) {
-      const frame = { delayCs: delay, x: u16(at), y: u16(at + 2), width: u16(at + 4), height: u16(at + 6), localPalette: 0 };
+      const frame = { delayCs: delay, transparent, dispose, x: u16(at), y: u16(at + 2), width: u16(at + 4), height: u16(at + 6), localPalette: 0 };
       const packed = b[at + 8];
       at += 9;
       if (packed & 0x80) {
         frame.localPalette = 1 << ((packed & 7) + 1);
         at += 3 * frame.localPalette;
       }
+      const dataStart = at;
       at++; // LZW minimum code size
       skipSubBlocks();
+      frame.bytes = at - dataStart;
       out.frames.push(frame);
       delay = 0;
+      transparent = null;
+      dispose = 0;
     } else {
       throw new Error(`unexpected GIF block 0x${kind?.toString(16)} at ${at - 1}`);
     }

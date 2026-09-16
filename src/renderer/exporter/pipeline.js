@@ -47,6 +47,7 @@ const AUDIO_LEAD_US = 500000;
 // bitrate passes), and how far under the limit a retry aims.
 const LIMIT_STEPS = [{ maxFps: Infinity, scale: 1 }, { maxFps: 30, scale: 1 }, { maxFps: 30, scale: 0.75 }, { maxFps: 24, scale: 0.5 }];
 const PASSES_PER_STEP = 2;
+const LIMITED_KEYFRAME_SECONDS = 10;
 const RETRY_MARGIN = 0.9;
 const JOB_EXPORT_KEYS = ['format', 'resolution', 'codec', 'quality', 'fps', 'sizeLimit', 'gifWidth', 'gifFps', 'dither'];
 
@@ -193,7 +194,9 @@ async function encodeVideoPass(ctx) {
   encoder.configure(video.config);
 
   const frameUs = 1e6 / fps;
-  const keyEvery = Math.max(1, Math.round(KEYFRAME_SECONDS * fps));
+  // A keyframe costs many times an ordinary frame; under a size limit they
+  // come less often, leaving the bits for the picture.
+  const keyEvery = Math.max(1, Math.round((exp.sizeLimit ? LIMITED_KEYFRAME_SECONDS : KEYFRAME_SECONDS) * fps));
   const failed = (e) => new Error(`Couldn't encode the video (${e.message ?? e}).`);
   const report = pass > 0
     // A retry shows its progress as the second half of the bar.
@@ -276,17 +279,20 @@ export async function exportProject(job, { write, progress = () => {}, signal } 
       const audio = audioChunks.length > 0;
       const limit = exp.sizeLimit ? exp.sizeLimit * MB : Infinity;
       passes = 0;
+      let lastBitrate = Infinity;
       steps: for (const step of exp.sizeLimit ? LIMIT_STEPS : LIMIT_STEPS.slice(0, 1)) {
         const stepFps = Math.min(fps, step.maxFps);
         const size = { width: even(width * step.scale), height: even(height * step.scale) };
         if (passes > 0 && stepFps === made.fps && size.width === made.width) continue;
         const stepPlan = stepFps === fps ? plan : tl.framePlan(stepFps);
-        let bitrate = videoBitrate(exp, { ...size, fps: stepFps, duration: tl.duration, audio });
+        // A smaller step never aims higher than the last try that was too big.
+        let bitrate = Math.min(lastBitrate, videoBitrate(exp, { ...size, fps: stepFps, duration: tl.duration, audio }));
         for (let i = 0; i < PASSES_PER_STEP; i++) {
           made = { ...size, fps: stepFps };
           result = await encodeVideoPass({ ...ctx, ...size, fps: stepFps, plan: stepPlan, audioChunks, bitrate, pass: passes });
           result.bitrate = bitrate;
           passes++;
+          lastBitrate = bitrate;
           if (result.bytes <= limit) break steps;
           bitrate = Math.max(50000, Math.floor(bitrate * (limit / result.bytes) * RETRY_MARGIN));
         }

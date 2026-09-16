@@ -6,10 +6,12 @@
 //  - mapping RGBA to a 256-colour palette, optionally with ordered dithering
 //    so gradients (the default background) don't band. Ordered, not
 //    error-diffusion: the same picture always dithers the same way, so still
-//    stretches don't shimmer from frame to frame and stay identical, which
-//    is what lets them be merged into one long frame;
+//    stretches don't shimmer from frame to frame;
 //  - deciding when the picture has changed enough (a new scene) to need a
-//    new palette.
+//    new palette;
+//  - frame differencing: only pixels that changed are drawn again, the rest
+//    are transparent, and a frame with no change is merged into the one
+//    before.
 
 // 4x4 Bayer matrix, values 0..15.
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
@@ -105,12 +107,6 @@ export function paletteError(rgba, map, { step = 61 } = {}) {
 // Above this average distance the scene has changed and gets its own palette.
 export const NEW_PALETTE_ERROR = 6;
 
-export function samePixels(a, b) {
-  if (!a || !b || a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
-}
-
 // Every `stride`th pixel of every `stride`th row, for a faster palette search.
 export function subsample(rgba, width, height, stride = 2) {
   const w = Math.ceil(width / stride);
@@ -124,4 +120,63 @@ export function subsample(rgba, width, height, stride = 2) {
     }
   }
   return out;
+}
+
+// Frame differencing. A pixel is drawn again unless what the GIF shows there
+// would come out the same (same palette colour) -- or the recording only
+// flickered by compression noise since it was drawn (within `tolerance` of
+// the source colour then). Comparing palette colours, not only source
+// colours, matters: during a fade each step is small, and comparing sources
+// alone would leave the last drawn step behind as a ghost of old text.
+// Unchanged pixels become `transparentIndex`, so the frame before shows
+// through and the GIF carries only what changed.
+//
+// screen = { source, drawn }: per pixel, the source RGB when last drawn and
+// the palette RGB shown. createScreen() starts it from a fully drawn frame.
+export const NOISE_TOLERANCE = 6;
+
+export function createScreen(rgba, index, palette) {
+  const n = index.length;
+  const screen = { source: new Uint8Array(n * 3), drawn: new Uint8Array(n * 3) };
+  for (let p = 0, o = 0, s = 0; p < n; p++, o += 4, s += 3) {
+    const c = palette[index[p]];
+    screen.source[s] = rgba[o]; screen.source[s + 1] = rgba[o + 1]; screen.source[s + 2] = rgba[o + 2];
+    screen.drawn[s] = c[0]; screen.drawn[s + 1] = c[1]; screen.drawn[s + 2] = c[2];
+  }
+  return screen;
+}
+
+// Marks unchanged pixels of `index` transparent and records the changed ones
+// in `screen`. Returns how many changed; with 0 nothing was touched.
+export function keepUnchanged(rgba, index, palette, transparentIndex, screen, tolerance = NOISE_TOLERANCE) {
+  const { source, drawn } = screen;
+  const n = index.length;
+  const same = new Uint8Array(n);
+  let changed = 0;
+  for (let p = 0, o = 0, s = 0; p < n; p++, o += 4, s += 3) {
+    const c = palette[index[p]];
+    if (c[0] === drawn[s] && c[1] === drawn[s + 1] && c[2] === drawn[s + 2]) {
+      same[p] = 1;
+      continue;
+    }
+    const dr = rgba[o] - source[s];
+    const dg = rgba[o + 1] - source[s + 1];
+    const db = rgba[o + 2] - source[s + 2];
+    if (dr <= tolerance && dr >= -tolerance && dg <= tolerance && dg >= -tolerance && db <= tolerance && db >= -tolerance) {
+      same[p] = 1;
+    } else {
+      changed++;
+    }
+  }
+  if (changed === 0) return 0;
+  for (let p = 0, o = 0, s = 0; p < n; p++, o += 4, s += 3) {
+    if (same[p]) {
+      index[p] = transparentIndex;
+    } else {
+      const c = palette[index[p]];
+      source[s] = rgba[o]; source[s + 1] = rgba[o + 1]; source[s + 2] = rgba[o + 2];
+      drawn[s] = c[0]; drawn[s + 1] = c[1]; drawn[s + 2] = c[2];
+    }
+  }
+  return changed;
 }
