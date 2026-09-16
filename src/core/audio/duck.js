@@ -4,6 +4,9 @@
 //   voiceActivity(channels, sampleRate) -> { rate, active: Uint8Array, threshold }
 //   duckingCurve(voiceTracks, duration, options) -> gain curve (see mix.js)
 //
+// Pass the voice tracks after clean-up (denoise.js): on a raw track, noise
+// that swells and fades can read as talking and hold the music down.
+//
 // Voice tracks use the mix.js track shape, so the same objects handed to
 // mixTracks() (mic, voiceovers) can be passed here; the curve comes back in
 // output time, ready to be the music track's `gain`.

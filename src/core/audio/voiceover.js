@@ -24,6 +24,10 @@ export function anchorAt(tl, outT) {
 let idCounter = 0;
 const newId = () => `vo-${Date.now().toString(36)}-${(idCounter++).toString(36)}`;
 
+// `outT` should be the playhead when startVoiceoverRecording() resolves --
+// that is when recording actually begins -- not when the button was pressed:
+// opening a microphone can take a few hundred milliseconds, and the take
+// would land that much early.
 export function createVoiceover({ file, tl, outT, volume = 1, id = newId() }) {
   if (typeof file !== 'string' || !file) throw new TypeError('file is required');
   return { id, file, ...anchorAt(tl, outT), volume };
