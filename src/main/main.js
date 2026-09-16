@@ -18,6 +18,8 @@ const { transition } = require('./bar-state');
 const { createLiveCamera, stepLiveCamera } = require('./live-camera');
 const { loadSettings, saveSettings, applySettingsPatch, inputTapArgs } = require('./settings');
 const { validateSpeedPaint, paintSpeed, retimePlan, outputDuration } = require('./speed');
+const { registerVoiceoverIpc } = require('./ipc/voiceover');
+const { registerMusicIpc } = require('./ipc/music');
 
 const rampMsOf = (project) => project.settings?.rampMs ?? 200;
 const outputDurationOf = (project) =>
@@ -799,6 +801,10 @@ function resolveExportSize(preset, source) {
     height: evenRound(source.height * scale)
   };
 }
+
+// Audio files the editor adds to the open project (voiceover takes, music).
+registerVoiceoverIpc({ ipcMain, getProjectDir: () => editorDir });
+registerMusicIpc({ ipcMain, dialog, BrowserWindow, getProjectDir: () => editorDir });
 
 ipcMain.handle('project:load', () => {
   const project = loadProject(editorDir);

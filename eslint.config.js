@@ -47,6 +47,26 @@ module.exports = [
       eqeqeq: 'error'
     }
   },
+  // src/core is ES modules shared by main, the editor, the exporter and the
+  // tests, so it gets only the globals common to Node and Chromium.
+  {
+    files: ['src/core/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2023,
+      sourceType: 'module',
+      globals: {
+        globalThis: 'readonly', console: 'readonly', process: 'readonly',
+        fetch: 'readonly', URL: 'readonly', WebAssembly: 'readonly', Blob: 'readonly',
+        setTimeout: 'readonly', clearTimeout: 'readonly'
+      }
+    },
+    rules: {
+      'no-unused-vars': 'error',
+      'no-undef': 'error',
+      'prefer-const': 'error',
+      eqeqeq: 'error'
+    }
+  },
   // The website (web/, deployed to Vercel) is plain browser scripts too.
   {
     files: ['web/**/*.js'],

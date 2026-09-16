@@ -33,5 +33,12 @@ contextBridge.exposeInMainWorld('loupe', {
   setShowCursor: (show) => ipcRenderer.invoke('project:setShowCursor', show),
   paintSpeed: (paint) => ipcRenderer.invoke('project:paintSpeed', paint),
   exportVideo: (opts) => ipcRenderer.invoke('export:start', opts),
-  onExportProgress: (cb) => ipcRenderer.on('export:progress', (_e, d) => cb(d))
+  onExportProgress: (cb) => ipcRenderer.on('export:progress', (_e, d) => cb(d)),
+  // Audio: voiceover takes and background music, saved into the project folder.
+  saveVoiceover: (take) => ipcRenderer.invoke('voiceover:save', take),
+  deleteVoiceover: (file) => ipcRenderer.invoke('voiceover:delete', { file }),
+  chooseMusic: () => ipcRenderer.invoke('music:choose'),
+  // A File dropped on the editor; only its path crosses to main, which copies it.
+  importMusicFile: (file) =>
+    ipcRenderer.invoke('music:import', require('electron').webUtils.getPathForFile(file))
 });
