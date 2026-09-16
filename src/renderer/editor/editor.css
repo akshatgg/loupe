@@ -354,7 +354,7 @@ dialog {
 dialog::backdrop { background: rgba(0,0,0,.55); }
 dialog h2 { margin: 0 0 16px; font-size: 17px; font-weight: 650; }
 dialog .close { position: absolute; top: 12px; right: 12px; }
-.export-dialog { width: 440px; }
+
 .export-body .field { margin-bottom: 14px; }
 .size-note { margin: -8px 0 14px; font-variant-numeric: tabular-nums; }
 .export-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
@@ -368,6 +368,66 @@ dialog .close { position: absolute; top: 12px; right: 12px; }
 .export-error { display: flex; gap: 10px; align-items: flex-start; color: var(--ink-2); }
 .export-error .icon { color: var(--red); margin-top: 1px; }
 .export-error p { margin: 0; }
+/* export: choices */
+.export-dialog { width: 460px; max-height: calc(100vh - 40px); overflow-y: auto; }
+.export-dialog .toggle { margin-bottom: 14px; }
+.export-body .segmented .seg-btn { flex: 1; justify-content: center; }
+#exportFormat .hint { margin-top: 7px; }
+.limit-row { display: flex; align-items: center; gap: 10px; margin-top: -4px; }
+.limit-row .segmented { flex: 1; }
+.limit-custom { display: flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.limit-custom input {
+  width: 72px; height: 32px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--line-2);
+  background: var(--well); color: var(--ink); font: inherit; font-variant-numeric: tabular-nums;
+}
+.limit-custom input:focus { outline: none; border-color: var(--accent); }
+.export-summary {
+  display: flex; align-items: center; gap: 7px; padding: 10px 12px; border-radius: 9px;
+  background: var(--well); color: var(--ink-2); font-variant-numeric: tabular-nums;
+}
+.export-summary .icon { color: var(--ink-3); }
+.export-summary .dot { color: var(--ink-3); }
+.export-warning {
+  display: flex; gap: 9px; align-items: flex-start; margin-top: 10px; padding: 10px 12px; border-radius: 9px;
+  background: rgba(245, 181, 68, .1); color: #f5d9a0;
+}
+.export-warning .icon { color: var(--fast); margin-top: 1px; }
+.export-warning p { margin: 0; line-height: 1.45; }
+.recent { margin-top: 18px; }
+.recent h3 { margin: 0 0 6px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.recent ul { list-style: none; margin: 0; padding: 0; }
+.recent-row {
+  display: flex; align-items: center; gap: 9px; padding: 4px 4px 4px 8px; border-radius: 8px; cursor: grab;
+}
+.recent-row:hover { background: var(--hover); }
+.recent-row > .icon { color: var(--ink-3); }
+.recent-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-meta { color: var(--ink-3); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.icon-btn.copied, .btn.copied { color: #81c995; }
+/* export: finished */
+.file-chip {
+  display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 12px;
+  background: var(--well); border: 1px solid var(--line-2); cursor: grab;
+}
+.file-chip:hover { border-color: var(--accent); }
+.file-chip:active { cursor: grabbing; }
+.file-text { flex: 1; min-width: 0; }
+.file-text .hint { font-variant-numeric: tabular-nums; }
+.drag-hint { display: flex; align-items: center; gap: 4px; color: var(--ink-3); font-size: 12px; }
+.done-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.share-status:empty { display: none; }
+.share-status { margin-top: 14px; }
+.share-status p { margin: 0 0 8px; color: var(--ink-2); }
+.share-status.bad p { color: var(--red); }
+.share-status.quiet p { color: var(--ink-3); }
+.share-status .hint { margin: 8px 0 0; }
+.share-row { display: flex; gap: 8px; }
+.share-link {
+  flex: 1; min-width: 0; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2);
+  background: var(--well); color: var(--ink); font: inherit; user-select: text;
+}
+.share-link:focus { outline: none; border-color: var(--accent); }
+.btn.small { height: 26px; padding: 0 10px; font-size: 12px; }
 
 .cheat-sheet { width: 560px; }
 .cheat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 28px; }
