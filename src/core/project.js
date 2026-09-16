@@ -114,7 +114,13 @@ export function defaultAudio() {
 }
 
 export function defaultCaptions() {
-  return { show: false, language: 'auto', segments: [], style: { size: 1, position: 'bottom' } };
+  return { show: false, language: 'auto', segments: [], style: { size: 1, position: 'bottom', box: true } };
+}
+
+// A project saved before a caption style setting existed gets its default.
+function mergeCaptions(c) {
+  const d = defaultCaptions();
+  return { ...d, ...c, style: isObj(c.style) ? { ...d.style, ...c.style } : c.style ?? d.style };
 }
 
 export function defaultExport() {
@@ -506,6 +512,7 @@ function validateCaptions(c, sources) {
   if (!isObj(c.style)) fail('Caption style must be an object');
   num(c.style.size, 'Caption size', 0.25, 4);
   oneOf(c.style.position, POSITIONS, 'Caption position');
+  bool(c.style.box, 'Caption background box');
   return c;
 }
 
@@ -547,7 +554,7 @@ export function validateProject(p) {
     annotations: p.annotations ?? [],
     transitions: p.transitions ?? [],
     audio: p.audio ? { ...defaultAudio(), ...p.audio } : defaultAudio(),
-    captions: p.captions ? { ...defaultCaptions(), ...p.captions } : defaultCaptions(),
+    captions: p.captions ? mergeCaptions(p.captions) : defaultCaptions(),
     export: p.export ? { ...defaultExport(), ...p.export } : defaultExport()
   };
   if (!Array.isArray(p.clips) || p.clips.length === 0) fail('The project has no clips');

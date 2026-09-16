@@ -29,6 +29,7 @@ export function createStore(project, { save = () => {}, onError = () => {} } = {
         : selection.kind === 'speed' ? p.speed.some((s) => s.source === selection.source &&
           s.start === selection.start && s.end === selection.end)
           : selection.kind === 'annotation' ? p.annotations.some((a) => a.id === selection.id)
+          : selection.kind === 'caption' ? p.captions.segments.some((c) => c.id === selection.id)
             : false;
     if (!alive) selection = null;
   }

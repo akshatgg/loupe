@@ -109,7 +109,7 @@ async function start() {
   let currentPanel = null;
 
   const editor = {
-    store, player, core: P, platform: loupe.platform, toast,
+    store, player, core: P, platform: loupe.platform, toast, sources: loaded.sources,
     select(sel, { seek = false } = {}) {
       store.select(sel);
       if (sel?.kind === 'annotation') {
@@ -130,9 +130,12 @@ async function start() {
           const t = z && store.tl.toOutput(z.source, z.start);
           if (t !== null && t !== undefined) player.seek(t);
         }
+      } else if (sel?.kind === 'caption') {
+        showPanel('captions');
       }
     },
     showPanel: (id, opts) => showPanel(id, opts),
+    revealCaption: (id, opts) => mounted.get('captions')?.api.reveal?.(id, opts),
     addZoom(range) {
       const before = new Set(store.project.zooms.map((z) => z.id));
       const next = store.apply((p) => P.addZoom(p, { ...range, level: 2, follow: true }));
@@ -228,6 +231,8 @@ async function start() {
       store.apply((p) => P.removeZoom(p, sel.id));
     } else if (sel.kind === 'annotation') {
       store.apply((p) => P.removeAnnotation(p, sel.id));
+    } else if (sel.kind === 'caption') {
+      store.apply((p) => P.setCaptions(p, { segments: p.captions.segments.filter((c) => c.id !== sel.id) }));
     } else if (sel.kind === 'speed') {
       store.apply((p) => P.paintSpeed(p, { source: sel.source, start: sel.start, end: sel.end, rate: 1 }));
     }

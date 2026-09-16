@@ -134,7 +134,7 @@ item is attached to.
     voiceover: [{ id, file, source, t, volume: 1 }]       // anchored to a source moment
   },
   captions: { show: false, language: "auto", segments: [{ id, source, start, end, text }],
-              style: { size: 1, position: "bottom" } },
+              style: { size: 1, position: "bottom", box: true } },
   export: { format: "mp4"|"webm"|"gif", resolution: "1080p", quality: "balanced", fps: 60,
             codec: "h264"|"hevc" }
 }
@@ -402,8 +402,23 @@ and the whole app recording with every addition on).
   userData/speech-models and saving .srt/.vtt; preload `window.loupe.captions.
   { models, ensureModel, cancelModel, removeModel, onModelProgress,
   saveSubtitles }`. Check: `npm run test:e2e:captions`.
-- Not yet: the editor's Captions panel is still the placeholder
-  (`panels/captions.js`).
+- Editor: `panels/captions.js` (Generate captions with the language and, the
+  first time, the model's download size, progress and Cancel; then "Show
+  captions on the video", the transcript -- click a time to seek, edit words
+  inline, split at the text cursor, join, delete, add at the playhead, save
+  .srt -- the look: size, position, `style.box` background box -- and "Write
+  captions again"). `captions-track.js` is the timeline's Captions track
+  (shown once there are captions; drag a caption or its edges, kept between
+  its neighbours; selection `{ kind: 'caption', id }`), `captions-math.js`
+  its pure arithmetic, `captions.css` the styles.
+- Export: `export-captions.js` adds "Burn captions into the video" (starts as
+  `captions.show`) and "Also save subtitles (.srt)" to the export dialog;
+  `export:start` takes `{ burnCaptions?, subtitles? }`, and with `subtitles`
+  main writes `<video name>.srt` beside the finished video from the project
+  it loaded (`writeSubtitlesBeside` in `ipc/captions.js`), returning
+  `subtitles` (path) or `subtitlesError`.
+- Check: `npm run test:e2e:captions` also runs `captions-editor.e2e.js`
+  (say → recording → editor → export with burned captions + .srt).
 
 ### Visuals (wired)
 

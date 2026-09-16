@@ -18,6 +18,23 @@ const { createSpeechModels } = require('../speech-models');
 
 const MAX_SUBTITLE_CHARS = 20 * 1024 * 1024;
 
+// The project's captions as a .srt beside an exported video ("demo.mp4" ->
+// "demo.srt"), timed to that video: cuts, reordering and speed changes are
+// already applied. Written from the project main loaded, never from text the
+// page sends. Returns the file's path, or null when there are no captions.
+async function writeSubtitlesBeside(videoFile, project) {
+  const { buildTimeline } = require('../../core/timeline.js');
+  const { captionsToOutput, toSRT } = require('../../core/captions/index.js');
+  const cues = captionsToOutput(project.captions?.segments ?? [], buildTimeline(project));
+  if (!cues.length) return null;
+  const file = path.join(path.dirname(videoFile), `${path.basename(videoFile, path.extname(videoFile))}.srt`);
+  // Temporary name first, so a half-written file never replaces an older one.
+  const part = `${file}.part`;
+  await fs.promises.writeFile(part, toSRT(cues), 'utf8');
+  await fs.promises.rename(part, file);
+  return file;
+}
+
 function validateSubtitlePayload(raw) {
   const { format, text, name } = raw ?? {};
   if (format !== 'srt' && format !== 'vtt') throw new Error(`Unknown subtitle format: ${JSON.stringify(format)}`);
@@ -64,4 +81,4 @@ function registerCaptionsIpc({ ipcMain, app, dialog, BrowserWindow, getDefaultDi
   return speech;
 }
 
-module.exports = { registerCaptionsIpc, validateSubtitlePayload };
+module.exports = { registerCaptionsIpc, validateSubtitlePayload, writeSubtitlesBeside };

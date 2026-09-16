@@ -21,6 +21,7 @@ import {
   resizedZoom, snap, snapPoints, insertionIndex, tickStep, formatTime, clamp
 } from './timeline-math.js';
 import { createVisualTracks } from './timeline-visuals.js';
+import { createCaptionsTrack } from './captions-track.js';
 
 const PAD = 16;           // px before 0:00 and after the end
 const SNAP_PX = 8;
@@ -42,6 +43,13 @@ export function createTimeline({ root, store, player, editor }) {
       showGuide: (v) => showGuide(v), rootEl: root
     }
   });
+  // Captions (captions-track.js) get the timeline's scale, drags and snapping.
+  const captions = createCaptionsTrack({ store, player, editor, view: {
+    x: (t) => x(t), timeAt: (cx, o) => timeAt(cx, o), get pps() { return pps; },
+    beginDrag: (e, handlers) => beginDrag(e, handlers), snapped: (t, pts) => snapped(t, pts),
+    snap: (t, pts) => snap(t, pts, SNAP_PX / pps),
+    snapPoints: () => snapPoints(store.project, clipLayout(store.project, store.tl), { playhead: player.time })
+  } });
   const playhead = h('div', { class: 'tl-playhead' }, h('div', { class: 'tl-knob' }));
   const guide = h('div', { class: 'tl-guide', hidden: true });
   const insert = h('div', { class: 'tl-insert', hidden: true });
@@ -50,7 +58,7 @@ export function createTimeline({ root, store, player, editor }) {
     store, player, editor,
     view: { x: (t) => x(t), get pps() { return pps; }, get scroller() { return scroller; } }
   });
-  const content = h('div', { class: 'tl-content' }, ruler, clipsTrack, audioLane.track, zoomTrack, speedTrack, visuals.track, visuals.joins, guide, insert, playhead);
+  const content = h('div', { class: 'tl-content' }, ruler, clipsTrack, audioLane.track, zoomTrack, speedTrack, visuals.track, captions.track, visuals.joins, guide, insert, playhead);
   const scroller = h('div', { class: 'tl-scroll' }, content);
   const labels = h('div', { class: 'tl-labels' },
     h('div', { class: 'tl-label lbl-ruler' }),
@@ -58,7 +66,8 @@ export function createTimeline({ root, store, player, editor }) {
     audioLane.label,
     h('div', { class: 'tl-label lbl-zooms' }, icon('zoom', { size: 15 }), 'Zoom'),
     h('div', { class: 'tl-label lbl-speed' }, icon('speed', { size: 15 }), 'Speed'),
-    visuals.label);
+    visuals.label,
+    captions.label);
   const menu = h('div', { class: 'speed-menu', role: 'menu', hidden: true });
   root.replaceChildren(labels, scroller, menu, visuals.menu);
 
@@ -155,6 +164,7 @@ export function createTimeline({ root, store, player, editor }) {
     renderZooms(p, layout);
     renderSpeed(p, layout);
     visuals.render(p, layout, clipsTrack);
+    captions.render(p, layout);
     movePlayhead(player.time);
     drawRuler();
   }
@@ -450,6 +460,7 @@ export function createTimeline({ root, store, player, editor }) {
     else if (zoom) zoomDrag(e, zoom);
     else if (e.target.closest('.tl-zooms')) zoomCreate(e);
     else if (e.target.closest('.tl-speed')) speedDrag(e, speed);
+    else if (e.target.closest('.caption')) captions.pointerdown(e);
     else scrub(e);
   });
   content.addEventListener('pointermove', (e) => drag?.move(e));

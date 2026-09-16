@@ -1,7 +1,7 @@
 // Captions in the project (docs/EDITOR-V2.md §3):
 //
 //   captions: { show, language, segments: [{ id, source, start, end, text, words? }],
-//               style: { size, position } }
+//               style: { size, position, box } }
 //
 // Segments are in SOURCE time, like every other attached item, so trimming,
 // cutting or speeding up the video never moves a caption off the words it
@@ -25,7 +25,7 @@ export function createCaptionId() {
 }
 
 export function defaultCaptions() {
-  return { show: false, language: 'auto', segments: [], style: { size: 1, position: 'bottom' } };
+  return { show: false, language: 'auto', segments: [], style: { size: 1, position: 'bottom', box: true } };
 }
 
 export function compareSegments(a, b) {
@@ -90,7 +90,9 @@ export function normalizeCaptions(raw) {
     segments: sortSegments(segments),
     style: {
       size: isNum(style.size) ? Math.min(CAPTION_SIZE_MAX, Math.max(CAPTION_SIZE_MIN, style.size)) : 1,
-      position: CAPTION_POSITIONS.includes(style.position) ? style.position : 'bottom'
+      position: CAPTION_POSITIONS.includes(style.position) ? style.position : 'bottom',
+      // The dark box behind the words; without it the words get an outline.
+      box: style.box !== false
     }
   };
 }
