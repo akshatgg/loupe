@@ -31,7 +31,27 @@
     initRelease();
     var demo = document.querySelector('[data-demo]');
     if (demo) initDemo(demo);
+    var look = document.querySelector('[data-look]');
+    if (look) initLook(look);
   });
+
+  /* ------------------------------------------------------------ look */
+
+  // The video shape buttons. Without JavaScript the illustration simply
+  // stays wide and the buttons stay hidden.
+  function initLook(look) {
+    var group = look.querySelector('[data-aspects]');
+    if (!group) return;
+    var buttons = Array.prototype.slice.call(group.querySelectorAll('[data-aspect-value]'));
+    group.hidden = false;
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var value = btn.getAttribute('data-aspect-value');
+        look.setAttribute('data-aspect', value);
+        buttons.forEach(function (b) { b.setAttribute('aria-pressed', b === btn ? 'true' : 'false'); });
+      });
+    });
+  }
 
   /* ------------------------------------------------------------ platform */
 
@@ -80,6 +100,11 @@
       each('[data-key-cap]', function (el) {
         var c = k.cap[el.getAttribute('data-key-cap')];
         if (typeof c === 'string') el.textContent = c;
+      });
+      // A shortcut badge and the reveal button read the way each system does.
+      each('[data-mod]', function (el) { el.textContent = next === 'win' ? 'Ctrl' : '⌘'; });
+      each('[data-reveal-label]', function (el) {
+        el.textContent = next === 'win' ? 'Show in Explorer' : 'Show in Finder';
       });
       each('[data-os-cta]', function (el) {
         el.textContent = next === 'win' ? 'Download for Windows' : 'Download for Mac';
