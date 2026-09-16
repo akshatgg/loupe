@@ -1,427 +1,305 @@
-'use strict';
+// The editor window (docs/EDITOR-V2.md section 11, wave 2): the preview, the
+// sidebar panels, the timeline and the export dialog, all working on one
+// project held here and edited with the pure core.
+//
+// Main (src/main/ipc/project.js) loads the project -- migrating a v1 one --
+// and saves whatever this page sends back; every change is sent, and main
+// writes the latest shortly after.
 
-const stage = document.getElementById('stage');
-const video = document.getElementById('src');
-const ctx = stage.getContext('2d');
-let state = null;
-let rafStarted = false;
-// True while the user is dragging the scrub handle. The draw loop writes the
-// playback position into that same control, so without this the two fight and
-// the handle snaps back under the cursor on every frame.
-let scrubbing = false;
+import * as P from '../../core/project.js';
+import { createStore } from './store.js';
+import { createPlayer } from './player.js';
+import { createTimeline } from './timeline-view.js';
+import { createExportDialog, plainError } from './export-dialog.js';
+import { createCheatSheet } from './cheat-sheet.js';
+import { commandFor } from './shortcuts.js';
+import { PANELS, panelById } from './panels/index.js';
+import { h, icon } from './ui.js';
+import { clipLayout, newZoomRange, formatTime } from './timeline-math.js';
 
-function clock(seconds) {
-  if (!Number.isFinite(seconds) || seconds < 0) seconds = 0;
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${String(s).padStart(2, '0')}`;
+const loupe = window.loupe;
+const $ = (id) => document.getElementById(id);
+
+// ---- toasts and the save indicator
+
+let toastTimer = null;
+function toast(message) {
+  const el = $('toast');
+  el.textContent = message;
+  el.hidden = false;
+  el.classList.remove('show');
+  void el.offsetWidth; // restart the fade-in
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.classList.remove('show'); }, 3200);
 }
 
-function sampleCamera(t) {
-  const cam = state.camera;
-  const src = state.project.source;
-  if (!cam || !cam.length) {
-    return { zoom: 1, cx: src.width / 2, cy: src.height / 2 };
-  }
-  const i = Math.min(cam.length - 1, Math.max(0, Math.round(t * 120)));
-  return cam[i];
+function setSaveState(text, bad = false) {
+  const el = $('saveState');
+  el.textContent = text;
+  el.classList.toggle('bad', bad);
 }
 
-// Nearest cursor sample to t -- the same lookup Render.swift's sampleCursor
-// does, so the preview and the export put the cursor in the same place.
-function sampleCursor(t) {
-  const track = state.cursor;
-  if (!track || !track.length) return null;
-  let lo = 0;
-  let hi = track.length - 1;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (track[mid].t <= t) lo = mid; else hi = mid;
-  }
-  return Math.abs(track[lo].t - t) <= Math.abs(track[hi].t - t) ? track[lo] : track[hi];
-}
-
-// The recording never contains the cursor (it's captured without one), so
-// it's drawn back in here -- the same arrow, shadow and outline as
-// Render.swift's drawCursor, scaled with the zoom the same way.
-function drawCursor(x, y, s) {
-  const path = new Path2D();
-  path.moveTo(x, y);
-  path.lineTo(x, y + 17 * s);
-  path.lineTo(x + 4.5 * s, y + 13 * s);
-  path.lineTo(x + 7.5 * s, y + 19 * s);
-  path.lineTo(x + 10.5 * s, y + 17.5 * s);
-  path.lineTo(x + 7.5 * s, y + 11.5 * s);
-  path.lineTo(x + 12 * s, y + 11.5 * s);
-  path.closePath();
-  ctx.save();
-  ctx.shadowColor = 'rgba(0, 0, 0, .45)';
-  ctx.shadowBlur = 3 * s;
-  ctx.shadowOffsetY = 1 * s;
-  ctx.fillStyle = '#fff';
-  ctx.fill(path);
-  ctx.strokeStyle = 'rgba(0, 0, 0, .85)';
-  ctx.lineWidth = 1.2 * s;
-  ctx.stroke(path);
-  ctx.restore();
-}
-
-const showCursor = () => state.project.settings?.showCursor !== false;
-
-// Playback speed at a recording time, with the same ~200ms ease in and out
-// at each stretch's edges the export uses. Kept in sync BY HAND with
-// src/main/timemap.js's rateAt (test/timemap.test.js covers that one) --
-// renderer scripts can't require main-process modules; see region.js for
-// the same convention.
-function smoothstep(t) { return t * t * (3 - 2 * t); }
-function rateAt(tSrc, segments, rampMs = 200) {
-  const rampSeconds = rampMs / 1000;
-  for (const seg of segments) {
-    if (tSrc < seg.srcStart || tSrc > seg.srcEnd) continue;
-    const ramp = Math.min(rampSeconds, (seg.srcEnd - seg.srcStart) / 2);
-    let k = 1;
-    if (ramp > 0) {
-      const into = tSrc - seg.srcStart;
-      const outOf = seg.srcEnd - tSrc;
-      if (into < ramp) k = smoothstep(into / ramp);
-      else if (outOf < ramp) k = smoothstep(outOf / ramp);
+// Sends every change; main debounces the writes. Only the newest project
+// matters, so one in flight is followed by at most one more.
+function createSaver() {
+  let inFlight = null;
+  let queued = null;
+  async function send(project) {
+    setSaveState('Saving…');
+    try {
+      await loupe.saveProject(project);
+      setSaveState('All changes saved');
+    } catch (err) {
+      setSaveState('Couldn’t save', true);
+      toast(`Your changes couldn’t be saved: ${plainError(err)}`);
     }
-    return 1 + (seg.rate - 1) * k;
   }
-  return 1;
+  function save(project) {
+    if (inFlight) { queued = project; return; }
+    inFlight = send(project).finally(() => {
+      inFlight = null;
+      if (queued) { const q = queued; queued = null; save(q); }
+    });
+  }
+  return { save, flush: async () => { while (inFlight) await inFlight; } };
 }
 
-const speedSegments = () => state.project.speedSegments ?? [];
-
-// The preview plays each stretch at its speed by driving the video element's
-// own playbackRate -- which also time-stretches the audio, keeping pitch
-// natural unless the project says otherwise, just as the export does.
-function applyPlaybackRate() {
-  const rate = rateAt(video.currentTime, speedSegments(), state.project.settings?.rampMs ?? 200);
-  if (Math.abs(video.playbackRate - rate) > 0.005) video.playbackRate = rate;
+function showFatal(heading, message) {
+  $('app').hidden = true;
+  const box = $('fatal');
+  box.replaceChildren(h('div', { class: 'fatal-card' },
+    h('div', { class: 'empty-icon' }, icon('alert', { size: 30 })),
+    h('h1', {}, heading),
+    h('p', {}, message)));
+  box.hidden = false;
 }
 
-function draw() {
-  if (!state || video.readyState < 2 || !video.videoWidth) {
-    requestAnimationFrame(draw);
+async function start() {
+  let loaded;
+  try {
+    loaded = await loupe.loadProject();
+  } catch (err) {
+    showFatal('This recording couldn’t be opened', plainError(err));
     return;
   }
-  const { width: sw, height: sh } = state.project.source;
-  const scale = video.videoWidth / sw;
-  const cam = sampleCamera(video.currentTime);
-  const vw = (sw / cam.zoom) * scale;
-  const vh = (sh / cam.zoom) * scale;
-  const x0 = cam.cx * scale - vw / 2;
-  const y0 = cam.cy * scale - vh / 2;
+  const saver = createSaver();
+  const store = createStore(loaded.project, {
+    save: (p) => saver.save(p),
+    onError: (err) => toast(plainError(err))
+  });
+  const player = createPlayer({ canvas: $('preview'), store, sources: loaded.sources });
 
-  stage.width = video.videoWidth;
-  stage.height = video.videoHeight;
-  ctx.drawImage(video, x0, y0, vw, vh, 0, 0, stage.width, stage.height);
-
-  const c = showCursor() ? sampleCursor(video.currentTime) : null;
-  if (c) {
-    const k = stage.width / vw; // output pixels per source pixel
-    drawCursor((c.x * scale - x0) * k, (c.y * scale - y0) * k, k * scale);
+  const missing = Object.entries(loaded.sources).filter(([key, s]) => s.missing &&
+    store.project.clips.some((c) => c.source === key));
+  if (missing.length) {
+    $('stageNotice').hidden = false;
+    $('stageNotice').replaceChildren(icon('alert', { size: 18 }),
+      h('span', {}, 'The video file for this recording is missing, so the preview is blank. It may have been moved or deleted.'));
   }
-  applyPlaybackRate();
-  syncTransport(cam.zoom);
-  requestAnimationFrame(draw);
-}
 
-// Nothing was driving the scrub handle, the clock or the playhead from the
-// video's own position, so they sat wherever they were last put and playback
-// looked frozen even while the picture moved.
-function syncTransport(zoom) {
-  const duration = state.project.capture.duration || 0;
-  const t = video.currentTime;
-  if (!scrubbing) {
-    const pos = duration > 0 ? (t / duration) * 1000 : 0;
-    document.getElementById('scrub').value = String(Math.min(1000, Math.max(0, pos)));
-    document.getElementById('playhead').style.left =
-      `${duration > 0 ? Math.min(100, (t / duration) * 100) : 0}%`;
-  }
-  document.getElementById('tnow').textContent = clock(t);
-  // The timeline is in recording time; with speed stretches the video
-  // itself ends up a different length, so say that too.
-  const out = state.outputDuration ?? duration;
-  document.getElementById('tend').textContent = Math.abs(out - duration) > 0.05
-    ? `${clock(duration)} · video ${clock(out)}` : clock(duration);
-  document.getElementById('zoomnow').textContent = `${zoom.toFixed(1)}×`;
-  document.getElementById('play').textContent = video.paused ? 'Play' : 'Pause';
-}
+  // ---- panels
 
-// Segments are built as DOM nodes with textContent, never innerHTML: project
-// data (the source window title) comes from another application and must
-// never be interpolated into markup -- see the picker window's earlier
-// script-injection bug.
-function renderTimeline() {
-  const track = document.getElementById('track');
-  for (const old of [...track.querySelectorAll('.seg')]) old.remove();
-  const duration = state.project.capture.duration || 1;
+  const tabs = $('tabs');
+  const panelBox = $('panel');
+  const mounted = new Map();
+  let currentPanel = null;
 
-  // An empty track is ambiguous: it looks the same whether the recording has
-  // no zooms or the editor failed to load them. Say which.
-  const removed = state.project.removedZooms?.length ?? 0;
-  const note = document.getElementById('notracks');
-  note.hidden = state.segments.length > 0;
-  note.textContent = removed > 0
-    ? 'All zooms removed — use Undo or Restore all zooms to bring them back.'
-    : 'No zooms in this recording — hold your zoom key (or a mouse side button) and scroll while recording to add one.';
-  document.getElementById('undoZoom').hidden = removed === 0;
-  const restore = document.getElementById('restoreZooms');
-  restore.hidden = removed === 0;
-  restore.textContent = `Restore all zooms (${removed})`;
-
-  for (const seg of state.segments) {
-    const el = document.createElement('div');
-    el.className = 'seg';
-    el.style.left = `${(seg.start / duration) * 100}%`;
-    el.style.width = `${Math.max(0.5, ((seg.end - seg.start) / duration) * 100)}%`;
-    el.textContent = `${seg.peak.toFixed(1)}×`;
-    el.title = 'Click to jump to this zoom';
-    el.addEventListener('click', () => { video.currentTime = seg.start; });
-
-    const del = document.createElement('button');
-    del.className = 'del';
-    del.type = 'button';
-    del.textContent = '×';
-    del.title = 'Remove this zoom (you can undo it)';
-    del.addEventListener('click', (e) => {
-      e.stopPropagation();
-      changeZooms(() => window.loupe.deleteZoom({ start: seg.start, end: seg.end }), 'Zoom removed');
-    });
-    el.appendChild(del);
-    track.appendChild(el);
-  }
-}
-
-let zoomChangeBusy = false;
-
-// Every zoom edit returns the new {project, segments, camera}; one at a time,
-// so a double-click can't send two removals of the same zoom.
-async function changeZooms(call, doneMessage) {
-  if (zoomChangeBusy) return;
-  zoomChangeBusy = true;
-  try {
-    state = { ...state, ...(await call()) };
-    renderTimeline();
-    setStatus(doneMessage);
-  } catch (err) {
-    setStatus(`Couldn't change zooms: ${err.message}`);
-  } finally {
-    zoomChangeBusy = false;
-  }
-}
-
-function undoZoom() {
-  if (!state?.project.removedZooms?.length) return;
-  changeZooms(() => window.loupe.undoZoomDelete(), 'Zoom brought back');
-}
-
-document.getElementById('undoZoom').onclick = undoZoom;
-document.getElementById('restoreZooms').onclick = () =>
-  changeZooms(() => window.loupe.restoreZooms(), 'All zooms restored');
-window.addEventListener('keydown', (e) => {
-  if (e.key.toLowerCase() === 'z' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
-    e.preventDefault();
-    undoZoom();
-  }
-});
-
-// ---- speed track ------------------------------------------------------------
-// Drag across a stretch (or click an existing one) and pick a speed. Stored
-// in recording time via main.js's project:paintSpeed; 1x puts it back.
-
-const SPEEDS = [0.25, 0.5, 1, 1.5, 2, 4, 8];
-const speedTrack = document.getElementById('speedtrack');
-const speedSelEl = document.getElementById('speedsel');
-const speedMenu = document.getElementById('speedmenu');
-let speedSel = null;   // {srcStart, srcEnd} being set, or null
-let speedDrag = null;  // recording time where the current drag started
-
-const recordingDuration = () => state.project.capture.duration || 0;
-const pct = (t) => `${(t / (recordingDuration() || 1)) * 100}%`;
-
-function timeAtX(clientX) {
-  const r = speedTrack.getBoundingClientRect();
-  return Math.min(1, Math.max(0, (clientX - r.left) / r.width)) * recordingDuration();
-}
-
-function renderSpeedTrack() {
-  for (const old of [...speedTrack.querySelectorAll('.speedseg')]) old.remove();
-  const segs = speedSegments();
-  document.getElementById('speedhint').hidden = segs.length > 0 || speedSel !== null;
-  for (const seg of segs) {
-    const el = document.createElement('div');
-    el.className = `speedseg ${seg.rate > 1 ? 'fast' : 'slow'}`;
-    el.style.left = pct(seg.srcStart);
-    el.style.width = pct(seg.srcEnd - seg.srcStart);
-    el.textContent = `${seg.rate}×`;
-    el.title = `${seg.rate}× — click to change`;
-    el.addEventListener('pointerdown', (e) => e.stopPropagation());
-    el.addEventListener('click', () => openSpeedMenu({ srcStart: seg.srcStart, srcEnd: seg.srcEnd }, seg.rate));
-    speedTrack.appendChild(el);
-  }
-  speedSelEl.hidden = !speedSel;
-  if (speedSel) {
-    const [a, b] = [Math.min(speedSel.srcStart, speedSel.srcEnd), Math.max(speedSel.srcStart, speedSel.srcEnd)];
-    speedSelEl.style.left = pct(a);
-    speedSelEl.style.width = pct(b - a);
-  }
-}
-
-function openSpeedMenu(sel, currentRate = 1) {
-  speedSel = sel;
-  renderSpeedTrack();
-  speedMenu.textContent = '';
-  const label = document.createElement('span');
-  label.className = 'label';
-  label.textContent = `${clock(sel.srcStart)}–${clock(sel.srcEnd)} speed:`;
-  speedMenu.append(label);
-  for (const rate of SPEEDS) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = rate === 1 ? '1× (normal)' : `${rate}×`;
-    if (rate === currentRate) b.className = 'current';
-    b.addEventListener('click', () => applySpeed(rate));
-    speedMenu.append(b);
-  }
-  speedMenu.hidden = false;
-  // Above the stretch, kept inside the timeline.
-  const tl = document.getElementById('timeline').getBoundingClientRect();
-  const tr = speedTrack.getBoundingClientRect();
-  const mid = tr.left + ((sel.srcStart + sel.srcEnd) / 2 / (recordingDuration() || 1)) * tr.width;
-  const w = speedMenu.offsetWidth;
-  speedMenu.style.left = `${Math.min(tl.width - w - 8, Math.max(8, mid - tl.left - w / 2))}px`;
-  speedMenu.style.top = `${tr.top - tl.top - speedMenu.offsetHeight - 6}px`;
-}
-
-function closeSpeedMenu() {
-  speedMenu.hidden = true;
-  speedSel = null;
-  renderSpeedTrack();
-}
-
-async function applySpeed(rate) {
-  const { srcStart, srcEnd } = speedSel;
-  try {
-    const update = await window.loupe.paintSpeed({ srcStart, srcEnd, rate });
-    state = { ...state, project: update.project, outputDuration: update.outputDuration };
-    setStatus(rate === 1 ? 'Back to normal speed' : `${clock(srcStart)}–${clock(srcEnd)} now plays at ${rate}×`);
-  } catch (err) {
-    setStatus(`Couldn't change speed: ${err.message}`);
-  }
-  closeSpeedMenu();
-}
-
-speedTrack.addEventListener('pointerdown', (e) => {
-  if (!state || e.button !== 0) return;
-  speedMenu.hidden = true;
-  speedDrag = timeAtX(e.clientX);
-  speedSel = { srcStart: speedDrag, srcEnd: speedDrag };
-  // Keeps the drag tracking outside the track; nice to have, never required.
-  try { speedTrack.setPointerCapture(e.pointerId); } catch { /* ignore */ }
-  renderSpeedTrack();
-});
-speedTrack.addEventListener('pointermove', (e) => {
-  if (speedDrag === null) return;
-  const t = timeAtX(e.clientX);
-  speedSel = { srcStart: Math.min(speedDrag, t), srcEnd: Math.max(speedDrag, t) };
-  renderSpeedTrack();
-});
-speedTrack.addEventListener('pointerup', (e) => {
-  if (speedDrag === null) return;
-  speedDrag = null;
-  if (speedSel.srcEnd - speedSel.srcStart < 0.1) {
-    // A click, not a drag: just jump there.
-    video.currentTime = timeAtX(e.clientX);
-    closeSpeedMenu();
-  } else {
-    openSpeedMenu(speedSel);
-  }
-});
-document.addEventListener('pointerdown', (e) => {
-  if (!speedMenu.hidden && !speedMenu.contains(e.target) && !speedTrack.contains(e.target)) closeSpeedMenu();
-});
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !speedMenu.hidden) closeSpeedMenu();
-});
-
-const showCursorEl = document.getElementById('showCursor');
-showCursorEl.onchange = async () => {
-  try {
-    const { project } = await window.loupe.setShowCursor(showCursorEl.checked);
-    state = { ...state, project };
-  } catch (err) {
-    showCursorEl.checked = showCursor();
-    setStatus(`Couldn't change the cursor setting: ${err.message}`);
-  }
-};
-
-function setStatus(text) {
-  document.getElementById('status').textContent = text;
-}
-
-const scrub = document.getElementById('scrub');
-scrub.addEventListener('pointerdown', () => { scrubbing = true; });
-// pointerup can land outside the control, so listen on the window.
-window.addEventListener('pointerup', () => { scrubbing = false; });
-scrub.oninput = (e) => {
-  if (!state) return;
-  const duration = state.project.capture.duration || 0;
-  video.currentTime = (e.target.value / 1000) * duration;
-  document.getElementById('playhead').style.left = `${(e.target.value / 1000) * 100}%`;
-  document.getElementById('tnow').textContent = clock(video.currentTime);
-};
-
-document.getElementById('play').onclick = () => {
-  if (video.paused) video.play();
-  else video.pause();
-};
-
-document.getElementById('export').onclick = async () => {
-  const preset = document.getElementById('preset').value;
-  const exportBtn = document.getElementById('export');
-  exportBtn.disabled = true;
-  setStatus('Exporting…');
-  try {
-    const result = await window.loupe.exportVideo({ resolution: preset, codec: 'h264' });
-    setStatus(`Saved ${result.file}`);
-  } catch (err) {
-    // ipcRenderer.invoke wraps a main-process error as "Error invoking
-    // remote method 'export:start': Error: <message>"; show only the message.
-    setStatus(`Export failed: ${String(err.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`);
-  } finally {
-    exportBtn.disabled = false;
-  }
-};
-
-window.loupe.onExportProgress((p) => {
-  if (p.phase === 'video' && p.total) {
-    setStatus(`Exporting… ${Math.min(100, Math.round((p.frame / p.total) * 100))}%`);
-  } else {
-    setStatus(p.phase === 'sound' ? 'Exporting… preparing the sound' : 'Exporting… reading the recording');
-  }
-});
-
-if (window.loupe.platform === 'win32') {
-  document.getElementById('undoZoom').title = 'Bring back the last zoom you removed (Ctrl+Z)';
-}
-
-(async function load() {
-  try {
-    state = await window.loupe.loadProject();
-    video.src = state.videoUrl ?? `file://${state.video}`;
-    video.load();
-    showCursorEl.checked = showCursor();
-    video.preservesPitch = state.project.settings?.preserveVoicePitch !== false;
-    renderTimeline();
-    renderSpeedTrack();
-    if (!rafStarted) {
-      rafStarted = true;
-      requestAnimationFrame(draw);
+  const editor = {
+    store, player, core: P, platform: loupe.platform, toast,
+    select(sel, { seek = false } = {}) {
+      store.select(sel);
+      if (sel?.kind === 'zoom') {
+        showPanel('zoom');
+        if (seek) {
+          const z = store.project.zooms.find((q) => q.id === sel.id);
+          const t = z && store.tl.toOutput(z.source, z.start);
+          if (t !== null && t !== undefined) player.seek(t);
+        }
+      }
+    },
+    showPanel: (id, opts) => showPanel(id, opts),
+    addZoom(range) {
+      const before = new Set(store.project.zooms.map((z) => z.id));
+      const next = store.apply((p) => P.addZoom(p, { ...range, level: 2, follow: true }));
+      const added = next?.zooms.find((z) => !before.has(z.id));
+      if (added) editor.select({ kind: 'zoom', id: added.id });
+      return added ?? null;
+    },
+    addZoomAtPlayhead() {
+      const range = newZoomRange(store.project, clipLayout(store.project, store.tl), player.time);
+      if (!range) {
+        toast('There’s already a zoom here. Move the playhead to add another.');
+        return null;
+      }
+      return editor.addZoom(range);
     }
-  } catch (err) {
-    setStatus(`Failed to load project: ${err.message}`);
+  };
+
+  function showPanel(id, { focus = false } = {}) {
+    const panel = panelById(id);
+    if (!panel) return;
+    currentPanel = id;
+    for (const b of tabs.children) b.setAttribute('aria-selected', String(b.dataset.panel === id));
+    for (const [pid, m] of mounted) m.el.hidden = pid !== id;
+    if (!mounted.has(id)) {
+      const el = h('div', { class: 'panel-body', dataset: { panel: id } });
+      panelBox.append(el);
+      mounted.set(id, { el, api: panel.mount(el, editor) });
+    }
+    $('panelTitle').textContent = panel.title;
+    mounted.get(id).api.update('panel');
+    if (focus) mounted.get(id).el.querySelector('input, button')?.focus();
   }
-})();
+
+  for (const panel of PANELS) {
+    tabs.append(h('button', {
+      type: 'button', role: 'tab', class: 'tab', title: panel.title, 'aria-label': panel.title,
+      dataset: { panel: panel.id }, onclick: () => showPanel(panel.id)
+    }, icon(panel.icon, { size: 20 }), h('span', {}, panel.title)));
+  }
+  showPanel('style');
+
+  // ---- timeline, transport, top bar
+
+  const timeline = createTimeline({ root: $('timeline'), store, player, editor });
+  const exportDialog = createExportDialog({ store, loupe, player, beforeExport: () => saver.flush() });
+  const cheat = createCheatSheet(loupe.platform);
+
+  const title = $('title');
+  title.value = store.project.title;
+  const commitTitle = () => {
+    const v = title.value.trim();
+    if (!v) { title.value = store.project.title; return; }
+    if (v !== store.project.title) store.apply((p) => P.setTitle(p, v));
+  };
+  title.addEventListener('change', commitTitle);
+  title.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); title.blur(); }
+    if (e.key === 'Escape') { title.value = store.project.title; title.blur(); }
+  });
+
+  const mod = loupe.platform === 'darwin' ? '⌘' : 'Ctrl+';
+  $('undo').title = `Undo (${mod}Z)`;
+  $('redo').title = loupe.platform === 'darwin' ? 'Redo (⇧⌘Z)' : 'Redo (Ctrl+Y)';
+  $('exportBtn').title = `Export (${mod}E)`;
+
+  function deleteSelection() {
+    const sel = store.selection;
+    if (!sel) {
+      toast('Select a clip, zoom or speed change first.');
+      return;
+    }
+    if (sel.kind === 'clip') {
+      if (store.project.clips.length === 1) {
+        toast('A video needs at least one clip. Drag its edges to trim it instead.');
+        return;
+      }
+      store.apply((p) => P.deleteClip(p, sel.id));
+    } else if (sel.kind === 'zoom') {
+      store.apply((p) => P.removeZoom(p, sel.id));
+    } else if (sel.kind === 'speed') {
+      store.apply((p) => P.paintSpeed(p, { source: sel.source, start: sel.start, end: sel.end, rate: 1 }));
+    }
+    store.select(null);
+  }
+
+  function split() {
+    const t = player.time;
+    const next = store.apply((p) => P.splitAt(p, t));
+    if (next) toast('Split into two clips');
+  }
+
+  const actions = {
+    undo: () => store.undo(),
+    redo: () => store.redo(),
+    export: () => { timeline.closeMenu(); exportDialog.open(); },
+    playPause: () => player.toggle(),
+    backFrame: () => player.seek(player.time - player.frameStep()),
+    forwardFrame: () => player.seek(player.time + player.frameStep()),
+    back1s: () => player.seek(player.time - 1),
+    forward1s: () => player.seek(player.time + 1),
+    toStart: () => player.seek(0),
+    toEnd: () => player.seek(store.tl.duration),
+    split,
+    addZoom: () => editor.addZoomAtPlayhead(),
+    delete: deleteSelection,
+    timelineZoomIn: () => timeline.zoomIn(),
+    timelineZoomOut: () => timeline.zoomOut(),
+    timelineFit: () => timeline.fit(),
+    cheatSheet: () => cheat.toggle(),
+    escape: () => {
+      if (timeline.menuOpen) timeline.closeMenu();
+      else store.select(null);
+    }
+  };
+
+  $('undo').onclick = actions.undo;
+  $('redo').onclick = actions.redo;
+  $('exportBtn').onclick = actions.export;
+  $('play').onclick = actions.playPause;
+  $('splitBtn').onclick = actions.split;
+  $('zoomBtn').onclick = actions.addZoom;
+  $('deleteBtn').onclick = actions.delete;
+  $('tlOut').onclick = actions.timelineZoomOut;
+  $('tlIn').onclick = actions.timelineZoomIn;
+  $('tlFit').onclick = actions.timelineFit;
+  $('shortcutsBtn').onclick = actions.cheatSheet;
+
+  document.addEventListener('keydown', (e) => {
+    const typing = e.target.closest?.('input[type="text"], input:not([type]), textarea, [contenteditable="true"]');
+    const command = commandFor(e, loupe.platform);
+    if (!command) return;
+    // In a text field only the app-wide shortcuts apply; undo there undoes typing.
+    if (typing && !['export'].includes(command)) return;
+    if (exportDialog.open) return;
+    if (cheat.open && command !== 'cheatSheet' && command !== 'escape') return;
+    // Space on a focused button would press it as well as play.
+    if (command === 'playPause' || command === 'delete') e.preventDefault();
+    // A slider or segmented button keeps its own arrow keys.
+    if (/Frame|1s/.test(command) && e.target.matches?.('input[type="range"]')) return;
+    e.preventDefault();
+    actions[command]();
+  });
+
+  // ---- keeping everything in step
+
+  const tlLabel = $('time');
+  player.onTime((t, playing) => {
+    tlLabel.textContent = `${formatTime(t, { fraction: true })} / ${formatTime(store.tl.duration, { fraction: true })}`;
+    const play = $('play');
+    const want = playing ? 'pause' : 'play';
+    if (play.dataset.state !== want) {
+      play.dataset.state = want;
+      play.replaceChildren(icon(want, { size: 20 }));
+      play.title = playing ? 'Pause (Space)' : 'Play (Space)';
+      play.setAttribute('aria-label', playing ? 'Pause' : 'Play');
+    }
+  });
+
+  function refresh(what) {
+    $('undo').disabled = !store.canUndo;
+    $('redo').disabled = !store.canRedo;
+    $('deleteBtn').disabled = !store.selection;
+    if (document.activeElement !== title) title.value = store.project.title;
+    document.title = `${store.project.title} — Loupe`;
+    for (const [id, m] of mounted) if (id === currentPanel) m.api.update(what);
+  }
+  store.subscribe(refresh);
+  player.onTime(() => {
+    // The zoom panel's "Add a zoom here" depends on where the playhead is.
+    if (currentPanel === 'zoom' && !store.selection && !player.playing) mounted.get('zoom').api.update('time');
+  });
+  refresh('load');
+  player.seek(0);
+  setSaveState(loaded.migrated ? 'Opened from an older version' : 'All changes saved');
+
+  // For the end-to-end tests (test/e2e/editor.js), which drive this page.
+  window.__editor = { store, player, timeline, exportDialog, cheat, editor, actions, saver };
+  document.body.dataset.ready = 'true';
+}
+
+start().catch((err) => {
+  console.error(err);
+  showFatal('Something went wrong opening the editor', plainError(err));
+});

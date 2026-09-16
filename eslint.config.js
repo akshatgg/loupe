@@ -28,7 +28,7 @@ module.exports = [
   // doing permanently even though it is clean today.
   {
     files: ['src/renderer/**/*.js'],
-    ignores: ['src/renderer/exporter/**'],
+    ignores: ['src/renderer/exporter/**', 'src/renderer/editor/**'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'script',
@@ -104,6 +104,27 @@ module.exports = [
         VideoDecoder: 'readonly', VideoEncoder: 'readonly', VideoFrame: 'readonly',
         AudioDecoder: 'readonly', AudioEncoder: 'readonly', AudioData: 'readonly',
         EncodedVideoChunk: 'readonly', EncodedAudioChunk: 'readonly', Blob: 'readonly'
+      }
+    },
+    rules: {
+      'no-unused-vars': 'error',
+      'no-undef': 'error',
+      'prefer-const': 'error',
+      eqeqeq: 'error'
+    }
+  },
+  // The editor window (src/renderer/editor) is ES modules too, in a sandboxed
+  // page that reaches main only through window.loupe.
+  {
+    files: ['src/renderer/editor/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: {
+        window: 'readonly', document: 'readonly', console: 'readonly', fetch: 'readonly',
+        URL: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly', performance: 'readonly',
+        requestAnimationFrame: 'readonly', cancelAnimationFrame: 'readonly', ResizeObserver: 'readonly',
+        Audio: 'readonly', Node: 'readonly'
       }
     },
     rules: {

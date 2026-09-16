@@ -1,37 +1,58 @@
 <!doctype html>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src file:; media-src file:; img-src file: data: blob:">
 <title>Loupe — Edit</title>
 <link rel="stylesheet" href="editor.css">
 <body>
-  <div id="stagewrap"><canvas id="stage"></canvas></div>
-  <video id="src" hidden></video>
-  <div id="timeline">
-    <div id="track"><div id="playhead"></div><p id="notracks" hidden></p></div>
-    <div id="speedtrack" title="Drag across a stretch to speed it up or slow it down">
-      <div id="speedsel" hidden></div>
-      <p id="speedhint">Speed: drag across any stretch here to speed it up or slow it down</p>
-    </div>
-    <div id="speedmenu" hidden role="menu" aria-label="Speed for this stretch"></div>
-    <input id="scrub" type="range" min="0" max="1000" value="0">
-    <div class="times"><span id="tnow">0:00</span><span id="tend">0:00</span></div>
+  <div id="app">
+    <header id="topbar">
+      <div class="brand" aria-hidden="true"><span class="lens"></span></div>
+      <input id="title" type="text" spellcheck="false" aria-label="Video title" maxlength="200">
+      <div class="history">
+        <button id="undo" type="button" class="icon-btn" aria-label="Undo" disabled></button>
+        <button id="redo" type="button" class="icon-btn" aria-label="Redo" disabled></button>
+      </div>
+      <span class="spacer"></span>
+      <span id="saveState" class="save-state" aria-live="polite"></span>
+      <button id="shortcutsBtn" type="button" class="icon-btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"></button>
+      <button id="exportBtn" type="button" class="btn primary">Export</button>
+    </header>
+
+    <main id="workspace">
+      <section id="stage">
+        <div id="canvasBox"><canvas id="preview"></canvas></div>
+        <div id="stageNotice" class="stage-notice" hidden></div>
+      </section>
+      <aside id="sidebar">
+        <div class="panel-wrap">
+          <h2 id="panelTitle" class="panel-title"></h2>
+          <div id="panel"></div>
+        </div>
+        <nav id="tabs" role="tablist" aria-label="Settings"></nav>
+      </aside>
+    </main>
+
+    <section id="transport">
+      <div class="group">
+        <button id="play" type="button" class="play-btn" aria-label="Play"></button>
+        <span id="time" class="time">0:00.0 / 0:00.0</span>
+      </div>
+      <div class="group tools">
+        <button id="splitBtn" type="button" class="tool" title="Split at the playhead (S)"></button>
+        <button id="zoomBtn" type="button" class="tool" title="Add a zoom at the playhead (Z)"></button>
+        <button id="deleteBtn" type="button" class="tool" title="Delete what’s selected (Delete)" disabled></button>
+      </div>
+      <div class="group tl-zoom">
+        <button id="tlOut" type="button" class="icon-btn small" aria-label="Zoom the timeline out"></button>
+        <button id="tlFit" type="button" class="icon-btn small" aria-label="Fit the whole video"></button>
+        <button id="tlIn" type="button" class="icon-btn small" aria-label="Zoom the timeline in"></button>
+      </div>
+    </section>
+
+    <section id="timeline"></section>
   </div>
-  <footer>
-    <button id="play">Play</button>
-    <span id="zoomnow" class="zoomnow"></span>
-    <button id="undoZoom" hidden title="Bring back the last zoom you removed (⌘Z)">Undo</button>
-    <button id="restoreZooms" hidden>Restore all zooms</button>
-    <label class="toggle" title="Draw the mouse cursor in the video">
-      <input type="checkbox" id="showCursor" checked> Show cursor
-    </label>
-    <span class="spacer"></span>
-    <select id="preset">
-      <option value="720p">720p</option>
-      <option value="1080p" selected>1080p</option>
-      <option value="1440p">1440p</option>
-      <option value="4k">4K</option>
-    </select>
-    <button id="export">Export MP4</button>
-    <span id="status"></span>
-  </footer>
-  <script src="editor.js"></script>
+  <div id="fatal" class="fatal" hidden></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script type="module" src="chrome.js"></script>
+  <script type="module" src="editor.js"></script>
 </body>
