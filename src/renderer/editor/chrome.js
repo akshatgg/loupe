@@ -16,6 +16,7 @@ fill('play', 'play', null, 20);
 fill('splitBtn', 'split', 'Split');
 fill('zoomBtn', 'zoomAdd', 'Zoom');
 fill('deleteBtn', 'trash', 'Delete');
+fill('addRecBtn', 'plus', 'Add recording');
 fill('tlOut', 'minus', null, 16);
 fill('tlFit', 'fit', null, 16);
 fill('tlIn', 'plus', null, 16);

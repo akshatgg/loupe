@@ -9,7 +9,8 @@
 //  - the background picture, from a bundled wallpaper or a copied picture
 //
 //   createVisualMedia({ sources, loupe, onChange }) ->
-//     { assets, sync({ project, tl, outT, at, rate, playing, jumped }) -> frames, destroy() }
+//     { assets, sync({ project, tl, outT, at, rate, playing, jumped }) -> frames,
+//       addSource(key, files), destroy() }
 //
 // sync() runs on every drawn frame and returns the extra frames to hand to
 // drawFrame; onChange() asks for a redraw when something finished loading.
@@ -41,15 +42,16 @@ export function createVisualMedia({ sources, loupe, onChange = () => {} }) {
   const assets = { keys, background: null };
   let backgroundValue = null;
 
-  for (const [key, files] of Object.entries(sources)) {
-    if (files.webcam) webcams[key] = mediaElement(files.webcam, onChange);
-    if (files.keys) {
+  function addSource(key, files) {
+    if (files.webcam && !webcams[key]) webcams[key] = mediaElement(files.webcam, onChange);
+    if (files.keys && !keys[key]) {
       fetch(files.keys)
         .then((r) => (r.ok ? r.json() : []))
         .then((list) => { keys[key] = normalizeKeys(list); onChange(); })
         .catch(() => {}); // no badges, nothing else lost
     }
   }
+  for (const [key, files] of Object.entries(sources)) addSource(key, files);
 
   function syncBackground(project) {
     const bg = project.style.background;
@@ -134,6 +136,8 @@ export function createVisualMedia({ sources, loupe, onChange = () => {} }) {
       syncHold(project, tl, outT, frames);
       return frames;
     },
+    // A recording added after the editor opened (Add recording).
+    addSource,
     get webcams() { return webcams; },
     destroy() {
       for (const v of [...Object.values(webcams), ...Object.values(holds).map((h) => h.el)]) {

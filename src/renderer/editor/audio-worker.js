@@ -124,7 +124,12 @@ async function pump() {
 self.onmessage = (e) => {
   const msg = e.data;
   if (msg.type === 'sources') {
-    sources = msg.sources ?? {};
+    const next = msg.sources ?? {};
+    // A recording read before its files were known would stay silent.
+    for (const key of recordings.keys()) {
+      if (next[key]?.video !== sources[key]?.video) recordings.delete(key);
+    }
+    sources = next;
   } else if (msg.type === 'pcm') {
     files.set(msg.id, msg.pcm);
   } else if (msg.type === 'render') {

@@ -19,6 +19,9 @@ import { h, icon } from './ui.js';
 import { clipLayout, newZoomRange, formatTime } from './timeline-math.js';
 import { newAnnotation } from './annotation-math.js';
 import { createAnnotationOverlay } from './annotation-overlay.js';
+import { createAddRecording } from './add-recording.js';
+import { createThumbnails } from './thumbnails.js';
+import { createFirstRunHint } from './first-run.js';
 
 const loupe = window.loupe;
 const $ = (id) => document.getElementById(id);
@@ -192,7 +195,15 @@ async function start() {
 
   // ---- timeline, transport, top bar
 
-  const timeline = createTimeline({ root: $('timeline'), store, player, editor });
+  // Pictures along the clips, from each recording's video.
+  const thumbnails = createThumbnails({ onReady: () => timeline.redrawPictures() });
+  for (const [key, files] of Object.entries(loaded.sources)) thumbnails.addSource(key, files.video);
+  const timeline = createTimeline({ root: $('timeline'), store, player, editor, thumbnails });
+  const addRecording = createAddRecording({
+    store, player, loupe, core: P, toast,
+    onAdded: (added) => thumbnails.addSource(added.key, added.files.video)
+  });
+  const firstRun = createFirstRunHint({ parent: $('stage') });
   const overlay = createAnnotationOverlay({ canvas: $('preview'), stage: $('stage'), store, player, editor });
   const exportDialog = createExportDialog({ store, loupe, player, beforeExport: () => saver.flush() });
   const cheat = createCheatSheet(loupe.platform);
@@ -266,8 +277,10 @@ async function start() {
     escape: () => {
       if (cheat.open) cheat.toggle();
       else if (timeline.menuOpen) timeline.closeMenu();
+      else if (firstRun.open && !store.selection) firstRun.dismiss();
       else store.select(null);
-    }
+    },
+    addRecording: () => addRecording.show()
   };
 
   $('undo').onclick = actions.undo;
@@ -277,6 +290,7 @@ async function start() {
   $('splitBtn').onclick = actions.split;
   $('zoomBtn').onclick = actions.addZoom;
   $('deleteBtn').onclick = actions.delete;
+  $('addRecBtn').onclick = actions.addRecording;
   $('tlOut').onclick = actions.timelineZoomOut;
   $('tlIn').onclick = actions.timelineZoomIn;
   $('tlFit').onclick = actions.timelineFit;
@@ -288,13 +302,29 @@ async function start() {
     if (!command) return;
     // In a text field only the app-wide shortcuts apply; undo there undoes typing.
     if (typing && !['export'].includes(command)) return;
-    if (exportDialog.isOpen) return;
+    if (exportDialog.isOpen || addRecording.isOpen) return;
     if (cheat.open && command !== 'cheatSheet' && command !== 'escape') return;
     // Space on a focused button would press it as well as play.
     if (command === 'playPause' || command === 'delete') e.preventDefault();
     // A slider or segmented button keeps its own arrow keys.
     if (/Frame|1s/.test(command) && e.target.matches?.('input[type="range"]')) return;
     e.preventDefault();
+    actions[command]();
+  });
+
+  // Edit > Undo/Redo and Help > Keyboard shortcuts from the app menu, sent
+  // here while the editor is in front. In a text field undo means typing.
+  loupe.onAppCommand?.((command) => {
+    if (command === 'shortcuts') {
+      if (!cheat.open) cheat.toggle();
+      return;
+    }
+    if (command !== 'undo' && command !== 'redo') return;
+    if (document.activeElement?.closest?.('input[type="text"], input:not([type]), textarea')) {
+      document.execCommand(command);
+      return;
+    }
+    if (exportDialog.isOpen || addRecording.isOpen) return;
     actions[command]();
   });
 
@@ -318,7 +348,7 @@ async function start() {
     $('redo').disabled = !store.canRedo;
     $('deleteBtn').disabled = !store.selection;
     if (document.activeElement !== title) title.value = store.project.title;
-    document.title = `${store.project.title} — Loupe`;
+    document.title = store.project.title || 'Loupe';
     for (const [id, m] of mounted) if (id === currentPanel) m.api.update(what);
   }
   store.subscribe(refresh);
@@ -331,8 +361,12 @@ async function start() {
   setSaveState(loaded.migrated ? 'Opened from an older version' : 'All changes saved');
 
   // For the end-to-end tests (test/e2e/editor.js), which drive this page.
-  window.__editor = { store, player, timeline, exportDialog, cheat, editor, actions, saver, overlay };
+  window.__editor = {
+    store, player, timeline, exportDialog, cheat, editor, actions, saver, overlay, addRecording, thumbnails, firstRun
+  };
   document.body.dataset.ready = 'true';
+  // After the page is up, so the tests (and people) see a settled editor.
+  firstRun.show();
 }
 
 start().catch((err) => {

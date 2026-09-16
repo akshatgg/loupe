@@ -12,6 +12,7 @@ const { registerSettingsIpc } = require('./ipc/settings');
 const { registerPresetsIpc } = require('./ipc/presets');
 const { registerUpdatesIpc } = require('./ipc/updates');
 const { registerAboutIpc } = require('./ipc/about');
+const { createWindowState } = require('./window-state');
 
 // Everything around recording and editing: the Library and Settings windows,
 // style presets, the menus, update checks and crash reports
@@ -26,6 +27,10 @@ const { registerAboutIpc } = require('./ipc/about');
 //   shell.openSettings(section?)  the Settings window, optionally at a section:
 //                                 general | recording | export | updates | privacy | about
 //   shell.recordingsChanged()     tell an open Library a recording was added
+//   shell.windowOptions(name, o)  BrowserWindow options with the remembered
+//                                 place of window `name` and the app icon
+//   shell.trackWindow(win, name)  remember where that window is left
+//   shell.library()               the recordings library (after start())
 //
 // `deps` from main.js: openEditorWindow(dir), showPicker(), getEditorWindow(),
 // getEditorDir() (the recording open in the editor, or null),
@@ -42,6 +47,23 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
   const logDir = () => path.join(app.getPath('userData'), 'logs');
   const defaultRecordingsFolder = () => recordingsRoot((name) => app.getPath(name), os.homedir());
 
+  // Every framed window reopens where it was left (window-state.js). The
+  // icon only matters off macOS, where the window shows it (a Mac app's
+  // windows use the app's own icon).
+  const windowState = createWindowState({
+    file: () => path.join(app.getPath('userData'), 'window-state.json'),
+    screen: () => electron.screen
+  });
+  const icon = path.join(__dirname, '..', 'renderer', 'shared', 'icon.png');
+  const windowOptions = (name, options) => ({
+    ...(process.platform === 'darwin' ? {} : { icon }),
+    ...options,
+    ...windowState.options(name, {
+      width: options.width, height: options.height, minWidth: options.minWidth, minHeight: options.minHeight
+    })
+  });
+
+  let library = null;
   let libraryWindow = null;
   let settingsWindow = null;
   let updater = null;
@@ -81,11 +103,12 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
 
   function openLibrary() {
     libraryWindow = openWindow(libraryWindow, () => {
-      const win = new BrowserWindow({
+      const win = new BrowserWindow(windowOptions('library', {
         width: 1040, height: 700, minWidth: 560, minHeight: 420,
         title: 'Recordings', backgroundColor: WINDOW_BG, show: false,
         webPreferences: { preload }
-      });
+      }));
+      windowState.track(win, 'library');
       win.loadFile(renderer('library'));
       win.once('ready-to-show', () => win.show());
       win.on('closed', () => { if (libraryWindow === win) libraryWindow = null; });
@@ -98,11 +121,12 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
     const at = SECTIONS.includes(section) ? section : null;
     const existed = settingsWindow && !settingsWindow.isDestroyed();
     settingsWindow = openWindow(settingsWindow, () => {
-      const win = new BrowserWindow({
+      const win = new BrowserWindow(windowOptions('settings', {
         width: 780, height: 600, minWidth: 620, minHeight: 460,
         title: 'Settings', backgroundColor: WINDOW_BG, show: false,
         fullscreenable: false, webPreferences: { preload }
-      });
+      }));
+      windowState.track(win, 'settings');
       win.loadFile(renderer('settings'), at ? { hash: at } : undefined);
       win.once('ready-to-show', () => win.show());
       win.on('closed', () => { if (settingsWindow === win) settingsWindow = null; });
@@ -112,12 +136,31 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
     return settingsWindow;
   }
 
-  function showShortcuts() {
+  // The editor when it is the window in front, else null.
+  function focusedEditor() {
     const focused = BrowserWindow.getFocusedWindow();
     const editor = getEditorWindow?.();
+    return editor && !editor.isDestroyed() && focused === editor ? editor : null;
+  }
+
+  // Edit > Undo / Redo: the editor's own history when it is in front (the
+  // page decides: in its title field they undo typing); elsewhere, typing.
+  function editCommand(command) {
+    const editor = focusedEditor();
+    if (editor) {
+      editor.webContents.send('app:command', command);
+      return;
+    }
+    const focused = BrowserWindow.getFocusedWindow();
+    if (focused && !focused.isDestroyed()) focused.webContents[command]();
+  }
+
+  function showShortcuts() {
+    const focused = BrowserWindow.getFocusedWindow();
+    const editor = focusedEditor();
     // The editor has its own cheat sheet ("?"); let it show that.
-    if (editor && !editor.isDestroyed() && focused === editor) {
-      editor.webContents.send('app:showShortcuts');
+    if (editor) {
+      editor.webContents.send('app:command', 'shortcuts');
       return;
     }
     const lines = appShortcuts(process.platform).map(([what, keys]) => `${what}:  ${keys}`);
@@ -141,7 +184,7 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
     const settingsIpc = registerSettingsIpc({ ipcMain, electron, store: settings, defaultRecordingsFolder });
     registerPresetsIpc({ ipcMain, store: settings });
 
-    const library = createLibrary({
+    library = createLibrary({
       root: settingsIpc.recordingsFolder,
       locale: () => app.getLocale(),
       createThumbnail: async (video) => {
@@ -182,6 +225,8 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
         getUpdater().check();
       },
       showShortcuts,
+      undo: () => editCommand('undo'),
+      redo: () => editCommand('redo'),
       openWebsite: about.openWebsite,
       reportProblem: about.reportProblem,
       showLogs: about.showLogs
@@ -193,6 +238,10 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
 
   function ready() {
     const { Menu } = electron;
+    // Run from source, macOS would show Electron's icon in the Dock.
+    if (process.platform === 'darwin' && !app.isPackaged) {
+      try { app.dock?.setIcon(icon); } catch { /* the default icon */ }
+    }
     Menu.setApplicationMenu(Menu.buildFromTemplate(buildMenuTemplate({
       platform: process.platform, appName: 'Loupe', isDev: !app.isPackaged, actions
     })));
@@ -218,6 +267,10 @@ function createAppShell({ electron, openEditorWindow, showPicker, getEditorWindo
     openLibrary,
     openSettings,
     recordingsChanged,
+    windowOptions,
+    trackWindow: (win, name) => windowState.track(win, name),
+    // The recordings library (ipc/library.js createLibrary), once started.
+    library: () => library,
     updater: getUpdater
   };
 }

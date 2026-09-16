@@ -3,10 +3,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-// The project-format-v2 fields (docs/EDITOR-V2.md section 3) a recording
-// writes at stop, next to the v1 fields the current editor and exporter
-// read. The project stays `version: 1` -- loadProject would refuse anything
-// else -- and the v2 migration reads these instead of guessing:
+// What a recording is, in project-format-v2 terms (docs/EDITOR-V2.md
+// section 3). recorder.js gathers the facts at stop in this shape, next to
+// the v1-shaped fields it has always kept in memory, and toProjectV2 turns
+// them into the version-2 project.json the editor opens:
 //
 //   project.sources.main = {
 //     dir: ".", kind, id, title, width, height, originX, originY,
@@ -78,7 +78,35 @@ function validKeyLabel(label) {
   return typeof label === 'string' && label.length > 0 && label.length <= 40 && !/[\n\r]/.test(label);
 }
 
+// src/core is ES modules; loaded only when a recording stops.
+let core = null;
+function loadCore() {
+  core ??= require('../core/project.js');
+  return core;
+}
+
+// The recording (v1 fields + sources.main + clips, as recorder.js keeps it)
+// as a version-2 project: the recording minus its pauses, the zooms made
+// while recording, and `style` -- the default preset's, when one is chosen
+// -- over the new-project look. Returns null when the facts don't make a
+// project (a capture that never produced a frame); the caller then keeps the
+// v1 file, which the editor migrates.
+function toProjectV2(recording, { createdAt = null, style = null } = {}) {
+  const P = loadCore();
+  try {
+    const main = recording.sources.main;
+    const project = P.createProject({ main, createdAt, style: style ?? undefined });
+    const zooms = P.zoomsFromKeyframes(recording.zoomKeyframes, main.duration);
+    return P.validateProject({ ...project, zooms });
+  } catch {
+    // A preset saved by another version may not validate; the recording
+    // matters more than its look.
+    if (style) return toProjectV2(recording, { createdAt });
+    return null;
+  }
+}
+
 module.exports = {
-  buildMainSource, writeKeys, readKeys, validKeyLabel,
+  toProjectV2, buildMainSource, writeKeys, readKeys, validKeyLabel,
   KEYS_FILE, WEBCAM_FILE, SYSTEM_AUDIO_FILES
 };

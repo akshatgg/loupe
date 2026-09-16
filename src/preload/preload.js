@@ -14,6 +14,9 @@ contextBridge.exposeInMainWorld('loupe', {
   // App shell (src/main/app-shell.js): the Library and Settings windows.
   openLibrary: () => ipcRenderer.invoke('shell:openLibrary'),
   openSettings: (section) => ipcRenderer.invoke('shell:openSettings', section),
+  // App menu commands meant for the editor when it is in front:
+  // 'undo' | 'redo' | 'shortcuts' (src/main/app-shell.js).
+  onAppCommand: (cb) => ipcRenderer.on('app:command', (_e, command) => cb(command)),
   // Style presets, for the editor's Style panel (src/main/ipc/presets.js has
   // the full contract). apply(id) resolves to a copy of the preset's style.
   presets: {
@@ -47,6 +50,11 @@ contextBridge.exposeInMainWorld('loupe', {
   // which main checks and saves shortly after.
   loadProject: () => ipcRenderer.invoke('project:load'),
   saveProject: (project) => ipcRenderer.invoke('project:save', project),
+  // Add recording (src/main/ipc/append-recording.js): the Library's other
+  // recordings, their pictures, and adding one after this recording.
+  listRecordings: () => ipcRenderer.invoke('project:recordings'),
+  recordingThumbnail: (id) => ipcRenderer.invoke('project:recordingThumbnail', id),
+  appendRecording: (id) => ipcRenderer.invoke('project:appendRecording', id),
   // Export runs in a hidden window (src/main/ipc/export.js): resolves with
   // { file, ... } once saved; progress arrives as { phase, frame, total }.
   exportVideo: (opts) => ipcRenderer.invoke('export:start', opts),

@@ -11,7 +11,8 @@
 // clicks (Menu.getApplicationMenu().getMenuItemById).
 //
 // `actions`: newRecording, openRecordings, openSettings(section?),
-// checkForUpdates, showShortcuts, openWebsite, reportProblem, showLogs.
+// checkForUpdates, showShortcuts, openWebsite, reportProblem, showLogs, and
+// optionally undo and redo.
 function buildMenuTemplate({ platform, appName = 'Loupe', isDev = false, actions }) {
   const mac = platform === 'darwin';
   const a = (name, ...args) => () => actions[name](...args);
@@ -57,8 +58,13 @@ function buildMenuTemplate({ platform, appName = 'Loupe', isDev = false, actions
   template.push({
     label: mac ? 'Edit' : '&Edit',
     submenu: [
-      { role: 'undo' },
-      { role: 'redo' },
+      // Undo and redo go to the editor's own history when the editor is in
+      // front (app-shell.js routes them); everywhere else they undo typing,
+      // as the standard roles would. Without those actions, the roles.
+      actions.undo ? { id: 'undo', label: 'Undo', accelerator: 'CmdOrCtrl+Z', click: a('undo') } : { role: 'undo' },
+      actions.redo
+        ? { id: 'redo', label: 'Redo', accelerator: mac ? 'Shift+CmdOrCtrl+Z' : 'Ctrl+Y', click: a('redo') }
+        : { role: 'redo' },
       { type: 'separator' },
       { role: 'cut' },
       { role: 'copy' },

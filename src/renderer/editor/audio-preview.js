@@ -11,6 +11,7 @@
 //     peaks(sourceKey)                  a recording's waveform (audio-math.js peaks)
 //     file(kind, file)                  a music file or take: { status, peaks, duration }
 //     setMuted(bool)                    silence it (while recording a voiceover)
+//     sourcesChanged()                  a recording was added (Add recording)
 //     mix, playing, position            the AudioBuffer, and where it is playing (tests)
 //   }
 //
@@ -60,12 +61,16 @@ export function createAudioPreview({ sources, folder = null }) {
     return new URL(file.split('/').map(encodeURIComponent).join('/'), folder).href;
   };
 
-  function ensureWorker() {
-    if (worker) return worker;
-    worker = new Worker(new URL('./audio-worker.js', import.meta.url), { type: 'module' });
+  function postSources() {
     const urls = {};
     for (const [key, s] of Object.entries(sources)) urls[key] = { video: s.video, systemAudio: s.systemAudio };
     worker.postMessage({ type: 'sources', sources: urls });
+  }
+
+  function ensureWorker() {
+    if (worker) return worker;
+    worker = new Worker(new URL('./audio-worker.js', import.meta.url), { type: 'module' });
+    postSources();
     worker.onmessage = (e) => onWorker(e.data);
     worker.onerror = (e) => {
       console.error('audio preview:', e.message);
@@ -192,6 +197,11 @@ export function createAudioPreview({ sources, folder = null }) {
     },
     peaks: (key) => peaks[key] ?? null,
     file: (kind, file) => files.get(`${kind}:${file}`) ?? null,
+    // `sources` is the player's own object, so an added recording is already
+    // in it; a worker made earlier only needs telling.
+    sourcesChanged() {
+      if (worker) postSources();
+    },
     setMuted(on) {
       muted = Boolean(on);
       if (gain) gain.gain.setTargetAtTime(muted ? 0 : 1, ctx.currentTime, 0.01);

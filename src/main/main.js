@@ -21,11 +21,12 @@ const { registerVoiceoverIpc } = require('./ipc/voiceover');
 const { registerMusicIpc } = require('./ipc/music');
 const { registerCaptionsIpc } = require('./ipc/captions');
 const { registerBackgroundIpc } = require('./ipc/background');
-const { defaultPresetStyle } = require('./presets');
+const { registerAppendRecordingIpc } = require('./ipc/append-recording');
 const {
   helperCommand, coordinateMapper, attachThumbnails
 } = require('./platform');
 const { registerRecordingExtras } = require('./ipc/recording');
+const { defaultPresetStyle } = require('./presets');
 
 const IS_WINDOWS = process.platform === 'win32';
 // Physical pixels <-> DIPs on Windows; identities on macOS (platform.js).
@@ -81,10 +82,11 @@ const recorder = createRecorder({
 let pickerWindow = null;
 
 function createPickerWindow() {
-  pickerWindow = new BrowserWindow({
-    width: 940, height: 800, title: 'Loupe',
+  pickerWindow = new BrowserWindow(appShell.windowOptions('picker', {
+    width: 940, height: 800, minWidth: 720, minHeight: 560, title: 'New recording', backgroundColor: '#2a2b2e',
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
-  });
+  }));
+  appShell.trackWindow(pickerWindow, 'picker');
   // Only windows on the active Space are listed, so choosing a window that
   // lives on another desktop means switching to it. A picker pinned to its own
   // Space would be left behind at exactly that moment, so it follows instead --
@@ -453,22 +455,30 @@ async function stopRecording() {
   // must not strand the user with no window at all: the picker has to come
   // back regardless of how stop() ends, so the recovery runs in `finally`
   // and the failure is re-thrown afterward rather than swallowed.
+  let opened = false;
   try {
-    // A new recording starts with the default style preset, if one is chosen.
-    let style = null;
-    try {
-      style = defaultPresetStyle(appShell.settings.get());
-    } catch (err) {
-      console.error('Loupe: could not read the default style preset:', err);
-    }
-    const result = await recorder.stop({ webcam, style });
+    const result = await recorder.stop({ webcam, style: newProjectStyle() });
     if (result?.dir) {
       openEditorWindow(result.dir);
+      opened = true;
       appShell.recordingsChanged();
     }
     return result;
   } finally {
-    showPicker();
+    // After a recording the editor is what comes next; the picker would only
+    // cover it (New Recording brings it back). Backing out, or a stop that
+    // failed, returns to the picker.
+    if (!opened) showPicker();
+  }
+}
+
+// A new recording starts with the default preset's look, if one is chosen.
+// A settings problem never costs the recording: the defaults apply.
+function newProjectStyle() {
+  try {
+    return defaultPresetStyle(appShell.settings.get());
+  } catch {
+    return null;
   }
 }
 
@@ -830,6 +840,8 @@ registerExportIpc({
   ipcMain, runner: exporter, projectDir: () => editorDir, shell,
   beforeStart: () => projects.flush()
 });
+// Add recording: another recording from the Library, played after this one.
+registerAppendRecordingIpc({ ipcMain, library: appShell.library, store: projects, projectDir: () => editorDir });
 
 function flushProject() {
   try {
@@ -861,11 +873,12 @@ function openEditorWindow(dir) {
   editorDir = dir;
   // Room for the preview, the sidebar and the timeline; the preview scales
   // to whatever shape the video has.
-  const win = new BrowserWindow({
-    width: 1280, height: 840, minWidth: 900, minHeight: 600, title: 'Loupe — Edit',
+  const win = new BrowserWindow(appShell.windowOptions('editor', {
+    width: 1280, height: 840, minWidth: 900, minHeight: 600, title: 'Loupe',
     backgroundColor: '#161618',
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js'), sandbox: true, contextIsolation: true }
-  });
+  }));
+  appShell.trackWindow(win, 'editor');
   editorWindow = win;
   win.loadFile(path.join(__dirname, '..', 'renderer', 'editor', 'index.html'));
   win.on('closed', () => {

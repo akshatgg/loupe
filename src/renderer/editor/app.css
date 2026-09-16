@@ -1,0 +1,69 @@
+/* Add recording, the pictures along the clips and the first-run card
+   (add-recording.js, thumbnails.js, first-run.js). Uses editor.css's colours. */
+
+.tool-sep { width: 1px; height: 18px; background: var(--line-2); margin: 0 4px; }
+.btn.small { height: 28px; padding: 0 12px; font-size: 12.5px; }
+
+/* ---- pictures along the clips */
+.clip-strip {
+  position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: 8px;
+}
+.clip-strip img {
+  position: absolute; top: 0; height: 100%; object-fit: cover; opacity: .62;
+  border-right: 1px solid rgba(0,0,0,.35);
+}
+.clip-strip:not(:empty) + .handle + .clip-label {
+  text-shadow: 0 1px 3px rgba(0,0,0,.9);
+}
+.clip-strip:not(:empty) + .handle + .clip-label .clip-dur { color: var(--ink-2); }
+.clip-strip:not(:empty) + .handle + .clip-label::before {
+  content: ""; position: absolute; inset: 0 -14px; z-index: -1;
+  background: linear-gradient(90deg, rgba(18,18,20,.72), rgba(18,18,20,.15) 130px, transparent 200px);
+}
+.clip-label { z-index: 1; }
+.clip.selected .clip-strip img { opacity: .75; }
+
+/* ---- Add recording */
+.add-recording { width: 520px; max-width: calc(100vw - 48px); }
+.add-recording h2 { margin-bottom: 4px; }
+.rec-sub { margin: 0 0 14px; }
+.rec-list {
+  display: flex; flex-direction: column; gap: 4px; max-height: min(420px, 60vh); overflow-y: auto;
+  margin: 0 -8px; padding: 0 8px;
+}
+.rec-row {
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px; border: 0; border-radius: 10px;
+  background: transparent; cursor: pointer; text-align: left;
+}
+.rec-row:hover, .rec-row:focus-visible { background: var(--hover); }
+.rec-thumb {
+  width: 96px; height: 60px; flex-shrink: 0; border-radius: 6px; overflow: hidden; background: var(--well);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,.06);
+}
+.rec-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.rec-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.rec-title { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rec-meta { color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.rec-add {
+  display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px 5px 8px; border-radius: 7px;
+  color: var(--accent); font-weight: 600; font-size: 12.5px; opacity: 0; transition: opacity .12s;
+}
+.rec-row:hover .rec-add, .rec-row:focus-visible .rec-add { opacity: 1; background: var(--accent-soft); }
+.rec-empty { text-align: center; padding: 24px 12px 8px; color: var(--ink-3); }
+.rec-empty p { margin: 12px auto 0; max-width: 300px; line-height: 1.5; }
+.rec-note { min-height: 18px; margin: 10px 0 0; color: var(--ink-2); }
+
+/* ---- first-run card */
+.first-run {
+  position: absolute; right: 22px; top: 18px; z-index: 10;
+  width: min(330px, calc(100% - 44px)); padding: 14px 16px 12px; border-radius: 12px;
+  background: rgba(32, 32, 36, .96); border: 1px solid var(--line-2);
+  box-shadow: 0 18px 50px rgba(0,0,0,.55);
+  animation: first-run-in .22s ease-out;
+}
+.first-run h2 { margin: 0 0 10px; font-size: 14px; font-weight: 650; }
+.first-run ul { list-style: none; margin: 0 0 14px; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.first-run li { display: flex; align-items: center; gap: 10px; color: var(--ink-2); }
+.first-run li .icon { color: var(--accent); }
+.first-run .btn { margin-left: auto; display: flex; }
+@keyframes first-run-in { from { opacity: 0; transform: translateY(-6px); } }

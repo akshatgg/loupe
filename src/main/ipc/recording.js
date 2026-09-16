@@ -13,7 +13,7 @@ const { createCameraBubble, cameraAccess } = require('./camera');
 //   bar:arm     onArm()                  camera bubble up, if chosen
 //   bar:start   runCountdown(onTick)     3-2-1 unless turned off; false = cancelled
 //               excludeWindowIds()       the bubble, for --exclude-window
-//               recorderOptions()        { systemAudio, keys } for recorder.start
+//               recorderOptions()        { systemAudio, keys, micName } for recorder.start
 //               onRecordingStarted(dir)  webcam recording + pause shortcut
 //   Stop        finishWebcam()           promise for recorder.stop({ webcam })
 //   teardown    teardown()               everything above undone
@@ -104,9 +104,18 @@ function registerRecordingExtras({
     return id ? [id] : [];
   }
 
+  // `micName`: the microphone chosen in Settings, by its label (null = the
+  // system default).
   function recorderOptions() {
     const s = current();
-    return { systemAudio: s.systemAudio, keys: s.recordKeys };
+    let micName = null;
+    try {
+      const label = getSettings()?.microphone?.label;
+      if (typeof label === 'string' && label) micName = label;
+    } catch {
+      // the default microphone
+    }
+    return { systemAudio: s.systemAudio, keys: s.recordKeys, micName };
   }
 
   function onRecordingStarted(dir) {

@@ -210,3 +210,31 @@ export function rateAt(project, layout, outT) {
   const r = (sourceInClip(project, layout, i, a + h) - sourceInClip(project, layout, i, a)) / h;
   return r > 0 ? r : 1;
 }
+
+// Clip pictures (thumbnails.js): where the pictures along a clip go.
+// A clip from output time outStart to outEnd, drawn at `pps` px per second,
+// is tiled with pictures `tileWidth` px wide; only tiles within the visible
+// stretch [viewStart, viewEnd] (px, timeline content coordinates, `pad` px
+// before 0:00) are wanted. Returns [{ x, outT }]: each tile's left edge inside
+// the clip and the output moment its picture shows (the tile's middle).
+export function stripTiles({ outStart, outEnd, pps, tileWidth, viewStart, viewEnd, pad = 0 }) {
+  const tiles = [];
+  const width = (outEnd - outStart) * pps;
+  if (!(width > 0) || !(tileWidth > 0) || !(pps > 0)) return tiles;
+  const left = pad + outStart * pps;
+  const first = Math.max(0, Math.floor((viewStart - left) / tileWidth));
+  const last = Math.min(Math.ceil(width / tileWidth) - 1, Math.floor((viewEnd - left) / tileWidth));
+  for (let i = first; i <= last; i++) {
+    const x = i * tileWidth;
+    const mid = Math.min(width, x + tileWidth / 2);
+    tiles.push({ x, outT: outStart + mid / pps });
+  }
+  return tiles;
+}
+
+// How finely pictures are kept apart, in source seconds, for tiles that each
+// cover about `seconds`: a "nice" step, so nearby zoom levels share pictures.
+const THUMB_STEPS = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
+export function thumbStep(seconds) {
+  return THUMB_STEPS.find((s) => s >= seconds * 0.75) ?? THUMB_STEPS.at(-1);
+}

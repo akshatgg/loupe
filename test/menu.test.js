@@ -3,10 +3,10 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { buildMenuTemplate, appShortcuts } = require('../src/main/menu');
 
-function build(platform, isDev = false) {
+function build(platform, isDev = false, extra = []) {
   const called = [];
   const names = ['newRecording', 'openRecordings', 'openSettings', 'checkForUpdates',
-    'showShortcuts', 'openWebsite', 'reportProblem', 'showLogs'];
+    'showShortcuts', 'openWebsite', 'reportProblem', 'showLogs', ...extra];
   const actions = Object.fromEntries(names.map((n) => [n, (...args) => called.push([n, ...args])]));
   return { template: buildMenuTemplate({ platform, appName: 'Loupe', isDev, actions }), called };
 }
@@ -38,6 +38,19 @@ test('File: New Recording ⌘N, Open Recordings ⌘O, Close', () => {
   file[0].click();
   file[1].click();
   assert.deepStrictEqual(called, [['newRecording'], ['openRecordings']]);
+});
+
+test('Edit: Undo ⌘Z and Redo ⇧⌘Z / Ctrl+Y are app commands (the editor has its own history)', () => {
+  for (const platform of ['darwin', 'win32']) {
+    const { template, called } = build(platform, false, ['undo', 'redo']);
+    assert.strictEqual(byId(template, 'undo').accelerator, 'CmdOrCtrl+Z');
+    assert.strictEqual(byId(template, 'redo').accelerator, platform === 'darwin' ? 'Shift+CmdOrCtrl+Z' : 'Ctrl+Y');
+    byId(template, 'undo').click();
+    byId(template, 'redo').click();
+    assert.deepStrictEqual(called, [['undo'], ['redo']]);
+    const roles = template.find((m) => /Edit/.test(m.label)).submenu.filter((i) => i.role).map((i) => i.role);
+    assert.ok(!roles.includes('undo') && roles.includes('copy'), 'copy and paste stay standard');
+  }
 });
 
 test('Edit uses the standard roles, so text fields everywhere get undo, copy and paste', () => {

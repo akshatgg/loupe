@@ -56,7 +56,7 @@ test('keystrokes are asked for, rebased like clicks and written to keys.json', a
   h.deliver('capture', { type: 'stopped', duration: 5, now: 1005 }, 1005);
   assert.deepStrictEqual(h.rec.state().keys, [{ t: 2.5, label: '⇧⌘K' }]);
 
-  const { project } = await h.rec.stop();
+  const { recording: project } = await h.rec.stop();
   assert.deepStrictEqual(JSON.parse(fs.readFileSync(path.join(h.dir, 'keys.json'), 'utf8')),
     [{ t: 2.5, label: '⇧⌘K' }]);
   assert.strictEqual(project.sources.main.keys, 'keys.json');
@@ -68,7 +68,7 @@ test('without the keys option inputtap is not asked for them and none are kept',
   await startAt(h);
   assert.ok(!h.argsFor.inputtap.includes('--keys'));
   h.deliver('inputtap', { type: 'key', clock: 1001, label: '⌘C' }, 1001);
-  const { project } = await h.rec.stop();
+  const { recording: project } = await h.rec.stop();
   assert.deepStrictEqual(h.rec.state().keys, []);
   assert.strictEqual(project.sources.main.keys, null);
   assert.ok(!fs.existsSync(path.join(h.dir, 'keys.json')));
@@ -79,7 +79,7 @@ test('keystrokes need the input hook: no zoom permission, no keys', async () => 
   const h = harness();
   await startAt(h, { keys: true, zoomEnabled: false });
   assert.strictEqual(h.argsFor.inputtap, undefined);
-  const { project } = await h.rec.stop();
+  const { recording: project } = await h.rec.stop();
   assert.strictEqual(project.sources.main.keys, null);
   h.cleanup();
 });
@@ -91,7 +91,7 @@ test('computer sound: the flag reaches capture, and the reported file lands in t
   h.deliver('capture', { type: 'system_audio', file: 'system.m4a' }, 1000.1);
   h.deliver('capture', { type: 'stopped', duration: 3, now: 1003 }, 1003);
   assert.strictEqual(h.rec.state().systemAudio, 'system.m4a');
-  const { project } = await h.rec.stop();
+  const { recording: project } = await h.rec.stop();
   assert.strictEqual(project.sources.main.systemAudio, 'system.m4a');
   h.cleanup();
 });
@@ -104,7 +104,7 @@ test('computer sound that never started is null, and a warning does not stop the
   assert.strictEqual(s.recording, true);
   assert.strictEqual(s.error, null);
   assert.deepStrictEqual(s.warnings, ['computer sound stopped recording: x']);
-  const { project } = await h.rec.stop();
+  const { recording: project } = await h.rec.stop();
   assert.strictEqual(project.sources.main.systemAudio, null);
   h.cleanup();
 });
@@ -113,7 +113,7 @@ test('an unexpected computer-sound file name is not trusted', async () => {
   const h = harness({ platform: 'win32' });
   await startAt(h, { systemAudio: true });
   h.deliver('capture', { type: 'system_audio', file: '../../evil.m4a' }, 1001);
-  const { project } = await h.rec.stop();
+  const { recording: project } = await h.rec.stop();
   assert.strictEqual(project.sources.main.systemAudio, null);
   assert.strictEqual(project.sources.main.video, 'raw.mp4');
   h.cleanup();
@@ -148,7 +148,7 @@ test('pauses are measured on the main clock and saved in source time, cut out of
   h.deliver('capture', { type: 'stopped', duration: 9, now: 1008 }, 1008 - DELAY);
   h.setLocalFromHelper(1008);
 
-  const { project } = await h.rec.stop();
+  const { recording: project } = await h.rec.stop();
   const pauses = project.sources.main.pauses;
   assert.strictEqual(pauses.length, 2);
   // Off by at most the quickest line delivery (DELAY).
@@ -176,7 +176,7 @@ test("the webcam's offset is its first frame's main-clock moment in source time"
   // (the bubble starts recording just before capture does).
   const webcam = { file: 'webcam.webm', startLocal: 5000 - 0.12 + OFFSET, width: 640, height: 480 };
   h.deliver('capture', { type: 'stopped', duration: 2, now: 5002 }, 5002);
-  const { project } = await h.rec.stop({ webcam });
+  const { recording: project } = await h.rec.stop({ webcam });
   const cam = project.sources.main.webcam;
   assert.strictEqual(cam.file, 'webcam.webm');
   assert.strictEqual(cam.width, 640);
@@ -185,7 +185,7 @@ test("the webcam's offset is its first frame's main-clock moment in source time"
   h.cleanup();
 });
 
-test('stop() writes the v2 main source next to the v1 fields', async () => {
+test('stop() writes a version-2 project.json from the recording', async () => {
   const h = harness();
   await h.rec.start({
     source: 'window:7', mic: true, dir: h.dir, width: 800, height: 600, title: 'Notes', x: 10, y: 20
@@ -193,18 +193,63 @@ test('stop() writes the v2 main source next to the v1 fields', async () => {
   h.deliver('capture', { type: 'started', clock: 1, now: 1 }, 1);
   h.deliver('inputtap', { type: 'click', clock: 2, x: 15, y: 25, button: 'left' }, 2);
   h.deliver('capture', { type: 'stopped', duration: 4, now: 5 }, 5);
-  const { project } = await h.rec.stop();
+  const { recording, project } = await h.rec.stop();
 
-  assert.strictEqual(project.version, 1, 'still a v1 project for the current editor');
-  assert.strictEqual(project.capture.file, 'raw.mov');
-  assert.deepStrictEqual(project.sources.main, {
+  assert.strictEqual(recording.capture.file, 'raw.mov');
+  assert.deepStrictEqual(recording.sources.main, {
     dir: '.', kind: 'window', id: 'window:7', title: 'Notes', width: 800, height: 600,
     originX: 10, originY: 20, video: 'raw.mov', duration: 4, fps: 60, mic: true,
     systemAudio: null, webcam: null, cursor: 'cursor.bin', keys: null,
     clicks: [{ t: 1, x: 5, y: 5, button: 'left' }], pauses: []
   });
-  assert.deepStrictEqual(project.clips, [{ id: 'clip-1', source: 'main', start: 0, end: 4 }]);
+  assert.strictEqual(project.version, 2);
+  assert.deepStrictEqual(project.sources.main, recording.sources.main);
+  assert.deepStrictEqual(project.clips, [{ id: 'c1', source: 'main', start: 0, end: 4 }]);
+  // A new recording gets the new look, not a migrated v1 one.
+  assert.strictEqual(project.style.background.type, 'gradient');
   const saved = JSON.parse(fs.readFileSync(path.join(h.dir, 'project.json'), 'utf8'));
-  assert.deepStrictEqual(saved.sources, project.sources);
+  assert.deepStrictEqual(saved, project);
   h.cleanup();
+});
+
+test('stop() starts the project from the default preset, and keeps zooms and pauses', async () => {
+  const h = harness();
+  await startAt(h, {}, 1000);
+  h.setLocalFromHelper(1002);
+  h.rec.pause();
+  h.setLocalFromHelper(1004);
+  h.rec.resume();
+  h.deliver('capture', { type: 'stopped', duration: 9, now: 1009 }, 1009);
+  const style = { background: { type: 'color', value: '#112233' }, padding: 0.1 };
+  const { project } = await h.rec.stop({ style });
+  assert.strictEqual(project.version, 2);
+  assert.deepStrictEqual(project.style.background, { type: 'color', value: '#112233' });
+  assert.strictEqual(project.style.padding, 0.1);
+  assert.strictEqual(project.style.aspect, 'source', 'the rest keeps its defaults');
+  assert.strictEqual(project.clips.length, 2, 'the pause is cut out');
+  assert.ok(Math.abs(project.clips[0].end - 2) < 0.01 && Math.abs(project.clips[1].start - 4) < 0.01);
+  h.cleanup();
+});
+
+test('a preset that is not a valid style never loses the recording', async () => {
+  const h = harness();
+  await startAt(h, {}, 1000);
+  h.deliver('capture', { type: 'stopped', duration: 3, now: 1003 }, 1003);
+  const { project } = await h.rec.stop({ style: { padding: 'lots' } });
+  assert.strictEqual(project.version, 2);
+  assert.strictEqual(project.style.padding, 0.06);
+  h.cleanup();
+});
+
+test('the microphone chosen in Settings is passed to capture by name, only with the mic on', async () => {
+  const h = harness();
+  await h.rec.start({ source: 'display:1', mic: true, micName: 'USB Mic', dir: h.dir, width: 800, height: 600 });
+  const args = h.argsFor.capture;
+  assert.strictEqual(args[args.indexOf('--mic-name') + 1], 'USB Mic');
+  h.cleanup();
+
+  const off = harness();
+  await off.rec.start({ source: 'display:1', mic: false, micName: 'USB Mic', dir: off.dir, width: 800, height: 600 });
+  assert.ok(!off.argsFor.capture.includes('--mic-name'));
+  off.cleanup();
 });

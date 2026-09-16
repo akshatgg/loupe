@@ -97,7 +97,7 @@ test('stop() records the real source width, height and title on project.source',
   sinks.capture({ type: 'started', clock: 0 });
   sinks.capture({ type: 'stopped', duration: 5 });
 
-  const { project } = await rec.stop();
+  const { recording: project } = await rec.stop();
   assert.strictEqual(project.source.width, 1920);
   assert.strictEqual(project.source.height, 1080);
   assert.strictEqual(project.source.title, 'Built-in Display');
@@ -144,7 +144,7 @@ test('duration from a prior recording does not leak into the next one', async ()
   assert.strictEqual(rec.state().duration, 0, 'duration should reset on start()');
   sinks.capture({ type: 'started', clock: 0 });
 
-  const { project } = await rec.stop();
+  const { recording: project } = await rec.stop();
   assert.strictEqual(project.capture.duration, 0);
 });
 
@@ -373,7 +373,7 @@ test("stop() records the source's origin onto project.source", async () => {
   sinks.capture({ type: 'started', clock: 0 });
   sinks.capture({ type: 'stopped', duration: 1 });
 
-  const { project } = await rec.stop();
+  const { recording: project } = await rec.stop();
   assert.strictEqual(project.source.originX, 400);
   assert.strictEqual(project.source.originY, 200);
 });
@@ -563,7 +563,7 @@ test('stop() keeps an untouched copy of the recorded zooms for the editor to res
   sinks.inputtap({ type: 'zoom', clock: 1, dy: 40, x: 100, y: 100 });
   sinks.capture({ type: 'stopped', duration: 5 });
 
-  const { project } = await rec.stop();
+  const { recording: project } = await rec.stop();
   assert.strictEqual(project.zoomKeyframes.length, 1);
   assert.deepStrictEqual(project.recordedZoomKeyframes, project.zoomKeyframes);
   assert.notStrictEqual(project.recordedZoomKeyframes, project.zoomKeyframes, 'a copy, not the same array');

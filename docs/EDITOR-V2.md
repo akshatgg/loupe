@@ -215,6 +215,15 @@ flushes a pending save first; closing the editor and quitting flush too.
 - `timeline-view.js` + `timeline-math.js` (pure, unit-tested): clips, zoom
   and speed tracks in output time; zooms and speed are drawn once per clip
   they overlap. Drags edit from the project as it was when they began.
+- Add recording (`add-recording.js`, main `ipc/append-recording.js`):
+  `project:recordings`, `project:recordingThumbnail(id)`,
+  `project:appendRecording(id) -> { key, meta, files, zooms, title }`. Main
+  resolves a Library id, adds that recording's main source to the open
+  project's known sources as `src2`, `src3`, ... with an absolute `dir`, and
+  the page applies `appendRecording` (+ its zooms) as one undo step;
+  `player.addSource(key, files)` loads it. `thumbnails.js` draws pictures
+  along each clip (`timeline-math.js` `stripTiles`/`thumbStep`); `first-run.js`
+  shows a three-line card once (localStorage).
 - `panels/index.js`: the sidebar, one module per panel exporting
   `{ id, title, icon, mount(container, editor) -> { update(what) } }`.
   Style, Zoom and Audio are real; `captions.js`, `annotations.js` are
@@ -358,14 +367,22 @@ outside, limits honoured, clipboard, the dialog with the share mock).
 How it is wired: `src/main/ipc/recording.js` (`registerRecordingExtras`,
 called from main.js) owns the countdown (`countdown.js`), the pause shortcut,
 the camera bubble (`ipc/camera.js`, page `src/renderer/camera/`) and the
-picker's `recordingSettings:get/set`; `recording-v2.js` writes the v2
-`project.json` at stop (`clock-sync.js` aligns the webcam, `webm.js` reads
+picker's `recordingSettings:get/set`; at stop `recording-v2.js`
+(`toProjectV2`) writes a version-2 `project.json` -- the recording minus its
+pauses, the zooms made while recording, and the default preset's style (or
+the new-project look) -- so the editor opens it without migrating (`clock-sync.js` aligns the webcam, `webm.js` reads
 its length). The bar's phases are in `bar-state.js`
 (armed → counting → recording ⇄ paused). The choices live in `settings.json`
 (below); `recording-settings.js` translates them to the picker's flat shape
 (`countdown, systemAudio, recordKeys ← showKeystrokes, camera ← recordCamera,
 cameraDeviceId ← camera.id`), so the picker and the Settings window always
-agree. A settings problem never stops a recording: the defaults apply.
+agree. The microphone chosen in Settings (`microphone.label`) reaches
+`capture --mic-name <label>`, which picks the device whose name the label
+contains and falls back to the default (with a warning line) when it is gone;
+the picker offers the same choice when there is more than one microphone.
+After Stop the editor opens on the recording and the Library is told; the
+picker only comes back when nothing was recorded. A settings problem never
+stops a recording: the defaults apply.
 Checks: `npm run test:e2e:recording` (bar UI, camera bubble, the real helpers,
 and the whole app recording with every addition on).
 
@@ -399,6 +416,14 @@ and the whole app recording with every addition on).
   (`ipc/library.js`), Settings (`ipc/settings.js`), presets (`ipc/presets.js`),
   updates (`ipc/updates.js`), About/help (`ipc/about.js`) and menus; those
   windows use `src/preload/shell.js`. Checks: `electron test/e2e/shell.e2e.js`.
+- **Windows and menus** (wired): `window-state.js` remembers where the picker
+  ("New recording"), editor (titled with the video's name), Library
+  ("Recordings") and Settings were left (userData/window-state.json; a place
+  no longer on any display falls back to the default size). Edit > Undo/Redo
+  and Help > Keyboard shortcuts are sent to the editor as `app:command`
+  (`window.loupe.onAppCommand`) when it is in front; elsewhere they undo
+  typing. Checks: `npm run test:e2e:app` (`test/e2e/app-flow.e2e.js`) records
+  through the real picker and bar, then edits, adds a recording and exports.
 - **Crash reporting**: Electron crashReporter and error logs stored locally in
   userData/logs; Help > Report a problem opens a pre-filled GitHub issue with
   version, OS and recent log lines the user can review first. Nothing is

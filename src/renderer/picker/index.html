@@ -1,6 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>Loupe</title>
+<title>New recording</title>
 <link rel="stylesheet" href="picker.css">
 <body>
   <header>
@@ -23,7 +23,10 @@
         <span class="glyph" aria-hidden="true">🎙</span>
         Record microphone
       </label>
-      <input type="checkbox" id="mic" class="switch">
+      <div class="rowcontrols">
+        <select id="micDevice" aria-label="Which microphone" hidden></select>
+        <input type="checkbox" id="mic" class="switch">
+      </div>
     </div>
     <div class="optionrow">
       <label for="systemAudio">

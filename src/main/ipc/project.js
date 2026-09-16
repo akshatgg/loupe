@@ -157,7 +157,20 @@ function createProjectStore({ delayMs = SAVE_DELAY_MS, onError = () => {} } = {}
     return true;
   }
 
-  return { load, save, flush, pending: () => pending !== null };
+  // The recordings the open project may use, as loaded plus any added since.
+  function sources(dir) {
+    return known.get(dir) ?? null;
+  }
+
+  // Another recording joins the project in `dir` as `key` (Add recording,
+  // ipc/append-recording.js). Only main adds one, from a folder it checked,
+  // so the page still can't point the project at other files.
+  function addSource(dir, key, meta) {
+    if (!known.has(dir)) throw new Error('Open the recording before adding another one to it.');
+    known.set(dir, { ...known.get(dir), [key]: meta });
+  }
+
+  return { load, save, flush, sources, addSource, pending: () => pending !== null };
 }
 
 function registerProjectIpc({ ipcMain, store, projectDir }) {
