@@ -1,0 +1,65 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Recordings</title>
+<link rel="stylesheet" href="../shared/shell.css">
+<link rel="stylesheet" href="library.css">
+<body>
+  <header class="top">
+    <div class="heading">
+      <h1>Recordings</h1>
+      <p class="sub" id="summary"></p>
+    </div>
+    <div class="tools" id="tools">
+      <label class="search">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+        <input type="search" id="search" placeholder="Search" aria-label="Search recordings" spellcheck="false">
+      </label>
+      <select id="sort" aria-label="Sort recordings">
+        <option value="newest">Newest first</option>
+        <option value="oldest">Oldest first</option>
+        <option value="name">Name</option>
+        <option value="longest">Longest first</option>
+      </select>
+      <button class="btn primary" id="newRecording" type="button">
+        <span class="recdot" aria-hidden="true"></span>New recording
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+    <ul id="grid" class="grid" role="listbox" aria-label="Recordings"></ul>
+
+    <section id="empty" class="empty" hidden>
+      <img src="../shared/icon.png" alt="" width="88" height="88">
+      <h2>No recordings yet</h2>
+      <p>Record your screen and it will show up here, ready to edit and share.</p>
+      <button class="btn primary" id="emptyNew" type="button">
+        <span class="recdot" aria-hidden="true"></span>New recording
+      </button>
+    </section>
+
+    <section id="noMatch" class="empty small" hidden>
+      <h2 id="noMatchText"></h2>
+      <p>Try a different word, or <button class="link" id="clearSearch" type="button">show all recordings</button>.</p>
+    </section>
+
+    <section id="failed" class="empty small" hidden>
+      <h2>Your recordings couldn't be shown</h2>
+      <p id="failedText"></p>
+      <button class="btn" id="retry" type="button">Try again</button>
+    </section>
+  </main>
+
+  <div id="menu" class="menu" role="menu" hidden>
+    <button type="button" role="menuitem" data-action="open">Open</button>
+    <button type="button" role="menuitem" data-action="rename">Rename</button>
+    <button type="button" role="menuitem" data-action="duplicate">Duplicate</button>
+    <button type="button" role="menuitem" data-action="reveal" id="revealItem">Show in Finder</button>
+    <hr>
+    <button type="button" role="menuitem" data-action="trash" class="danger" id="trashItem">Move to Trash</button>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="library.js"></script>
+</body>

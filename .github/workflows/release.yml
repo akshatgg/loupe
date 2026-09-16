@@ -198,6 +198,11 @@ jobs:
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: npx electron-builder --win --config electron-builder.config.js --publish never
 
+      # The update manifest: the installer's version, sha512 and size. The app
+      # downloads it with the installer and won't run one that doesn't match.
+      - name: Write latest.yml
+        run: node packaging/latest-yml.js --version "${{ needs.prepare.outputs.version }}" --installer dist/Loupe-Setup-x64.exe
+
       - name: Verify the installer
         shell: pwsh
         run: |
@@ -221,7 +226,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: dist/Loupe-Setup-x64.exe
+          path: |
+            dist/Loupe-Setup-x64.exe
+            dist/latest.yml
           if-no-files-found: error
 
   release:
@@ -243,6 +250,7 @@ jobs:
           count=$(find artifacts -type f -name '*.dmg' | wc -l)
           test "$count" -eq 2 || { echo "::error::expected 2 DMGs, found $count"; exit 1; }
           test -f artifacts/windows/Loupe-Setup-x64.exe || { echo "::error::the Windows installer is missing"; exit 1; }
+          test -f artifacts/windows/latest.yml || { echo "::error::latest.yml (the Windows update manifest) is missing"; exit 1; }
 
       # A manual run chose the version, so write it back to the repository and
       # create the tag. Pushes made with GITHUB_TOKEN do not trigger workflows,
@@ -270,6 +278,7 @@ jobs:
           files: |
             artifacts/**/*.dmg
             artifacts/windows/Loupe-Setup-x64.exe
+            artifacts/windows/latest.yml
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |

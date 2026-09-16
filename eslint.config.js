@@ -47,6 +47,14 @@ module.exports = [
       eqeqeq: 'error'
     }
   },
+  // The Library and Settings windows are ES modules (docs/EDITOR-V2.md).
+  {
+    files: ['src/renderer/library/**/*.js', 'src/renderer/settings/**/*.js'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: { Intl: 'readonly', CSS: 'readonly', Option: 'readonly', location: 'readonly' }
+    }
+  },
   // The website (web/, deployed to Vercel) is plain browser scripts too.
   {
     files: ['web/**/*.js'],

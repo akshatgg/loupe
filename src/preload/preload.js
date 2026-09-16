@@ -10,6 +10,20 @@ contextBridge.exposeInMainWorld('loupe', {
   // Picker: saved preferences (currently how zoom is triggered).
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
+  onSettingsChanged: (cb) => ipcRenderer.on('settings:changed', (_e, s) => cb(s)),
+  // App shell (src/main/app-shell.js): the Library and Settings windows.
+  openLibrary: () => ipcRenderer.invoke('shell:openLibrary'),
+  openSettings: (section) => ipcRenderer.invoke('shell:openSettings', section),
+  // Style presets, for the editor's Style panel (src/main/ipc/presets.js has
+  // the full contract). apply(id) resolves to a copy of the preset's style.
+  presets: {
+    list: () => ipcRenderer.invoke('presets:list'),
+    save: (preset) => ipcRenderer.invoke('presets:save', preset),
+    rename: (id, name) => ipcRenderer.invoke('presets:rename', { id, name }),
+    remove: (id) => ipcRenderer.invoke('presets:delete', id),
+    setDefault: (id) => ipcRenderer.invoke('presets:setDefault', id),
+    apply: (id) => ipcRenderer.invoke('presets:apply', id)
+  },
   // Picker: "Continue" arms the control bar -- nothing is recording yet.
   armRecording: (opts) => ipcRenderer.invoke('bar:arm', opts),
   // Bar (armed state): Start actually begins recording, with whatever area

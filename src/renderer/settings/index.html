@@ -1,0 +1,279 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Settings</title>
+<link rel="stylesheet" href="../shared/shell.css">
+<link rel="stylesheet" href="settings.css">
+<body>
+  <nav class="side" aria-label="Settings sections">
+    <a href="#general" data-section="general">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.6"/><path d="M10 2.5v2.2M10 15.3v2.2M2.5 10h2.2M15.3 10h2.2M4.7 4.7l1.6 1.6M13.7 13.7l1.6 1.6M4.7 15.3l1.6-1.6M13.7 6.3l1.6-1.6"/></svg>
+      General</a>
+    <a href="#recording" data-section="recording">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><circle cx="10" cy="10" r="3" class="fill"/></svg>
+      Recording</a>
+    <a href="#export" data-section="export">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9M6.5 8.5 10 12l3.5-3.5M4 14.5v2h12v-2"/></svg>
+      Export</a>
+    <a href="#updates" data-section="updates">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 10a6 6 0 1 1-1.8-4.3M16 3.5v3.2h-3.2"/></svg>
+      Updates<span class="dot" id="updateDot" hidden></span></a>
+    <a href="#privacy" data-section="privacy">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8 4 5.2v4.3c0 3.6 2.6 6.6 6 7.7 3.4-1.1 6-4.1 6-7.7V5.2z"/></svg>
+      Privacy</a>
+    <a href="#about" data-section="about">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 9v5M10 6.2v.1"/></svg>
+      About</a>
+  </nav>
+
+  <main>
+    <!-- General ------------------------------------------------------------>
+    <section id="general" data-section="general" hidden>
+      <h1>General</h1>
+
+      <div class="group">
+        <div class="row stack">
+          <div class="label">
+            <h3>Recordings folder</h3>
+            <p>New recordings are saved here. Recordings already made stay where they are.</p>
+          </div>
+          <div class="folder">
+            <span class="path" id="folderPath"></span>
+            <button class="btn small" id="changeFolder" type="button">Change…</button>
+            <button class="btn small" id="resetFolder" type="button">Reset</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <label class="row">
+          <div class="label">
+            <h3>Countdown before recording</h3>
+            <p>Counts 3, 2, 1 after you press Start, so you're ready when it begins.</p>
+          </div>
+          <input type="checkbox" class="switch" data-setting="countdown">
+        </label>
+        <label class="row">
+          <div class="label">
+            <h3>Open Loupe when you log in</h3>
+            <p>Starts Loupe in the background when you turn on your computer.</p>
+          </div>
+          <input type="checkbox" class="switch" data-setting="openAtLogin">
+        </label>
+      </div>
+    </section>
+
+    <!-- Recording ---------------------------------------------------------->
+    <section id="recording" data-section="recording" hidden>
+      <h1>Recording</h1>
+
+      <div class="group">
+        <div class="row stack">
+          <div class="label">
+            <h3>Zoom shortcuts</h3>
+            <p id="zoomHelp">Hold one and scroll while recording to zoom in.</p>
+          </div>
+          <div class="shortcuts" role="group" aria-label="Zoom shortcuts">
+            <div class="shortcut">
+              <button type="button" class="capture" data-slot="0"></button>
+              <button type="button" class="clear" data-slot="0" aria-label="Remove this shortcut">×</button>
+            </div>
+            <div class="shortcut">
+              <button type="button" class="capture" data-slot="1"></button>
+              <button type="button" class="clear" data-slot="1" aria-label="Remove this shortcut">×</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="row">
+          <div class="label">
+            <h3>Microphone</h3>
+            <p id="micHelp">Used when you turn on the microphone for a recording.</p>
+          </div>
+          <select id="microphone" aria-label="Microphone"></select>
+        </div>
+        <div class="row">
+          <div class="label">
+            <h3>Camera</h3>
+            <p id="cameraHelp">Used when you add yourself to a recording.</p>
+          </div>
+          <select id="camera" aria-label="Camera"></select>
+        </div>
+      </div>
+
+      <div class="group">
+        <label class="row">
+          <div class="label">
+            <h3>Record computer sound</h3>
+            <p>Sound playing on your computer, like a video or a call. You can change this for each recording.</p>
+          </div>
+          <input type="checkbox" class="switch" data-setting="systemAudio">
+        </label>
+        <label class="row">
+          <div class="label">
+            <h3>Show keyboard shortcuts in videos</h3>
+            <p>Shortcuts you press, like <kbd id="copyKey">⌘C</kbd>, appear on screen. Ordinary typing is never recorded.</p>
+          </div>
+          <input type="checkbox" class="switch" data-setting="showKeystrokes">
+        </label>
+      </div>
+
+      <h2>Looks</h2>
+      <div class="group">
+        <div class="row">
+          <div class="label">
+            <h3>Look for new recordings</h3>
+            <p>Background, corners and cursor style that new recordings start with.</p>
+          </div>
+          <select id="defaultPreset" aria-label="Look for new recordings"></select>
+        </div>
+        <ul class="presets" id="presetList"></ul>
+        <p class="note" id="noPresets">Save a look from the Style panel in the editor and it will appear here.</p>
+      </div>
+    </section>
+
+    <!-- Export ------------------------------------------------------------->
+    <section id="export" data-section="export" hidden>
+      <h1>Export</h1>
+      <p class="intro">What the Export button starts with. You can still change these for each video.</p>
+
+      <div class="group">
+        <div class="row">
+          <div class="label">
+            <h3>Format</h3>
+            <p id="formatHelp"></p>
+          </div>
+          <div class="segmented" role="radiogroup" aria-label="Format">
+            <label><input type="radio" name="format" value="mp4"><span>MP4</span></label>
+            <label><input type="radio" name="format" value="webm"><span>WebM</span></label>
+            <label><input type="radio" name="format" value="gif"><span>GIF</span></label>
+          </div>
+        </div>
+        <div class="row">
+          <div class="label">
+            <h3>Size</h3>
+            <p>Taller videos look sharper and make bigger files.</p>
+          </div>
+          <select id="resolution" aria-label="Size">
+            <option value="720p">720p</option>
+            <option value="1080p">1080p (Full HD)</option>
+            <option value="1440p">1440p</option>
+            <option value="4k">4K</option>
+          </select>
+        </div>
+        <div class="row">
+          <div class="label">
+            <h3>Quality</h3>
+            <p id="qualityHelp"></p>
+          </div>
+          <div class="segmented" role="radiogroup" aria-label="Quality">
+            <label><input type="radio" name="quality" value="high"><span>High</span></label>
+            <label><input type="radio" name="quality" value="balanced"><span>Balanced</span></label>
+            <label><input type="radio" name="quality" value="small"><span>Small file</span></label>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Updates ------------------------------------------------------------>
+    <section id="updates" data-section="updates" hidden>
+      <h1>Updates</h1>
+
+      <div class="group">
+        <div class="row update">
+          <img src="../shared/icon.png" alt="" width="44" height="44">
+          <div class="label">
+            <h3 id="updateTitle"></h3>
+            <p id="updateText"></p>
+          </div>
+          <button class="btn" id="checkNow" type="button">Check now</button>
+        </div>
+        <div class="row stack" id="updateActions" hidden>
+          <div class="brew" id="brewBox" hidden>
+            <p>Loupe was installed with Homebrew. To update, run this in Terminal:</p>
+            <div class="command">
+              <code id="brewCommand">brew upgrade --cask loupe</code>
+              <button class="btn small" id="copyBrew" type="button">Copy</button>
+            </div>
+          </div>
+          <div class="actions">
+            <button class="btn primary" id="installUpdate" type="button" hidden>Restart to update</button>
+            <button class="btn primary" id="downloadUpdate" type="button" hidden>Download</button>
+            <button class="btn" id="releaseNotes" type="button">What's new</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <label class="row">
+          <div class="label">
+            <h3>Check for updates automatically</h3>
+            <p>Once a day, Loupe asks GitHub for the newest version. Nothing about you or your recordings is sent.</p>
+          </div>
+          <input type="checkbox" class="switch" data-setting="checkForUpdates">
+        </label>
+      </div>
+    </section>
+
+    <!-- Privacy ------------------------------------------------------------>
+    <section id="privacy" data-section="privacy" hidden>
+      <h1>Privacy</h1>
+      <p class="intro">Your recordings stay on this computer. Nothing is uploaded unless you choose to share a video.</p>
+
+      <div class="group">
+        <label class="row">
+          <div class="label">
+            <h3>Save crash reports on this computer</h3>
+            <p>If something goes wrong, the details are kept in a log here so you can send them to us. Nothing is sent automatically. Changes apply the next time Loupe opens.</p>
+          </div>
+          <input type="checkbox" class="switch" data-setting="saveCrashReports">
+        </label>
+      </div>
+
+      <div class="group">
+        <div class="row">
+          <div class="label">
+            <h3>Report a problem</h3>
+            <p>Opens a form on GitHub with your Loupe version, system and recent log lines filled in. You can read and change all of it before sending.</p>
+          </div>
+          <button class="btn" id="reportProblem" type="button">Report a problem…</button>
+        </div>
+        <div class="row">
+          <div class="label">
+            <h3>Logs</h3>
+            <p>The files Loupe writes when something goes wrong.</p>
+          </div>
+          <button class="btn" id="showLogs" type="button">Show logs</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- About -------------------------------------------------------------->
+    <section id="about" data-section="about" hidden>
+      <div class="hero">
+        <img src="../shared/icon.png" alt="" width="96" height="96">
+        <div>
+          <h1 class="name">Loupe</h1>
+          <p class="version" id="aboutVersion"></p>
+          <p class="tagline">Screen recordings that zoom in on what matters.</p>
+          <div class="links">
+            <button class="btn small" type="button" data-link="website">Website</button>
+            <button class="btn small" type="button" data-link="github">GitHub</button>
+            <button class="btn small" type="button" data-link="releases">Release notes</button>
+          </div>
+        </div>
+      </div>
+
+      <h2>Open-source licenses</h2>
+      <p class="intro">Loupe is free, open-source software, built with these projects.</p>
+      <div class="group licenses" id="licenses"></div>
+      <p class="fineprint" id="aboutBuild"></p>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="../shared/zoom-shortcuts.js"></script>
+  <script type="module" src="settings.js"></script>
+</body>

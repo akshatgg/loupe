@@ -3,7 +3,6 @@ const electron = require('electron');
 const { app, BrowserWindow, ipcMain, systemPreferences, shell, dialog, globalShortcut } = electron;
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
-const os = require('node:os');
 const fs = require('node:fs');
 const { execFile } = require('node:child_process');
 const { performance } = require('node:perf_hooks');
@@ -18,10 +17,11 @@ const { loadProject, saveProject, readCursorTrack, writeCameraTrack } = require(
 const { validateRegion, clampRegionToBounds } = require('./region');
 const { transition } = require('./bar-state');
 const { createLiveCamera, stepLiveCamera } = require('./live-camera');
-const { loadSettings, saveSettings, applySettingsPatch, inputTapArgs } = require('./settings');
+const { inputTapArgs } = require('./settings');
+const { createAppShell } = require('./app-shell');
 const { validateSpeedPaint, paintSpeed, retimePlan, outputDuration } = require('./speed');
 const {
-  helperCommand, recordingsRoot, coordinateMapper, attachThumbnails
+  helperCommand, coordinateMapper, attachThumbnails
 } = require('./platform');
 
 const IS_WINDOWS = process.platform === 'win32';
@@ -93,6 +93,15 @@ function createPickerWindow() {
   pickerWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   pickerWindow.loadFile(path.join(__dirname, '..', 'renderer', 'picker', 'index.html'));
   return pickerWindow;
+}
+
+// "New recording" from the menu or the Library. The picker may have been
+// closed since launch, so it is made again rather than assumed; while a bar is
+// armed or recording, that session is the recording, so nothing opens.
+function showPicker() {
+  if (barWindow) return;
+  if (!pickerWindow || pickerWindow.isDestroyed()) createPickerWindow();
+  else { pickerWindow.show(); pickerWindow.focus(); }
 }
 
 // ---------------------------------------------------------------------------
@@ -402,10 +411,13 @@ async function stopRecording() {
   // and the failure is re-thrown afterward rather than swallowed.
   try {
     const result = await recorder.stop();
-    if (result?.dir) openEditorWindow(result.dir);
+    if (result?.dir) {
+      openEditorWindow(result.dir);
+      appShell.recordingsChanged();
+    }
     return result;
   } finally {
-    pickerWindow?.show();
+    showPicker();
   }
 }
 
@@ -476,23 +488,13 @@ ipcMain.handle('permissions:status', () => ({
 
 ipcMain.handle('permissions:open', (_e, pane) => permissions.openPane(pane));
 
-// User settings (settings.js), loaded lazily on first use and kept in memory.
-let settings = null;
-const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
-
-function currentSettings() {
-  if (!settings) settings = loadSettings(settingsFile());
-  return settings;
-}
-
-ipcMain.handle('settings:get', () => currentSettings());
-
-// The picker renderer is no more a trust boundary here than anywhere else:
-// applySettingsPatch refuses unknown keys and invalid values outright.
-ipcMain.handle('settings:set', (_e, patch) => {
-  settings = saveSettings(settingsFile(), applySettingsPatch(currentSettings(), patch));
-  return settings;
+// Settings (settings:get/set included), the Library and Settings windows,
+// presets, menus, updates and crash reports: see app-shell.js.
+const appShell = createAppShell({
+  electron, openEditorWindow, showPicker, getEditorWindow: () => editorWindow
 });
+appShell.start();
+const currentSettings = () => appShell.settings.get();
 
 // The main process is the actual trust boundary here, not the picker
 // renderer: a compromised or hostile renderer can invoke this handler with
@@ -607,7 +609,7 @@ ipcMain.handle('bar:start', async () => {
       if (!granted) recordMic = false;
     }
 
-    const dir = path.join(recordingsRoot((name) => app.getPath(name), os.homedir()), String(Date.now()));
+    const dir = path.join(appShell.recordingsFolder(), String(Date.now()));
     fs.mkdirSync(dir, { recursive: true });
 
     // Every Loupe-owned window that could be on screen right now -- the bar
@@ -688,6 +690,7 @@ let stopShortcutRegistered = false;
 app.whenReady().then(() => {
   // Groups Loupe's windows under one taskbar button with the right name.
   if (IS_WINDOWS) app.setAppUserModelId('tech.markai.loupe');
+  appShell.ready();
   createPickerWindow();
   stopShortcutRegistered = globalShortcut.register('Control+Shift+S', () => {
     // Unlike ipcMain.handle('record:stop', stopRecording), Electron has no

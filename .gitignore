@@ -10,3 +10,4 @@ dist/
 .build-native/
 .vercel
 .env*
+test/e2e/out/
