@@ -15,6 +15,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { writeSubtitlesBeside } = require('./captions');
 
 const RESOLUTIONS = ['720p', '1080p', '1440p', '4k'];
 const CODECS = ['h264', 'hevc'];
@@ -45,7 +46,18 @@ function validateExportOptions(raw) {
   if (opts.fps !== undefined && !FRAME_RATES.includes(opts.fps)) {
     throw new Error(`Unsupported frame rate: ${JSON.stringify(opts.fps)}`);
   }
-  return { resolution, codec: opts.codec, quality: opts.quality, fps: opts.fps };
+  // Captions: burn them into the picture (undefined = as the project shows
+  // them), and/or save a .srt beside the video.
+  for (const key of ['burnCaptions', 'subtitles']) {
+    if (opts[key] !== undefined && typeof opts[key] !== 'boolean') {
+      throw new Error(`Export option ${key} must be true or false.`);
+    }
+  }
+  return {
+    resolution, codec: opts.codec, quality: opts.quality, fps: opts.fps,
+    ...(opts.burnCaptions !== undefined ? { burnCaptions: opts.burnCaptions } : {}),
+    ...(opts.subtitles ? { subtitles: true } : {})
+  };
 }
 
 // src/core is ES modules; require() of them works in this Node, but only
@@ -89,6 +101,7 @@ function buildJob(dir, rawOptions, { out } = {}) {
     if (opts[key] !== undefined) exportPatch[key] = opts[key];
   }
   project = P.setExport(project, exportPatch);
+  if (opts.burnCaptions !== undefined) project = P.setCaptions(project, { show: opts.burnCaptions });
 
   const sources = {};
   for (const key of new Set(project.clips.map((c) => c.source))) {
@@ -115,7 +128,7 @@ function buildJob(dir, rawOptions, { out } = {}) {
     project, sources, background,
     resolution: ex.resolution, codec: ex.codec, quality: ex.quality, fps: ex.fps
   };
-  return { job, project, out: out ?? path.join(dir, `export-${width}x${height}.mp4`) };
+  return { job, project, subtitles: opts.subtitles === true, out: out ?? path.join(dir, `export-${width}x${height}.mp4`) };
 }
 
 function cancelledError() {
@@ -237,12 +250,20 @@ function registerExportIpc({ ipcMain, runner, projectDir, beforeStart = () => {}
     const dir = projectDir();
     if (!dir) throw new Error('There is no recording open to export.');
     await beforeStart();
-    const { job, out } = buildJob(dir, rawOptions);
+    const { job, out, project, subtitles } = buildJob(dir, rawOptions);
     const sender = event.sender;
     const result = await runner.start(job, out, {
       onProgress: (p) => { if (!sender.isDestroyed?.()) sender.send('export:progress', p); }
     });
     lastFile = result.file;
+    if (subtitles) {
+      // The video is saved either way; a subtitle problem is reported beside it.
+      try {
+        result.subtitles = await writeSubtitlesBeside(result.file, project);
+      } catch (err) {
+        result.subtitlesError = `Couldn't save the subtitles (${err.message}).`;
+      }
+    }
     return result;
   });
   ipcMain.handle('export:cancel', () => runner.cancel());

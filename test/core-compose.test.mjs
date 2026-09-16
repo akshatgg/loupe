@@ -310,3 +310,23 @@ test('captions are drawn over the whole frame at their output time, only when sh
   assert.ok(drawn.args[2] > 540, 'at the bottom by default');
   assert.deepStrictEqual(texts(P.setCaptions(p, { show: false }), 2.5), []);
 });
+
+test('captions have a dark box by default, and outlined words without it', () => {
+  let p = P.createProject({ main: MAIN });
+  p = P.setCaptions(p, { show: true, segments: [{ id: 'c1', source: 'main', start: 1, end: 3, text: 'Hi' }] });
+  const size = { width: 1920, height: 1080 };
+  const boxed = render(p, { outT: 2, size }).ctx;
+  assert.ok(boxed.named('fill').some((c) => c.state.fillStyle === 'rgba(0, 0, 0, 0.72)'), 'a box');
+  assert.strictEqual(boxed.named('strokeText').length, 0);
+  const open = render(P.setCaptions(p, { style: { box: false } }), { outT: 2, size }).ctx;
+  assert.ok(!open.named('fill').some((c) => c.state.fillStyle === 'rgba(0, 0, 0, 0.72)'), 'no box');
+  assert.deepStrictEqual(open.named('strokeText').map((c) => c.args[0]), ['Hi']);
+  assert.deepStrictEqual(open.named('fillText').map((c) => c.args[0]), ['Hi']);
+});
+
+test('an older project without the caption box setting gets it on load', () => {
+  const p = P.createProject({ main: MAIN });
+  const old = { ...p, captions: { ...p.captions, style: { size: 1.5, position: 'top' } } };
+  assert.deepStrictEqual(P.validateProject(old).captions.style, { size: 1.5, position: 'top', box: true });
+  assert.throws(() => P.setCaptions(p, { style: { box: 'yes' } }), /box/i);
+});

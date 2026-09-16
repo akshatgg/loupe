@@ -11,7 +11,8 @@
 // segmentsAtTime  the cues showing at this moment ([{ text }]), normally
 //                 segmentsAt(captionsToOutput(segments, tl), outT); usually
 //                 zero or one, several are stacked in order.
-// style           project.captions.style: { size: 0.5..2, position: "bottom"|"top" }
+// style           project.captions.style: { size: 0.5..2, position: "bottom"|"top",
+//                 box: true (dark box behind the words) | false (outlined words) }
 //
 // Returns the drawn box { x, y, w, h } (for hit-testing in the editor), or
 // null when there was nothing to draw. ctx state is restored afterwards.
@@ -91,15 +92,27 @@ export function drawCaptions(ctx, area, segmentsAtTime, style = {}) {
   try {
     const l = layoutCaptions(ctx, area, segmentsAtTime, style);
     if (!l) return null;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
-    roundRect(ctx, l.x, l.y, l.w, l.h, Math.round(l.px * 0.28));
-    ctx.fill();
-    ctx.fillStyle = '#ffffff';
+    const box = style.box !== false;
+    if (box) {
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+      roundRect(ctx, l.x, l.y, l.w, l.h, Math.round(l.px * 0.28));
+      ctx.fill();
+    }
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const cx = l.x + l.w / 2;
     l.lines.forEach((line, i) => {
-      ctx.fillText(line, cx, l.y + l.padY + l.lineH * (i + 0.5));
+      const y = l.y + l.padY + l.lineH * (i + 0.5);
+      if (!box) {
+        // Without the box the words must stand out on a light picture too:
+        // a dark outline all round, then the fill on top.
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = Math.max(2, l.px * 0.16);
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)';
+        ctx.strokeText(line, cx, y);
+      }
+      ctx.fillStyle = '#ffffff';
+      ctx.fillText(line, cx, y);
     });
     return { x: l.x, y: l.y, w: l.w, h: l.h };
   } finally {
