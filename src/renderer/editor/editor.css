@@ -438,7 +438,7 @@ kbd {
 .vo-overlay { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
 .vo-count {
   width: 132px; height: 132px; border-radius: 50%; display: grid; place-items: center;
-  background: rgba(18,18,20,.82); border: 2px solid var(--accent); color: var(--ink);
+  background: #18181b; border: 2px solid var(--accent); color: var(--ink);
   font: 700 64px/1 var(--font); font-variant-numeric: tabular-nums; box-shadow: 0 20px 60px rgba(0,0,0,.5);
 }
 .vo-count.pop { animation: vo-pop .9s ease-out; }

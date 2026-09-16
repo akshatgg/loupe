@@ -98,7 +98,8 @@ item is attached to.
       cursor: "cursor.bin",
       keys: "keys.json" | null,  // [{t, label: "⌘K"}] shortcut presses
       clicks: [{t,x,y,button}],
-      pauses: [{start, end}]     // paused while recording (also removed from clips)
+      pauses: [{start, end}]     // paused while recording (also removed from clips; on
+                                 // load too, if the clips are still one untouched clip)
     },
     // appended recordings: "src2": { dir: "/abs/path/other", ... }
   },
@@ -204,15 +205,14 @@ flushes a pending save first; closing the editor and quitting flush too.
 - `player.js`: the output time is the clock; one muted `<video>` per source
   kept at the right moment and `playbackRate` (nudged when it drifts, seeked
   on a jump or when far off), each frame drawn with `drawFrame` on a HiDPI
-  canvas. `audio-preview.js` plays mic and system audio on the same clock
-  (`createAudioPreview({ sources }) -> { sync, stop }`; the audio work
-  replaces it behind that interface).
+  canvas. `audio-preview.js` plays the project's sound on the same clock
+  (see "Sound in the editor" below).
 - `timeline-view.js` + `timeline-math.js` (pure, unit-tested): clips, zoom
   and speed tracks in output time; zooms and speed are drawn once per clip
   they overlap. Drags edit from the project as it was when they began.
 - `panels/index.js`: the sidebar, one module per panel exporting
   `{ id, title, icon, mount(container, editor) -> { update(what) } }`.
-  Style and Zoom are real; `audio.js`, `captions.js`, `annotations.js` are
+  Style, Zoom and Audio are real; `captions.js`, `annotations.js` are
   placeholders their features replace.
 - `shortcuts.js` (pure): Space, ←/→ (⇧ 1 s), Home/End, S, Z, Delete, ⌘/Ctrl+Z,
   ⇧⌘Z / Ctrl+Y, ⌘/Ctrl+E, ⌘/Ctrl+= / − / 0, ?; `export-dialog.js`.
@@ -249,10 +249,51 @@ frame at or before t, VFR-safe, resets the decoder on jumps), `audio.js`,
 mixer the audio features also use: `mixTracks(tracks, { duration, sampleRate })`
 with per-track gain curves). Windows' `system.wav` is read by
 `core/audio/wav.js` (WebCodecs has no WAV decoder); everything else goes
-through mp4box + `AudioDecoder`. Clean-up, levelling, music and voiceover
-exist as core modules (`denoise.js`, `level.js`, `music.js`, `voiceover.js`,
-`duck.js`) and IPC, but the exporter does not apply them yet
-(`exportMix(..., { extraTracks })` is where they plug in).
+through mp4box + `AudioDecoder`. The whole sound is made by
+`core/audio/project-audio.js` (`renderProjectAudio(project, tl, inputs,
+{ cache, quick, onProgress }) -> { mix, pending, cleanUp }`): clean-up
+(RNNoise wasm, so the exporter and editor CSPs allow `'wasm-unsafe-eval'`) and
+levelling of each whole mic track and voiceover take (the mic's two switches
+apply to takes too), mic + system along the timeline, takes placed at their
+source moment, music fitted and ducked under mic + takes, then `mixTracks`.
+`job.audioFiles = { music, voiceover: { [id]: url } }` comes from
+`ipc/project-files.js audioFileUrls` (only files inside the project's `music/`
+and `voiceover/` folders); the page decodes them with `decodeAudioFile`
+(`OfflineAudioContext.decodeAudioData`). Missing music fails the export with a
+plain message; a missing take is left out. The summary reports `cleanUp`
+(`'rnnoise'`, `'spectral'` or `'none'`). Sound progress: `{ phase: 'sound',
+fraction }`. The mix is format-agnostic channels, so an Opus/WebM encoder
+takes the same result.
+
+### Sound in the editor
+
+- `panels/audio.js`: Microphone (volume 0-200%, mute, "Clean up background
+  noise", "Even out volume"), Computer sound (volume, mute), Music (Add music
+  via `loupe.chooseMusic`, or drop a file anywhere: `installMusicDrop(editor)`
+  from editor.js -> `loupe.importMusicFile`; volume, "Lower music when I
+  talk", replace, remove), Voiceover (Record voiceover, takes listed by output
+  time: jump, move to playhead, delete). Every change is a `setAudio` edit.
+- `voiceover-session.js`: 3-2-1 count-in on the stage, microphone opens, the
+  take is anchored at the playhead, the video plays with the preview muted;
+  Stop / Space / Esc / end of video saves it (`voiceover:save`) and adds it
+  as one undo step. Undoing leaves the file in `voiceover/`.
+- `audio-preview.js` + module worker `audio-worker.js`: the worker decodes
+  mic/system with the exporter's own `demux.js`/`audio.js`/`wav.js`, the page
+  decodes music and takes (`decodeAudioData`), and the worker runs
+  `renderProjectAudio` (first `quick` with whatever clean-up is cached, then
+  final). The page plays the mix as an `AudioBuffer` from the playhead,
+  restarting on a seek, a new mix or >80 ms drift (`audio-math.js`, unit
+  tested). Only clips/speed/audio/sources changes re-mix. A "Preparing audio…"
+  note shows on the stage meanwhile; the old mix keeps playing.
+  `project:load` returns `folder` (file:// URL) so the page can find music
+  and takes.
+- `timeline-audio.js`: the "Sound" strip under the clips (recording waveform
+  per clip in output time, voiceover takes as draggable blue blocks, a purple
+  line when there is music).
+- Checks: `test/e2e/run.js` case "the whole sound" (levels, ducking, sync,
+  duration of a real export) and `npm run test:e2e:audio` (the panel, Add
+  music, recording a take with Chromium's fake microphone, dragging it, and
+  preview mix == exported sound per tone).
 
 Two things WebCodecs does that the pipeline corrects (both covered by e2e):
 Chromium's `AudioDecoder` starts its output timestamps at 0 whatever the first
