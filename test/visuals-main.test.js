@@ -142,7 +142,8 @@ test('a v1 project with a recorder-written style opens with that style', () => {
   assert.match(job.background, /aurora\.png$/);
 });
 
-test('the recorder writes the default preset style it is given, and nothing without one', async () => {
+test('the recorder starts the project from the default preset style it is given, or the defaults', async () => {
+  const { defaultStyle } = require('../src/core/project.js');
   const { createRecorder } = require('../src/main/recorder');
   for (const style of [{ padding: 0.12, background: { type: 'color', value: '#101010' } }, null]) {
     let local = 0;
@@ -162,6 +163,15 @@ test('the recorder writes the default preset style it is given, and nothing with
     sinks.capture({ type: 'stopped', duration: 3, now: 1003 });
     await rec.stop({ style });
     const saved = JSON.parse(fs.readFileSync(path.join(dir, 'project.json'), 'utf8'));
-    assert.deepStrictEqual(saved.style, style ?? undefined);
+    // Stop writes a version-2 project (recording-v2.js): the preset fills in
+    // over the full default style.
+    assert.strictEqual(saved.version, 2);
+    if (style) {
+      assert.strictEqual(saved.style.padding, 0.12);
+      assert.deepStrictEqual(saved.style.background, style.background);
+      assert.strictEqual(saved.style.radius, defaultStyle().radius);
+    } else {
+      assert.deepStrictEqual(saved.style, defaultStyle());
+    }
   }
 });
