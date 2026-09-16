@@ -15,9 +15,13 @@ function waitForDequeue(codec) {
   });
 }
 
-// -> { channels, sampleRate }, sample 0 at recording time 0. Each decoded
-// block is placed by its own timestamp, so the edit list's delay/skip (AAC
-// priming) and any gap in the file land where they belong in time.
+// -> { channels, sampleRate }, sample 0 at recording time 0. The first
+// decoded sample belongs at the first packet's time, which the demuxer has
+// already moved by the edit list (so the encoder's priming lands before 0
+// and is cut off); later blocks follow by their offset from the first.
+// Chromium's decoder doesn't carry the packet timestamps through -- its
+// output starts at 0 even when the first packet is at -51ms -- so only the
+// differences between output timestamps are used.
 export async function decodeAudioTrack(demuxed, label) {
   const track = demuxed.audio;
   if (!track) return null;
@@ -65,10 +69,12 @@ export async function decodeAudioTrack(demuxed, label) {
   if (decoder.state !== 'closed') decoder.close();
   if (error) throw new Error(`Couldn't decode the sound in ${label} (${error.message}).`);
 
-  const end = blocks.reduce((m, b) => Math.max(m, Math.round(b.at * rate) + b.planes[0].length), 0);
+  const origin = track.samples.length ? track.samples[0].time - (blocks[0]?.at ?? 0) : 0;
+  const startOf = (block) => Math.round((block.at + origin) * rate);
+  const end = blocks.reduce((m, b) => Math.max(m, startOf(b) + b.planes[0].length), 0);
   const channels = Array.from({ length: channelCount }, () => new Float32Array(Math.max(0, end)));
   for (const b of blocks) {
-    const start = Math.round(b.at * rate);
+    const start = startOf(b);
     b.planes.forEach((plane, c) => {
       if (c >= channelCount) return;
       const from = Math.max(0, -start);

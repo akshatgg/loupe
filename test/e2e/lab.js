@@ -74,6 +74,47 @@ async function encodeVideo(muxer, { width, height, duration, fps, codec, palette
   return k;
 }
 
+// Recorders (AVFoundation, Media Foundation) keep the AAC encoder's priming
+// in the file and add an edit list telling players to skip it. mp4-muxer
+// writes no edit list, so one is added to the finished file: the moov box
+// comes last (fastStart: false), so growing it moves nothing else.
+function addAudioEditList(buffer, mediaTime) {
+  const bytes = new Uint8Array(buffer);
+  const view = new DataView(buffer);
+  const type = (at) => String.fromCharCode(...bytes.subarray(at + 4, at + 8));
+  const children = (start, end) => {
+    const out = [];
+    for (let at = start; at + 8 <= end; at += view.getUint32(at)) out.push(at);
+    return out;
+  };
+  const moov = children(0, bytes.length).find((at) => type(at) === 'moov');
+  const moovEnd = moov + view.getUint32(moov);
+  if (moovEnd !== bytes.length) throw new Error('moov must be last');
+  const hasSound = (trak) => {
+    const mdia = children(trak + 8, trak + view.getUint32(trak)).find((at) => type(at) === 'mdia');
+    const hdlr = children(mdia + 8, mdia + view.getUint32(mdia)).find((at) => type(at) === 'hdlr');
+    return String.fromCharCode(...bytes.subarray(hdlr + 16, hdlr + 20)) === 'soun';
+  };
+  const trak = children(moov + 8, moovEnd).find((at) => type(at) === 'trak' && hasSound(at));
+  const tkhd = trak + 8;
+  const version = bytes[tkhd + 8];
+  const duration = version === 1 ? Number(view.getBigUint64(tkhd + 36)) : view.getUint32(tkhd + 28);
+  const edts = new DataView(new ArrayBuffer(36));
+  edts.setUint32(0, 36); edts.setUint32(4, 0x65647473); // 'edts'
+  edts.setUint32(8, 28); edts.setUint32(12, 0x656c7374); // 'elst'
+  edts.setUint32(16, 0); edts.setUint32(20, 1);
+  edts.setUint32(24, duration); edts.setInt32(28, mediaTime); edts.setUint32(32, 0x00010000);
+  const at = tkhd + view.getUint32(tkhd);
+  const out = new Uint8Array(bytes.length + 36);
+  out.set(bytes.subarray(0, at), 0);
+  out.set(new Uint8Array(edts.buffer), at);
+  out.set(bytes.subarray(at), at + 36);
+  const outView = new DataView(out.buffer);
+  outView.setUint32(moov, outView.getUint32(moov) + 36);
+  outView.setUint32(trak, outView.getUint32(trak) + 36);
+  return out;
+}
+
 async function encodeSound(muxer, samples, rate) {
   let error = null;
   const encoder = new AudioEncoder({
@@ -81,14 +122,11 @@ async function encodeSound(muxer, samples, rate) {
     error: (e) => { error = e; }
   });
   encoder.configure({ codec: 'mp4a.40.2', sampleRate: rate, numberOfChannels: 1, bitrate: 128000 });
-  // Like the exporter: skip the encoder's priming so the tone is where it
-  // was generated, as in a real recording (whose file has an edit list).
-  const skip = await encoderDelay();
-  for (let at = skip; at < samples.length; at += 1024) {
+  for (let at = 0; at < samples.length; at += 1024) {
     const n = Math.min(1024, samples.length - at);
     const data = new AudioData({
       format: 'f32-planar', sampleRate: rate, numberOfFrames: n, numberOfChannels: 1,
-      timestamp: Math.round(((at - skip) / rate) * 1e6), data: samples.slice(at, at + n)
+      timestamp: Math.round((at / rate) * 1e6), data: samples.slice(at, at + n)
     });
     encoder.encode(data);
     data.close();
@@ -107,14 +145,17 @@ async function makeRecording({
     target,
     video: { codec, width, height, frameRate: fps },
     audio: sound ? { codec: 'aac', sampleRate: 48000, numberOfChannels: 1 } : undefined,
-    fastStart: 'in-memory',
+    fastStart: false,
     firstTimestampBehavior: 'offset'
   });
   const frames = await encodeVideo(muxer, { width, height, duration, fps, codec, palette: PALETTES[palette], still });
   if (sound) await encodeSound(muxer, sine({ duration, rate: 48000, ...sound }), 48000);
   muxer.finalize();
-  await window.labHost.save(name, new Uint8Array(target.buffer));
-  return { frames, bytes: target.buffer.byteLength };
+  // The sound track's priming is skipped by an edit list, as in a real
+  // recording, so the tone is heard exactly when it was generated.
+  const file = sound ? addAudioEditList(target.buffer, await encoderDelay()) : new Uint8Array(target.buffer);
+  await window.labHost.save(name, file);
+  return { frames, bytes: file.byteLength };
 }
 
 function average(data, width, height, x, y, radius = 3) {
