@@ -8,7 +8,7 @@
 //
 // job = {
 //   project,                       // v2 project (validated again here)
-//   sources: { [key]: { video, cursor, systemAudio } },   // file:// URLs or null
+//   sources: { [key]: { video, cursor, systemAudio, webcam, keys } },  // file:// URLs or null
 //   background,                    // file:// URL of a background image, or null
 //   resolution, codec, quality, fps
 // }
@@ -22,6 +22,7 @@ import { isWav, parseWav } from '../../core/audio/wav.js';
 import { Muxer, StreamTarget } from '../../vendor/mp4-muxer/mp4-muxer.mjs';
 import { readFile, demux } from './demux.js';
 import { openVideoSource } from './video-source.js';
+import { openVisuals } from './visuals.js';
 import { decodeAudioTrack, encodeAudio } from './audio.js';
 import { chooseVideoConfig, AUDIO_RATE, AUDIO_CHANNELS, KEYFRAME_SECONDS } from './encode.js';
 
@@ -62,7 +63,7 @@ async function openSources(job, project, keys, report) {
       // cursor drawn in.
       cursor = parseCursorTrack(await readFile(files.cursor, `the cursor track of ${label}`).catch(() => new ArrayBuffer(0)));
     }
-    opened[key] = { video, cursor };
+    opened[key] = { video, cursor, demuxed };
     if (project.sources[key].mic && demuxed.audio && !project.audio.mic.muted) {
       decoded.mic[key] = await decodeAudioTrack(demuxed, label);
     }
@@ -91,7 +92,11 @@ export async function exportProject(job, { write, progress = () => {}, signal } 
   const { opened, decoded } = await openSources(job, project, keys, progress);
   checkAbort(signal);
 
+  const visuals = await openVisuals(job, project, keys, {
+    openRecording: (k) => openVideoSource(opened[k].demuxed, labelOf(k, keys.length))
+  });
   const assets = {
+    ...visuals.assets,
     cursors: Object.fromEntries(keys.map((k) => [k, opened[k].cursor])),
     background: project.style.background.type === 'image' && job.background
       ? await loadImage(job.background).catch(() => null) : null
@@ -162,9 +167,10 @@ export async function exportProject(job, { write, progress = () => {}, signal } 
       checkAbort(signal);
       if (failure) throw failed(failure);
       const { source, t } = plan[k];
+      const extra = await visuals.extraFrames(k / fps, tl, plan[k]);
       const picture = await opened[source].video.frameAt(t);
       drawFrame(ctx, {
-        project, tl, outT: k / fps, frames: { [source]: picture }, size: { width, height }, assets
+        project, tl, outT: k / fps, frames: { ...extra, [source]: picture }, size: { width, height }, assets
       });
       const frame = new VideoFrame(canvas, { timestamp: Math.round(k * frameUs), duration: Math.round(frameUs) });
       encoder.encode(frame, { keyFrame: k % keyEvery === 0 });
@@ -188,6 +194,7 @@ export async function exportProject(job, { write, progress = () => {}, signal } 
   } finally {
     if (encoder.state !== 'closed') encoder.close();
     for (const k of keys) opened[k].video.close();
+    visuals.close();
   }
 
   const seconds = (performance.now() - started) / 1000;

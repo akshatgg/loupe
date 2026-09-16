@@ -20,6 +20,8 @@ const { registerFileActionsIpc } = require('./ipc/fileActions');
 const { registerVoiceoverIpc } = require('./ipc/voiceover');
 const { registerMusicIpc } = require('./ipc/music');
 const { registerCaptionsIpc } = require('./ipc/captions');
+const { registerBackgroundIpc } = require('./ipc/background');
+const { defaultPresetStyle } = require('./presets');
 const {
   helperCommand, coordinateMapper, attachThumbnails
 } = require('./platform');
@@ -452,7 +454,14 @@ async function stopRecording() {
   // back regardless of how stop() ends, so the recovery runs in `finally`
   // and the failure is re-thrown afterward rather than swallowed.
   try {
-    const result = await recorder.stop({ webcam });
+    // A new recording starts with the default style preset, if one is chosen.
+    let style = null;
+    try {
+      style = defaultPresetStyle(appShell.settings.get());
+    } catch (err) {
+      console.error('Loupe: could not read the default style preset:', err);
+    }
+    const result = await recorder.stop({ webcam, style });
     if (result?.dir) {
       openEditorWindow(result.dir);
       appShell.recordingsChanged();
@@ -761,6 +770,8 @@ registerVoiceoverIpc({ ipcMain, getProjectDir: () => editorDir });
 registerMusicIpc({ ipcMain, dialog, BrowserWindow, getProjectDir: () => editorDir });
 // Captions: speech model downloads and saving .srt/.vtt (see ipc/captions.js).
 registerCaptionsIpc({ ipcMain, app, dialog, BrowserWindow, getDefaultDir: () => editorDir });
+// Background pictures: bundled wallpapers and pictures copied into the project.
+registerBackgroundIpc({ ipcMain, dialog, BrowserWindow, getProjectDir: () => editorDir });
 
 // Whether the Control+Shift+S stop-recording shortcut is actually held by
 // us. globalShortcut.register() returns false (not a rejection/throw) when

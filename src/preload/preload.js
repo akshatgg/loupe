@@ -84,6 +84,12 @@ contextBridge.exposeInMainWorld('loupe', {
   // A File dropped on the editor; only its path crosses to main, which copies it.
   importMusicFile: (file) =>
     ipcRenderer.invoke('music:import', webUtils.getPathForFile(file)),
+  // Style: a background picture copied into the project (src/main/ipc/background.js),
+  // and where any background value's picture is.
+  background: {
+    choose: () => ipcRenderer.invoke('background:choose'),
+    url: (value) => ipcRenderer.invoke('background:url', value)
+  },
 
   // ---- recording additions (src/main/ipc/recording.js) ----------------------
   // Picker: countdown, computer sound, keyboard shortcuts, camera and which one.

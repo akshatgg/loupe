@@ -332,7 +332,7 @@ function createRecorder({
   // the helpers stop (ipc/camera.js finish()). startLocal is when webcam.webm's first frame was taken, on the
   // `now` clock (see ipc/camera.js), so its offset into the recording is
   // that moment in source time -- negative when the camera started first.
-  async function stop({ webcam = null } = {}) {
+  async function stop({ webcam = null, style = null } = {}) {
     // stop() can be reached from a stop button or a global hotkey, either of
     // which may fire with no recording ever started (source is still null).
     // Rather than throwing out of an async function, resolve to null: a
@@ -399,6 +399,8 @@ function createRecorder({
       })
     };
     project.clips = clipsFromPauses(duration, sourcePauses);
+    // The default style preset's style, which the v2 migration starts from.
+    if (style && typeof style === 'object') project.style = style;
 
     saveProject(dir, project);
     writeCursorTrack(dir, cursorTrack);
