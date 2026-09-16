@@ -652,6 +652,8 @@ html:not(.js) .demo__screenwrap { max-width: 920px; }
 }
 .keycap__g { align-self: flex-end; font: 400 20px/1 var(--sys); color: var(--ink); }
 .keycap__n { font: 500 11.5px/1 var(--sys); color: var(--ink-3); }
+.keycap__g.is-word { align-self: flex-start; font: 500 15px/1 var(--sys); }
+.gkey.is-word { width: auto; min-width: 40px; padding: 0 9px; font-size: 14px; font-weight: 500; }
 .keycap--on { border-color: var(--blue); box-shadow: 0 3px 0 #111113, 0 0 0 1px var(--blue); }
 .keycap--on .keycap__n { color: var(--blue); }
 .keycap--mouse { width: 96px; }
@@ -952,17 +954,54 @@ html:not(.js) .demo__screenwrap { max-width: 920px; }
 .download__req { font-size: 1.1875rem; color: var(--ink); margin-bottom: .5em; }
 .release { font-size: .9375rem; color: var(--ink-3); }
 
+/* Mac | Windows. Without JavaScript both panels simply stack; with it, the
+   visitor's own system is chosen and the other is one click away. The page's
+   key names follow the same choice (site.js). */
+.os {
+  display: inline-flex;
+  gap: 4px;
+  margin: 0 0 36px;
+  padding: 4px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--ground);
+}
+.os__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 22px 0 18px;
+  border: 2px solid transparent;
+  border-radius: 9px;
+  background: none;
+  color: var(--ink-3);
+  font: 650 1.0625rem/1 var(--font);
+  font-stretch: 115%;
+  cursor: pointer;
+  transition: color .15s, background-color .15s, border-color .15s;
+}
+.os__tab:hover { color: var(--ink); background: rgba(255, 255, 255, .04); }
+/* The chosen one is "in shot": the same blue frame the app draws. */
+.os__tab[aria-selected="true"] { color: var(--ink); border-color: var(--blue); background: var(--raised); }
+.os__icon { width: 18px; height: 18px; }
+
+.panel + .panel { margin-top: 72px; padding-top: 56px; border-top: 1px solid var(--line-2); }
+.js .panel + .panel { margin-top: 0; padding-top: 0; border-top: 0; }
+.js[data-platform="mac"] [data-os-panel="win"],
+.js[data-platform="win"] [data-os-panel="mac"] { display: none; }
+.panel__h { font-size: clamp(1.5rem, 1.2rem + 1vw, 1.9rem); font-stretch: 120%; margin-bottom: .25em; }
+.js .panel__h { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.panel__req { font-size: 1.125rem; color: var(--ink); margin-bottom: 28px; }
+
 .dl { display: grid; gap: 48px; }
 @media (min-width: 980px) {
   .dl {
     grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
-    grid-template-areas: "brew brew" "dmg win";
-    gap: 64px 72px;
+    gap: 72px;
     align-items: start;
   }
-  .dl__brew { grid-area: brew; }
-  .dl__dmg { grid-area: dmg; }
-  .dl__win { grid-area: win; }
+  .dl__alt { padding-top: 58px; }
 }
 
 /* The recommended option gets the "in shot" frame. */
@@ -983,7 +1022,7 @@ html:not(.js) .demo__screenwrap { max-width: 920px; }
   color: #fff;
   font: 600 13px/1.2 var(--sys);
 }
-.dl h3 { font-size: 1.375rem; font-stretch: 118%; }
+.dl h4 { margin: 0 0 .4em; color: var(--ink); font-size: 1.375rem; font-stretch: 118%; font-weight: 650; line-height: 1.3; }
 
 .cmd {
   display: flex;
@@ -1033,10 +1072,12 @@ html:not(.js) .demo__screenwrap { max-width: 920px; }
   .copy { min-height: 44px; border-left: 0; border-top: 1px solid var(--line-2); }
 }
 .dl__sub { font-size: .9375rem; color: var(--ink-3); }
+.dl__sub--after { margin-top: 20px; }
+.dl__sub code { font: 13.5px/1.4 var(--mono); color: var(--ink-2); }
 
-.dmgs { display: grid; gap: 12px; margin: 20px 0 22px; }
-@media (min-width: 480px) { .dmgs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.dmg {
+.files { display: grid; gap: 12px; margin: 20px 0 22px; }
+@media (min-width: 480px) { .files { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.file {
   display: grid;
   grid-template-columns: auto 1fr;
   column-gap: 12px;
@@ -1050,29 +1091,16 @@ html:not(.js) .demo__screenwrap { max-width: 920px; }
   text-decoration: none;
   transition: border-color .15s, background-color .15s;
 }
-.dmg:hover { border-color: var(--blue); background: #2d2f34; }
-.dmg__icon { grid-row: 1 / span 2; width: 22px; height: 22px; color: var(--blue); }
-.dmg__t { font-size: 1.0625rem; font-weight: 650; font-stretch: 112%; line-height: 1.2; }
-.dmg__f { font: 12.5px/1.2 var(--mono); color: var(--ink-3); }
+.file:hover { border-color: var(--blue); background: #2d2f34; }
+.file__icon { grid-row: 1 / span 2; width: 22px; height: 22px; color: var(--blue); }
+.file__t { font-size: 1.0625rem; font-weight: 650; font-stretch: 112%; line-height: 1.2; }
+.file__f { font: 12.5px/1.2 var(--mono); color: var(--ink-3); }
+.file--big { margin: 22px 0 4px; padding: 20px 22px; background: var(--blue); border-color: var(--blue); color: #16181d; }
+.file--big:hover { background: var(--blue-hi); border-color: var(--blue-hi); }
+.file--big .file__icon { width: 26px; height: 26px; color: #16181d; }
+.file--big .file__t { font-size: 1.25rem; font-stretch: 118%; }
+.file--big .file__f { color: #2b3547; }
 .which { font-size: 1rem; }
-
-.dl__win { padding-top: 32px; border-top: 1px solid var(--line-2); }
-@media (min-width: 980px) {
-  .dl__win { padding: 0 0 0 48px; border-top: 0; border-left: 1px solid var(--line-2); }
-}
-.dl__win h3 { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
-.soon {
-  display: inline-block;
-  margin: 0;
-  padding: 5px 12px;
-  border: 1px dashed #55575d;
-  border-radius: 999px;
-  color: var(--ink-3);
-  font-size: .875rem;
-  font-weight: 600;
-  line-height: 1.3;
-}
-.dl__win p { font-size: 1rem; }
 
 .dl__links { display: flex; flex-wrap: wrap; gap: 10px 28px; margin: 40px 0 0; font-weight: 600; }
 
@@ -1101,7 +1129,11 @@ html:not(.js) .demo__screenwrap { max-width: 920px; }
   font-stretch: 125%;
   color: var(--ink);
 }
-.steps h3 { margin: 5px 0 8px; }
+.steps h4 { margin: 5px 0 8px; color: var(--ink); font-size: 1.125rem; font-stretch: 112%; font-weight: 650; line-height: 1.3; }
+.steps__for { margin-bottom: 20px; color: var(--ink-3); font-size: 1rem; }
+.js .steps__for { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+[data-os-panel="win"] + .faq, [data-os-panel="mac"] + [data-os-panel="win"] { margin-top: 48px; }
+.js [data-os-panel="mac"] + [data-os-panel="win"] { margin-top: 0; }
 .steps p { font-size: 1rem; }
 .steps__tag {
   display: inline-block;

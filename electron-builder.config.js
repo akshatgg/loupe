@@ -74,8 +74,7 @@ module.exports = {
     icon: 'packaging/icon.png',
     // Version-less, like the DMGs: /releases/latest/download/Loupe-Setup-x64.exe
     // always serves the newest installer.
-    artifactName: '${productName}-Setup-${arch}.${ext}',
-    publisherName: 'akshatgg'
+    artifactName: '${productName}-Setup-${arch}.${ext}'
   },
 
   nsis: {

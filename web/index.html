@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Loupe: a Mac screen recorder that zooms while you record</title>
-<meta name="description" content="Loupe records your Mac screen for demos and tutorials. Hold a key and scroll to zoom in while you record, then edit the pace and export MP4 up to 4K. Free, with no account, no upload and no watermark.">
+<title>Loupe: a screen recorder for Mac and Windows that zooms while you record</title>
+<meta name="description" content="Loupe records your screen for demos and tutorials, on Mac and Windows. Hold a key and scroll to zoom in while you record, then edit the pace and export MP4 up to 4K. Free, with no account, no upload and no watermark.">
 <link rel="canonical" href="https://loupeapp.vercel.app/">
 <meta name="theme-color" content="#1a1a1c">
 <meta name="color-scheme" content="dark">
@@ -18,14 +18,14 @@
 <meta property="og:site_name" content="Loupe">
 <meta property="og:url" content="https://loupeapp.vercel.app/">
 <meta property="og:title" content="Loupe: zoom in while you record">
-<meta property="og:description" content="A free screen recorder for Mac. Hold a key and scroll to zoom in while you record. Everything stays on your Mac.">
+<meta property="og:description" content="A free screen recorder for Mac and Windows. Hold a key and scroll to zoom in while you record. Everything stays on your computer.">
 <meta property="og:image" content="https://loupeapp.vercel.app/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Loupe: a Mac screen with a blue frame and a 2.0× badge marking the zoomed-in area being recorded.">
+<meta property="og:image:alt" content="Loupe: a screen with a blue frame and a 2.0× badge marking the zoomed-in area being recorded.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Loupe: zoom in while you record">
-<meta name="twitter:description" content="A free screen recorder for Mac. Hold a key and scroll to zoom in while you record. Everything stays on your Mac.">
+<meta name="twitter:description" content="A free screen recorder for Mac and Windows. Hold a key and scroll to zoom in while you record. Everything stays on your computer.">
 <meta name="twitter:image" content="https://loupeapp.vercel.app/og.png">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -39,10 +39,10 @@
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   "name": "Loupe",
-  "description": "A screen recorder for Mac that zooms in while you record.",
+  "description": "A screen recorder for Mac and Windows that zooms in while you record.",
   "url": "https://loupeapp.vercel.app/",
   "applicationCategory": "MultimediaApplication",
-  "operatingSystem": "macOS 14 or later",
+  "operatingSystem": "macOS 14 or later, Windows 10 (version 2004) or later",
   "downloadUrl": "https://github.com/akshatgg/loupe/releases/latest",
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
 }
@@ -75,12 +75,12 @@
       <div class="hero__head">
         <h1 id="hero-h">Zoom in while you record.</h1>
         <div class="hero__aside">
-          <p class="lead">Loupe records your Mac screen for demos and tutorials. Hold <kbd>⌥</kbd>&nbsp;Option and scroll, and the video zooms in on your cursor, so whatever you’re talking about fills the frame.</p>
+          <p class="lead">Loupe records your screen for demos and tutorials. Hold <kbd data-keyglyph="option">⌥</kbd><span data-key-name="option-after">&nbsp;Option</span> and scroll, and the video zooms in on your cursor, so whatever you’re talking about fills the frame.</p>
           <div class="hero__actions">
-            <a class="btn btn--primary" href="#download">Download for Mac</a>
+            <a class="btn btn--primary" href="#download" data-os-cta>Download Loupe</a>
             <a class="btn" href="https://github.com/akshatgg/loupe">View the source</a>
           </div>
-          <p class="hero__note">Free. Needs macOS 14 Sonoma or later, on Apple Silicon or Intel.</p>
+          <p class="hero__note">Free, for Mac and Windows. macOS 14 Sonoma or later; Windows 10 (version 2004) or Windows 11.</p>
         </div>
       </div>
 
@@ -160,7 +160,7 @@
             <div class="output"><div class="output__view" data-output></div></div>
             <div class="gesture">
               <div class="gesture__row">
-                <span class="gkey" data-gkey>⌥</span>
+                <span class="gkey" data-gkey data-keyglyph="option">⌥</span>
                 <span class="gesture__plus">+</span>
                 <span class="gwheel">
                   <svg viewBox="0 0 24 34"><rect x="1.5" y="1.5" width="21" height="31" rx="10.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path class="gwheel__up" d="M12 6.5l-3 3h6z"/><rect class="gwheel__wheel" x="10.5" y="11" width="3" height="7" rx="1.5"/><path class="gwheel__down" d="M12 22.5l-3-3h6z"/></svg>
@@ -188,19 +188,19 @@
     <div class="wrap split">
       <div class="split__a">
         <h2 id="zoom-h">Hold a key and scroll</h2>
-        <p>Hold <kbd>⌥</kbd>&nbsp;Option and scroll up to zoom in, as far as 4×. Scroll back down to zoom out. You choose what deserves a close-up at the moment you’re showing it, not afterwards.</p>
-        <p>Rather use a different key? Pick Control, Command or Shift instead. Or hold a side button on your mouse and scroll.</p>
+        <p>Hold <kbd data-keyglyph="option">⌥</kbd><span data-key-name="option-after">&nbsp;Option</span> and scroll up to zoom in, as far as 4×. Scroll back down to zoom out. You choose what deserves a close-up at the moment you’re showing it, not afterwards.</p>
+        <p>Rather use a different key? Pick <span data-key-name="control">Control</span>, <span data-key-name="command">Command</span> or Shift instead. Or hold a side button on your mouse and scroll.</p>
         <ul class="keys" aria-label="Ways to trigger the zoom">
-          <li class="keycap keycap--on"><span class="keycap__g" aria-hidden="true">⌥</span><span class="keycap__n">option</span></li>
-          <li class="keycap"><span class="keycap__g" aria-hidden="true">⌃</span><span class="keycap__n">control</span></li>
-          <li class="keycap"><span class="keycap__g" aria-hidden="true">⌘</span><span class="keycap__n">command</span></li>
-          <li class="keycap"><span class="keycap__g" aria-hidden="true">⇧</span><span class="keycap__n">shift</span></li>
+          <li class="keycap keycap--on"><span class="keycap__g" aria-hidden="true" data-keyglyph="option">⌥</span><span class="keycap__n" data-key-cap="option">option</span></li>
+          <li class="keycap"><span class="keycap__g" aria-hidden="true" data-keyglyph="control">⌃</span><span class="keycap__n" data-key-cap="control">control</span></li>
+          <li class="keycap"><span class="keycap__g" aria-hidden="true" data-keyglyph="command">⌘</span><span class="keycap__n" data-key-cap="command">command</span></li>
+          <li class="keycap"><span class="keycap__g" aria-hidden="true" data-keyglyph="shift">⇧</span><span class="keycap__n" data-key-cap="shift">shift</span></li>
           <li class="keycap keycap--mouse">
             <svg class="keycap__g" viewBox="0 0 28 34" aria-hidden="true"><rect x="7" y="1.5" width="19" height="31" rx="9.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M16.5 1.5v10" stroke="currentColor" stroke-width="1.6"/><rect x="1.5" y="12" width="5" height="11" rx="2.5" fill="#8ab4f8"/></svg>
             <span class="keycap__n">side button</span>
           </li>
         </ul>
-        <p class="keys__note">Option is the default. Change it any time.</p>
+        <p class="keys__note"><span data-key-name="option">Option</span> is the default. Change it any time.</p>
       </div>
 
       <figure class="split__b follow">
@@ -387,7 +387,7 @@
   <!-- ============================== Private ============================== -->
   <section class="sec private" aria-labelledby="private-h">
     <div class="wrap private__in">
-      <h2 id="private-h" class="private__h">Everything stays on your Mac.</h2>
+      <h2 id="private-h" class="private__h">Everything stays on your computer.</h2>
       <p class="private__p">Recording, editing and export all happen on your computer. There’s no account to make, nothing is uploaded, and there’s no watermark on your videos. Loupe is free.</p>
     </div>
   </section>
@@ -397,49 +397,86 @@
     <div class="wrap">
       <div class="download__head">
         <h2 id="download-h">Download Loupe</h2>
-        <p class="download__req">For macOS 14 Sonoma or later, on Apple Silicon or Intel.</p>
+        <p class="download__req">Free for Mac and Windows. Pick your computer.</p>
         <p class="release" data-release hidden><span data-release-text></span> <a data-release-link href="https://github.com/akshatgg/loupe/releases">Release notes</a></p>
       </div>
 
-      <div class="dl">
-        <div class="dl__brew framed">
-          <span class="framed__badge">Recommended</span>
-          <h3>Install with Homebrew</h3>
-          <p>Paste this into Terminal. Homebrew downloads Loupe and puts it in your Applications folder, and it opens with no warning dialog.</p>
-          <div class="cmd">
-            <code class="cmd__code" id="cmd-brew">brew install <span class="nw">--cask</span> akshatgg/tap/loupe</code>
-            <button class="copy" type="button" data-copy="cmd-brew" data-copy-name="Copy the Loupe install command" hidden><span data-copy-label>Copy</span></button>
+      <div class="os" role="tablist" aria-label="Your computer" data-os-tabs hidden>
+        <button class="os__tab" type="button" role="tab" id="tab-mac" aria-controls="panel-mac" aria-selected="true" data-platform-tab="mac">
+          <svg class="os__icon" viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M13.6 10.6c0-2 1.6-2.9 1.7-3a3.7 3.7 0 0 0-2.9-1.6c-1.2-.1-2.4.7-3 .7s-1.6-.7-2.6-.7A3.9 3.9 0 0 0 3.5 8c-1.4 2.4-.4 6 1 8 .7.9 1.4 2 2.4 2s1.3-.6 2.5-.6 1.5.6 2.5.6 1.7-1 2.3-1.9a8 8 0 0 0 1.1-2.2 3.3 3.3 0 0 1-1.7-3.3ZM11.7 4.7A3.4 3.4 0 0 0 12.5 2a3.5 3.5 0 0 0-2.3 1.2 3.2 3.2 0 0 0-.8 2.5 2.9 2.9 0 0 0 2.3-1Z"/></svg>
+          Mac
+        </button>
+        <button class="os__tab" type="button" role="tab" id="tab-win" aria-controls="panel-win" aria-selected="false" data-platform-tab="win" tabindex="-1">
+          <svg class="os__icon" viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M2 3.9 8.5 3v6.3H2Zm7.3-1L18 1.7v7.6H9.3ZM2 10.1h6.5v6.3L2 15.5Zm7.3 0H18v7.6l-8.7-1.2Z"/></svg>
+          Windows
+        </button>
+      </div>
+
+      <!-- ---------------- Mac ---------------- -->
+      <div class="panel" id="panel-mac" role="tabpanel" aria-labelledby="tab-mac" data-os-panel="mac">
+        <h3 class="panel__h">For Mac</h3>
+        <p class="panel__req">macOS 14 Sonoma or later, on Apple Silicon or Intel.</p>
+        <div class="dl">
+          <div class="dl__main framed">
+            <span class="framed__badge">Recommended</span>
+            <h4>Install with Homebrew</h4>
+            <p>Paste this into Terminal. Homebrew downloads Loupe and puts it in your Applications folder, and it opens with no warning dialog.</p>
+            <div class="cmd">
+              <code class="cmd__code" id="cmd-brew">brew install <span class="nw">--cask</span> akshatgg/tap/loupe</code>
+              <button class="copy" type="button" data-copy="cmd-brew" data-copy-name="Copy the Loupe install command" hidden><span data-copy-label>Copy</span></button>
+            </div>
+            <p class="dl__sub">No Homebrew yet? Install it first with this command from <a href="https://brew.sh">brew.sh</a>, then run the line above.</p>
+            <div class="cmd cmd--small">
+              <code class="cmd__code" id="cmd-homebrew">/bin/bash <span class="nw">-c</span> "$(curl <span class="nw">-fsSL</span> https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code>
+              <button class="copy" type="button" data-copy="cmd-homebrew" data-copy-name="Copy the Homebrew install command" hidden><span data-copy-label>Copy</span></button>
+            </div>
+            <p class="dl__sub dl__sub--after">To update later: <code>brew upgrade --cask loupe</code></p>
           </div>
-          <p class="dl__sub">No Homebrew yet? Install it first with this command from <a href="https://brew.sh">brew.sh</a>, then run the line above.</p>
-          <div class="cmd cmd--small">
-            <code class="cmd__code" id="cmd-homebrew">/bin/bash <span class="nw">-c</span> "$(curl <span class="nw">-fsSL</span> https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code>
-            <button class="copy" type="button" data-copy="cmd-homebrew" data-copy-name="Copy the Homebrew install command" hidden><span data-copy-label>Copy</span></button>
+
+          <div class="dl__alt">
+            <h4>Or download the app</h4>
+            <p>A disk image to open and drag into Applications. Pick the one for your Mac’s chip.</p>
+            <div class="files">
+              <a class="file" href="https://github.com/akshatgg/loupe/releases/latest/download/Loupe-arm64.dmg">
+                <svg class="file__icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m0 0l-3.5-3.5M10 12l3.5-3.5M4 14.5v1A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5v-1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span class="file__t">Apple Silicon</span>
+                <span class="file__f">Loupe-arm64.dmg</span>
+              </a>
+              <a class="file" href="https://github.com/akshatgg/loupe/releases/latest/download/Loupe-x64.dmg">
+                <svg class="file__icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m0 0l-3.5-3.5M10 12l3.5-3.5M4 14.5v1A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5v-1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span class="file__t">Intel</span>
+                <span class="file__f">Loupe-x64.dmg</span>
+              </a>
+            </div>
+            <p class="which"><strong>Not sure which?</strong> Open the Apple menu&nbsp;<span aria-hidden="true">›</span> About This Mac and look at <b>Chip</b>. Apple M1, M2 or any later M chip means Apple Silicon. If it shows an Intel processor, pick Intel.</p>
+            <p class="dl__sub">The downloaded app needs one extra click the first time you open it. <a href="#first-launch">See first launch</a>.</p>
           </div>
         </div>
+      </div>
 
-        <div class="dl__dmg">
-          <h3>Or download the app</h3>
-          <p>A disk image to open and drag into Applications. Pick the one for your Mac’s chip.</p>
-          <div class="dmgs">
-            <a class="dmg" href="https://github.com/akshatgg/loupe/releases/latest/download/Loupe-arm64.dmg">
-              <svg class="dmg__icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m0 0l-3.5-3.5M10 12l3.5-3.5M4 14.5v1A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5v-1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <span class="dmg__t">Apple Silicon</span>
-              <span class="dmg__f">Loupe-arm64.dmg</span>
+      <!-- ---------------- Windows ---------------- -->
+      <div class="panel" id="panel-win" role="tabpanel" aria-labelledby="tab-win" data-os-panel="win">
+        <h3 class="panel__h">For Windows</h3>
+        <p class="panel__req">Windows 10 (version 2004 or later) or Windows 11, 64-bit.</p>
+        <div class="dl">
+          <div class="dl__main framed">
+            <span class="framed__badge">Recommended</span>
+            <h4>Download the installer</h4>
+            <p>Run it and follow the steps. Loupe installs for your account only, so it doesn’t ask for an administrator password, and adds itself to the Start menu and your desktop.</p>
+            <a class="file file--big" href="https://github.com/akshatgg/loupe/releases/latest/download/Loupe-Setup-x64.exe" data-win-download>
+              <svg class="file__icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m0 0l-3.5-3.5M10 12l3.5-3.5M4 14.5v1A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5v-1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <span class="file__t">Download for Windows</span>
+              <span class="file__f">Loupe-Setup-x64.exe</span>
             </a>
-            <a class="dmg" href="https://github.com/akshatgg/loupe/releases/latest/download/Loupe-x64.dmg">
-              <svg class="dmg__icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9m0 0l-3.5-3.5M10 12l3.5-3.5M4 14.5v1A1.5 1.5 0 0 0 5.5 17h9a1.5 1.5 0 0 0 1.5-1.5v-1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <span class="dmg__t">Intel</span>
-              <span class="dmg__f">Loupe-x64.dmg</span>
-            </a>
+            <p class="dl__sub" data-win-pending hidden>The Windows installer arrives with the next release. Until then, <a href="https://github.com/akshatgg/loupe/releases">watch the releases</a> to hear when it’s out.</p>
+            <p class="dl__sub dl__sub--after">Runs on Windows 11 on ARM PCs too, through Windows’ built-in emulation.</p>
           </div>
-          <p class="which"><strong>Not sure which?</strong> Open the Apple menu&nbsp;<span aria-hidden="true">›</span> About This Mac and look at <b>Chip</b>. Apple M1, M2 or any later M chip means Apple Silicon. If it shows an Intel processor, pick Intel.</p>
-          <p class="dl__sub">The downloaded app needs one extra click the first time you open it. <a href="#first-launch">See first launch</a>.</p>
-        </div>
 
-        <div class="dl__win">
-          <h3>Windows</h3>
-          <p class="soon">Coming soon</p>
-          <p>Loupe’s recording and zoom are built on macOS-native technology, so it only runs on a Mac for now. A Windows version is planned. To hear when it’s out, watch the project’s releases on <a href="https://github.com/akshatgg/loupe">GitHub</a>.</p>
+          <div class="dl__alt">
+            <h4>If Windows warns you</h4>
+            <p>The installer isn’t code-signed yet, so the first time you run it, SmartScreen may show <b>Windows protected your PC</b>. Click <b>More info</b>, then <b>Run anyway</b>. Your browser may also ask whether to keep the download; choose <b>Keep</b>.</p>
+            <p>To uninstall, open Settings&nbsp;<span aria-hidden="true">›</span> Apps&nbsp;<span aria-hidden="true">›</span> Installed apps, find Loupe and choose Uninstall. Your recordings stay where they are.</p>
+          </div>
         </div>
       </div>
 
@@ -452,31 +489,52 @@
     <div class="wrap split split--steps">
       <div class="split__a">
         <h2 id="first-h">First launch</h2>
-        <p>A few one-time steps, then you’re recording.</p>
+        <p data-os-panel="mac">A few one-time steps on a Mac, then you’re recording.</p>
+        <p data-os-panel="win">On Windows there’s nothing to set up: no permissions to grant. Open Loupe and pick what to record.</p>
       </div>
       <div class="split__b">
-        <ol class="steps">
-          <li>
-            <h3>Open it, once, with Open Anyway <span class="steps__tag">DMG only</span></h3>
-            <p>Loupe isn’t notarized by Apple yet, so the first time you open the downloaded app, macOS will refuse. Open System Settings&nbsp;› Privacy &amp; Security, scroll down, click <b>Open Anyway</b> and confirm. You only do this once. If you installed with Homebrew, skip this step.</p>
-          </li>
-          <li>
-            <h3>Allow Screen Recording</h3>
-            <p>Required, since Loupe can’t record your screen without it. Turn on Loupe in System Settings&nbsp;› Privacy &amp; Security&nbsp;› Screen Recording (called Screen &amp; System Audio Recording on newer versions of macOS). macOS may ask you to quit and reopen Loupe.</p>
-          </li>
-          <li>
-            <h3>Allow Accessibility</h3>
-            <p>Needed for the zoom gesture. It lets Loupe notice the zoom key and your scrolling while you record. Turn on Loupe in System Settings&nbsp;› Privacy &amp; Security&nbsp;› Accessibility.</p>
-          </li>
-        </ol>
+        <div data-os-panel="mac">
+          <h3 class="steps__for">On a Mac</h3>
+          <ol class="steps">
+            <li>
+              <h4>Open it, once, with Open Anyway <span class="steps__tag">DMG only</span></h4>
+              <p>Loupe isn’t notarized by Apple yet, so the first time you open the downloaded app, macOS will refuse. Open System Settings&nbsp;› Privacy &amp; Security, scroll down, click <b>Open Anyway</b> and confirm. You only do this once. If you installed with Homebrew, skip this step.</p>
+            </li>
+            <li>
+              <h4>Allow Screen Recording</h4>
+              <p>Required, since Loupe can’t record your screen without it. Turn on Loupe in System Settings&nbsp;› Privacy &amp; Security&nbsp;› Screen Recording (called Screen &amp; System Audio Recording on newer versions of macOS). macOS may ask you to quit and reopen Loupe.</p>
+            </li>
+            <li>
+              <h4>Allow Accessibility</h4>
+              <p>Needed for the zoom gesture. It lets Loupe notice the zoom key and your scrolling while you record. Turn on Loupe in System Settings&nbsp;› Privacy &amp; Security&nbsp;› Accessibility.</p>
+            </li>
+          </ol>
+        </div>
+        <div data-os-panel="win">
+          <h3 class="steps__for">On Windows</h3>
+          <ol class="steps">
+            <li>
+              <h4>Open Loupe from the Start menu</h4>
+              <p>The installer offers to open it straight away. After that, it’s in the Start menu and on your desktop.</p>
+            </li>
+            <li>
+              <h4>Pick a screen or a window, then press Start</h4>
+              <p>Hold <kbd>Alt</kbd> and scroll to zoom while you record. The zoom frame and Loupe’s control bar never appear in the video.</p>
+            </li>
+            <li>
+              <h4>Recording your voice? Check the microphone switch</h4>
+              <p>If Loupe records no sound, open Settings&nbsp;› Privacy &amp; security&nbsp;› Microphone and turn on <b>Let desktop apps access your microphone</b>.</p>
+            </li>
+          </ol>
+        </div>
         <dl class="faq">
           <div>
             <dt>Where are my recordings saved?</dt>
-            <dd>In the Loupe folder inside your Movies folder: <code>~/Movies/Loupe</code>.</dd>
+            <dd>In a Loupe folder: <code>~/Movies/Loupe</code> on a Mac, and <code>Videos\Loupe</code> on Windows.</dd>
           </div>
           <div>
-            <dt>Does anything leave my Mac?</dt>
-            <dd>No. Recording, editing and export all happen on your Mac, and there’s no account.</dd>
+            <dt>Does anything leave my computer?</dt>
+            <dd>No. Recording, editing and export all happen on your computer, and there’s no account.</dd>
           </div>
         </dl>
       </div>
@@ -490,7 +548,7 @@
       <img src="icon.svg" alt="" width="26" height="26">
       <span>Loupe</span>
     </a>
-    <p class="foot__p">A free screen recorder for Mac that zooms while you record.</p>
+    <p class="foot__p">A free screen recorder for Mac and Windows that zooms while you record.</p>
     <nav class="foot__nav" aria-label="Footer">
       <a href="#download">Download</a>
       <a href="https://github.com/akshatgg/loupe/releases">Releases</a>
