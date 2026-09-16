@@ -1,4 +1,5 @@
 'use strict';
+/* global OffscreenCanvas -- the drawing runs in the page, not in Node */
 // Draws the bundled wallpapers (src/core/wallpapers.js) into
 // src/assets/wallpapers/*.png. Run with:  electron packaging/make-wallpapers.js
 //

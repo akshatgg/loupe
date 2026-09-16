@@ -16,7 +16,7 @@ export const SHOW_SECONDS = 1.4;
 export const FADE_IN_SECONDS = 0.08;
 export const FADE_OUT_SECONDS = 0.3;
 export const MAX_BADGES = 3;
-export const BADGE_PX = 34;
+export const BADGE_PX = 42;
 const FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif';
 
 // The presses on screen at source time t, oldest first, each with its opacity.

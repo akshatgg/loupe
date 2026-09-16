@@ -222,21 +222,28 @@ function drawBox(ctx, state, a, alpha) {
   ctx.restore();
 }
 
-// One small scratch canvas per drawing context, reused frame to frame.
+// Two scratch canvases per drawing context, reused frame to frame.
 const scratches = new WeakMap();
 function scratchFor(ctx, w, h) {
   if (typeof globalThis.OffscreenCanvas !== 'function') return null;
   let s = scratches.get(ctx);
-  if (!s || s.canvas.width < w || s.canvas.height < h) {
-    const canvas = new globalThis.OffscreenCanvas(Math.max(w, s?.canvas.width ?? 0), Math.max(h, s?.canvas.height ?? 0));
-    s = { canvas, ctx: canvas.getContext('2d') };
+  if (!s || s[0].canvas.width < w || s[0].canvas.height < h) {
+    const cw = Math.max(w, s?.[0].canvas.width ?? 0);
+    const ch = Math.max(h, s?.[0].canvas.height ?? 0);
+    const make = () => {
+      const canvas = new globalThis.OffscreenCanvas(cw, ch);
+      return { canvas, ctx: canvas.getContext('2d') };
+    };
+    s = [make(), make()];
     scratches.set(ctx, s);
   }
   return s;
 }
 
-// Pixelates the region: what's under it is shrunk to a few blocks and
-// stretched back without smoothing, so no letter survives.
+// Pixelates the region: what's under it is shrunk to blocks a few dozen
+// pixels across and stretched back without smoothing, so no letter survives.
+// The shrinking halves the picture a step at a time, so each block is the
+// average of what it covers (one big step would just pick a few pixels).
 function drawBlur(ctx, state, a) {
   const { box } = annotationGeometry(ctx, state, a);
   const { content } = state;
@@ -250,15 +257,27 @@ function drawBlur(ctx, state, a) {
   const block = Math.max(4, BLOCK_PX * state.unit * a.size);
   const cols = Math.max(1, Math.ceil(w / block));
   const rows = Math.max(1, Math.ceil(h / block));
-  const scratch = ctx.canvas ? scratchFor(ctx, cols, rows) : null;
+  const pair = ctx.canvas ? scratchFor(ctx, w, h) : null;
   ctx.save();
-  if (scratch) {
-    scratch.ctx.imageSmoothingEnabled = true;
-    scratch.ctx.imageSmoothingQuality = 'high';
-    scratch.ctx.clearRect(0, 0, cols, rows);
-    scratch.ctx.drawImage(ctx.canvas, x0, y0, w, h, 0, 0, cols, rows);
+  if (pair) {
+    let [src, dst] = pair;
+    src.ctx.globalCompositeOperation = 'copy';
+    src.ctx.drawImage(ctx.canvas, x0, y0, w, h, 0, 0, w, h);
+    let cw = w;
+    let ch = h;
+    while (cw > cols || ch > rows) {
+      const nw = Math.max(cols, Math.ceil(cw / 2));
+      const nh = Math.max(rows, Math.ceil(ch / 2));
+      dst.ctx.globalCompositeOperation = 'copy';
+      dst.ctx.imageSmoothingEnabled = true;
+      dst.ctx.imageSmoothingQuality = 'high';
+      dst.ctx.drawImage(src.canvas, 0, 0, cw, ch, 0, 0, nw, nh);
+      [src, dst] = [dst, src];
+      cw = nw;
+      ch = nh;
+    }
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(scratch.canvas, 0, 0, cols, rows, x0, y0, w, h);
+    ctx.drawImage(src.canvas, 0, 0, cols, rows, x0, y0, w, h);
   } else {
     // Nothing to read the picture back from: cover it instead.
     ctx.fillStyle = '#5f6368';
