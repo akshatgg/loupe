@@ -144,6 +144,7 @@ async function waitFor(what, fn, timeout = 8000) {
   }
 }
 
+const editorWindow = () => BrowserWindow.getAllWindows().find((w) => !w.isDestroyed() && w.webContents.getURL().includes('/renderer/editor/'));
 const windowTitled = (title) => BrowserWindow.getAllWindows().find((w) => !w.isDestroyed() && w.getTitle() === title);
 const js = (win, code) => win.webContents.executeJavaScript(`(async () => { ${code} })()`);
 const clickMenu = (id) => {
@@ -163,8 +164,8 @@ async function shot(win, name) {
 
 async function run() {
   await app.whenReady();
-  await waitFor('the picker', () => windowTitled('Loupe'));
-  const picker = windowTitled('Loupe');
+  await waitFor('the picker', () => windowTitled('New recording'));
+  const picker = windowTitled('New recording');
   await waitFor('the picker to load', () => !picker.webContents.isLoading());
 
   await check('menus: the app menu has the shell commands', () => {
@@ -278,13 +279,13 @@ async function run() {
 
   await check('double-click opens the recording in the editor', async () => {
     await js(library, `document.querySelector('.card[data-id="${firstId}"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
-    const editor = await waitFor('the editor', () => windowTitled('Loupe — Edit'));
+    const editor = await waitFor('the editor', () => editorWindow());
     editor.close();
   });
 
   await check('a recording open in the editor can\'t be moved to the Trash', async () => {
     await js(library, `document.querySelector('.card[data-id="${firstId}"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
-    const editor = await waitFor('the editor', () => windowTitled('Loupe — Edit'));
+    const editor = await waitFor('the editor', () => editorWindow());
     const trashed = record.trash.length;
     const asked = record.dialogs.length;
     await js(library, `document.querySelector('.card[data-id="${firstId}"] .more').click()`);
@@ -295,7 +296,7 @@ async function run() {
     assert.ok(fs.existsSync(path.join(RECORDINGS, firstId)));
     await shot(library, '08-library-trash-open-in-editor');
     editor.close();
-    await waitFor('the editor to close', () => !windowTitled('Loupe — Edit'));
+    await waitFor('the editor to close', () => !editorWindow());
   });
 
   await check('Duplicate pressed twice quickly makes one copy', async () => {
