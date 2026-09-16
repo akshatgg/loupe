@@ -10,6 +10,16 @@
 //   armed -----back -----> closed
 //   recording --stop-----> closed
 //
+// With the countdown and pause additions:
+//
+//   armed ------countdown--> counting   (3-2-1 on the bar, capture not started)
+//   counting ---go---------> recording
+//   counting ---cancel-----> armed      (Esc: back to choosing, nothing recorded)
+//   counting ---back-------> closed     (Stop shortcut / quit during the countdown)
+//   recording --pause------> paused     (capture keeps running; the range is cut later)
+//   paused -----resume-----> recording
+//   paused -----stop-------> closed
+//
 // Kept apart from main.js's window/process side effects (creating the bar
 // BrowserWindow, spawning bin/capture, closing the outline, ...) the same
 // way region.js's validateRegion/clampRegionToBounds are pure and unit-
@@ -18,8 +28,10 @@
 // so that question can be exercised directly (test/bar-state.test.js)
 // without spinning up Electron or a native helper.
 const TRANSITIONS = {
-  armed: { start: 'recording', back: 'closed' },
-  recording: { stop: 'closed' }
+  armed: { start: 'recording', countdown: 'counting', back: 'closed' },
+  counting: { go: 'recording', cancel: 'armed', back: 'closed' },
+  recording: { stop: 'closed', pause: 'paused' },
+  paused: { resume: 'recording', stop: 'closed' }
 };
 
 function transition(state, action) {

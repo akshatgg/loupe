@@ -419,5 +419,118 @@ window.loupe.getSettings().then((s) => {
   renderShortcuts();
 });
 
+// ---- recording additions ------------------------------------------------------
+// Computer sound, the camera bubble, keyboard shortcuts and the countdown.
+// Saved as soon as they change (main.js, recording-settings.js) and read by
+// main when recording starts, so nothing here has to be passed along.
+
+const recordingSwitches = ['systemAudio', 'recordKeys', 'countdown'];
+const cameraSwitch = document.getElementById('camera');
+const cameraSelect = document.getElementById('cameraDevice');
+const cameraNote = document.getElementById('cameraNote');
+
+function showBanner(text, pane) {
+  const banner = document.getElementById('banner');
+  banner.hidden = false;
+  banner.textContent = text;
+  if (pane) addPaneButton(banner, 'Open Settings', pane);
+}
+
+async function saveRecording(patch) {
+  try {
+    return await window.loupe.setRecordingSettings(patch);
+  } catch (err) {
+    showBanner(`Could not save that choice: ${err.message}`);
+    return null;
+  }
+}
+
+function setCameraNote(text) {
+  cameraNote.textContent = text;
+  cameraNote.hidden = !text;
+}
+
+async function videoInputs() {
+  try {
+    return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+  } catch {
+    return [];
+  }
+}
+
+// Camera names are only shown to a page that has used a camera once, so when
+// they are missing the camera is opened for a moment first. Returns the
+// cameras found.
+async function listCameras(selectedId) {
+  let cameras = await videoInputs();
+  if (cameras.some((c) => !c.label)) {
+    try {
+      const probe = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      for (const track of probe.getTracks()) track.stop();
+    } catch {
+      // Unnamed cameras are still cameras.
+    }
+    cameras = await videoInputs();
+  }
+  cameraSelect.textContent = '';
+  cameras.forEach((cam, i) => {
+    const option = document.createElement('option');
+    option.value = cam.deviceId;
+    // Device labels come from drivers: textContent, never innerHTML.
+    option.textContent = cam.label || `Camera ${i + 1}`;
+    cameraSelect.appendChild(option);
+  });
+  if (cameras.some((c) => c.deviceId === selectedId)) cameraSelect.value = selectedId;
+  cameraSelect.hidden = cameras.length < 2;
+  return cameras;
+}
+
+async function turnCameraOn(selectedId) {
+  setCameraNote('');
+  const allowed = await window.loupe.requestCamera();
+  if (!allowed) {
+    cameraSwitch.checked = false;
+    cameraSelect.hidden = true;
+    showBanner('Loupe needs permission to use the camera. ', 'camera');
+    await saveRecording({ camera: false });
+    return;
+  }
+  const cameras = await listCameras(selectedId);
+  if (cameras.length === 0) {
+    cameraSwitch.checked = false;
+    setCameraNote('No camera found');
+    await saveRecording({ camera: false });
+    return;
+  }
+  await saveRecording({ camera: true, cameraDeviceId: cameraSelect.value || null });
+}
+
+cameraSwitch.addEventListener('change', async () => {
+  if (cameraSwitch.checked) {
+    await turnCameraOn(cameraSelect.value || null);
+  } else {
+    cameraSelect.hidden = true;
+    setCameraNote('');
+    await saveRecording({ camera: false });
+  }
+});
+
+cameraSelect.addEventListener('change', () => {
+  saveRecording({ cameraDeviceId: cameraSelect.value || null });
+});
+
+for (const id of recordingSwitches) {
+  document.getElementById(id).addEventListener('change', (e) => {
+    saveRecording({ [id]: e.target.checked });
+  });
+}
+
+window.loupe.getRecordingSettings().then(async (s) => {
+  for (const id of recordingSwitches) document.getElementById(id).checked = s[id];
+  cameraSwitch.checked = s.camera;
+  // Still there, still allowed? Otherwise the switch goes off with a reason.
+  if (s.camera) await turnCameraOn(s.cameraDeviceId);
+});
+
 window.addEventListener('focus', refreshPermissions);
 load();

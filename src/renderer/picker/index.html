@@ -26,6 +26,38 @@
       <input type="checkbox" id="mic" class="switch">
     </div>
     <div class="optionrow">
+      <label for="systemAudio">
+        <span class="glyph" aria-hidden="true">🔊</span>
+        Record computer sound
+      </label>
+      <input type="checkbox" id="systemAudio" class="switch">
+    </div>
+    <div class="optionrow">
+      <label for="camera">
+        <span class="glyph" aria-hidden="true">📷</span>
+        Camera
+      </label>
+      <div class="rowcontrols">
+        <select id="cameraDevice" aria-label="Which camera" hidden></select>
+        <span id="cameraNote" class="note" hidden></span>
+        <input type="checkbox" id="camera" class="switch">
+      </div>
+    </div>
+    <div class="optionrow">
+      <label for="recordKeys">
+        <span class="glyph" aria-hidden="true">⌨️</span>
+        Show keyboard shortcuts I press (never what I type)
+      </label>
+      <input type="checkbox" id="recordKeys" class="switch">
+    </div>
+    <div class="optionrow">
+      <label for="countdown">
+        <span class="glyph" aria-hidden="true">⏱</span>
+        Count down 3, 2, 1 before recording
+      </label>
+      <input type="checkbox" id="countdown" class="switch">
+    </div>
+    <div class="optionrow">
       <span class="rowlabel" id="zoomLabel">
         <span class="glyph" aria-hidden="true">🔍</span>
         Zoom shortcuts — hold one and scroll

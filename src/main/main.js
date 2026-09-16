@@ -23,6 +23,7 @@ const { validateSpeedPaint, paintSpeed, retimePlan, outputDuration } = require('
 const {
   helperCommand, recordingsRoot, coordinateMapper, attachThumbnails
 } = require('./platform');
+const { registerRecordingExtras } = require('./ipc/recording');
 
 const IS_WINDOWS = process.platform === 'win32';
 // Physical pixels <-> DIPs on Windows; identities on macOS (platform.js).
@@ -83,7 +84,7 @@ let pickerWindow = null;
 
 function createPickerWindow() {
   pickerWindow = new BrowserWindow({
-    width: 940, height: 660, title: 'Loupe',
+    width: 940, height: 800, title: 'Loupe',
     webPreferences: { preload: path.join(__dirname, '..', 'preload', 'preload.js') }
   });
   // Only windows on the active Space are listed, so choosing a window that
@@ -239,6 +240,7 @@ function teardownArmedState() {
   teardownBar();
   closeOverlayWindow();
   closeShotWindow();
+  extras.teardown();
   armedSource = null;
   areaMode = 'full';
   currentAreaRect = null;
@@ -365,7 +367,8 @@ function barPayload() {
     sourceLabel: armedSource?.title || armedSource?.source || '',
     canPickArea: Boolean(armedSource),
     sourceKind: armedSource?.source.startsWith('window:') ? 'window' : 'display',
-    areaMode
+    areaMode,
+    ...extras.payload()
   };
 }
 
@@ -376,9 +379,46 @@ function recordingPayload() {
     zoom: s.zoom, duration: s.duration, zoomEnabled: s.zoomEnabled,
     tapReenables: s.tapReenables, hasMic: s.hasMic, micRequested: Boolean(armedSource?.mic),
     error: s.error,
-    elapsed: (Date.now() - startedAt) / 1000
+    // The timer leaves out time spent paused, and stands still while paused.
+    paused: barPhase === 'paused',
+    elapsed: Math.max(0, (Date.now() - startedAt) / 1000 - s.pausedSeconds),
+    systemAudioRequested: s.systemAudioRequested, systemAudio: s.systemAudio,
+    warnings: s.warnings,
+    ...extras.payload()
   };
 }
+
+function sendBarUpdate() {
+  if (!barWindow || barWindow.isDestroyed()) return;
+  const recordingNow = barPhase === 'recording' || barPhase === 'paused';
+  barWindow.webContents.send('bar:update', recordingNow ? recordingPayload() : barPayload());
+}
+
+// Pause/resume (bar button and the pause shortcut): capture keeps running,
+// the recorder only notes the range (pauses.js).
+function togglePause() {
+  if (barPhase === 'recording') {
+    if (!recorder.pause()) return;
+    barPhase = transition(barPhase, 'pause');
+  } else if (barPhase === 'paused') {
+    if (!recorder.resume()) return;
+    barPhase = transition(barPhase, 'resume');
+  } else {
+    return;
+  }
+  sendBarUpdate();
+}
+
+const extras = registerRecordingExtras({
+  electron,
+  preload: path.join(__dirname, '..', 'preload', 'preload.js'),
+  rendererDir: path.join(__dirname, '..', 'renderer'),
+  userDataPath: () => app.getPath('userData'),
+  excludeFromCapture,
+  now: () => performance.now() / 1000,
+  togglePause,
+  refreshBar: sendBarUpdate
+});
 
 // Both the Back button (armed) and the Stop button (recording) resolve to
 // this one function -- see preload.js's stopRecording, which both map to.
@@ -392,7 +432,11 @@ function recordingPayload() {
 // channel).
 async function stopRecording() {
   if (!barWindow) return null;
-  barPhase = transition(barPhase, barPhase === 'armed' ? 'back' : 'stop');
+  const backingOut = barPhase === 'armed' || barPhase === 'counting';
+  barPhase = transition(barPhase, backingOut ? 'back' : 'stop');
+  // The webcam file finishes while the helpers stop (recorder.stop awaits
+  // it); started before teardown, which would otherwise just close it.
+  const webcam = backingOut ? null : extras.finishWebcam();
   teardownArmedState();
   // recorder.stop() resolves to null when there is nothing to stop (e.g. the
   // bar was only ever armed, or a second call races the first); that is a
@@ -401,7 +445,7 @@ async function stopRecording() {
   // back regardless of how stop() ends, so the recovery runs in `finally`
   // and the failure is re-thrown afterward rather than swallowed.
   try {
-    const result = await recorder.stop();
+    const result = await recorder.stop({ webcam });
     if (result?.dir) openEditorWindow(result.dir);
     return result;
   } finally {
@@ -570,8 +614,14 @@ ipcMain.handle('bar:arm', (_e, rawOpts) => {
   currentAreaRect = null;
   barPhase = 'armed';
   createBarWindow();
+  extras.onArm();
   pickerWindow?.hide();
 });
+
+// Bar: the pause button, and Cancel/Esc during the countdown.
+ipcMain.handle('bar:pause', () => { if (barPhase === 'recording') togglePause(); });
+ipcMain.handle('bar:resume', () => { if (barPhase === 'paused') togglePause(); });
+ipcMain.handle('bar:cancelCountdown', () => extras.cancelCountdown());
 
 ipcMain.handle('bar:setAreaMode', (_e, mode) => {
   if (mode !== 'full' && mode !== 'rect' && mode !== 'draw') {
@@ -591,7 +641,6 @@ ipcMain.handle('bar:start', async () => {
   }
   starting = true;
   try {
-    barPhase = transition(barPhase, 'start');
     if (!permissions.canRecord()) throw new Error('Screen Recording permission is required');
 
     // A denied mic prompt used to be discarded entirely: bin/capture was
@@ -607,6 +656,30 @@ ipcMain.handle('bar:start', async () => {
       if (!granted) recordMic = false;
     }
 
+    // 3-2-1 on the bar before anything records (unless turned off). Escape
+    // cancels it back to armed, so the area overlay lends its Escape to the
+    // countdown and gets it back afterwards.
+    if (extras.settings().countdown) {
+      barPhase = transition(barPhase, 'countdown');
+      const overlayHadEscape = escapeHeld;
+      holdEscapeForBack(false);
+      const go = await extras.runCountdown((count) => {
+        barWindow?.webContents.send('bar:update', { ...barPayload(), state: 'countdown', count });
+      });
+      if (!go) {
+        // Stop/quit during the countdown already closed the bar.
+        if (barPhase === 'counting') {
+          barPhase = transition(barPhase, 'cancel');
+          if (overlayHadEscape && overlayWindow && !overlayWindow.isDestroyed()) holdEscapeForBack(true);
+          sendBarUpdate();
+        }
+        return { cancelled: true };
+      }
+      barPhase = transition(barPhase, 'go');
+    } else {
+      barPhase = transition(barPhase, 'start');
+    }
+
     const dir = path.join(recordingsRoot((name) => app.getPath(name), os.homedir()), String(Date.now()));
     fs.mkdirSync(dir, { recursive: true });
 
@@ -617,7 +690,7 @@ ipcMain.handle('bar:start', async () => {
     // middle segment is the same windowID `bin/sources` reports as
     // "window:<n>" and that SCContentFilter(excludingWindows:) matches
     // against -- verified empirically, see control-bar-report.md.
-    const excludeWindowIds = [barWindow.getMediaSourceId().split(':')[1]];
+    const excludeWindowIds = [barWindow.getMediaSourceId().split(':')[1], ...extras.excludeWindowIds()];
     if (overlayWindow && !overlayWindow.isDestroyed()) {
       excludeWindowIds.push(overlayWindow.getMediaSourceId().split(':')[1]);
     }
@@ -649,7 +722,8 @@ ipcMain.handle('bar:start', async () => {
         region: validated.region,
         excludeWindowIds,
         zoomEnabled,
-        inputTapArgs: inputTapArgs(currentSettings())
+        inputTapArgs: inputTapArgs(currentSettings()),
+        ...extras.recorderOptions()
       });
     } catch (err) {
       closeShotWindow();
@@ -657,13 +731,10 @@ ipcMain.handle('bar:start', async () => {
       throw err;
     }
     if (zoomEnabled) startShotFrame(area);
+    extras.onRecordingStarted(dir);
 
-    barTimer = setInterval(() => {
-      if (barWindow && !barWindow.isDestroyed()) {
-        barWindow.webContents.send('bar:update', recordingPayload());
-      }
-    }, 200);
-    barWindow.webContents.send('bar:update', recordingPayload());
+    barTimer = setInterval(sendBarUpdate, 200);
+    sendBarUpdate();
 
     return { dir, zoomEnabled: permissions.canZoom(), mic: recordMic, micRequested: armedSource.mic };
   } finally {

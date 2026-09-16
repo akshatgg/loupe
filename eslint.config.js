@@ -47,6 +47,19 @@ module.exports = [
       eqeqeq: 'error'
     }
   },
+  // The webcam bubble is an ES module page (docs/EDITOR-V2.md: new renderer
+  // code is ESM).
+  {
+    files: ['src/renderer/camera/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: {
+        window: 'readonly', document: 'readonly', navigator: 'readonly',
+        console: 'readonly', performance: 'readonly', MediaRecorder: 'readonly'
+      }
+    }
+  },
   // The website (web/, deployed to Vercel) is plain browser scripts too.
   {
     files: ['web/**/*.js'],

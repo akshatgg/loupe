@@ -1,10 +1,14 @@
 'use strict';
 
 const path = require('node:path');
+const { performance } = require('node:perf_hooks');
 const { createZoomState, applyScroll } = require('./zoom');
 const { createProject, saveProject, writeCursorTrack } = require('./project');
 const { buildExcludeWindowArgs } = require('./exclude-args');
 const { helperCommand, captureFileName } = require('./platform');
+const { createClockSync } = require('./clock-sync');
+const { createPauseTracker, toSourcePauses, clipsFromPauses } = require('./pauses');
+const { buildMainSource, writeKeys, validKeyLabel } = require('./recording-v2');
 
 const identity = (v) => v;
 
@@ -14,9 +18,14 @@ const identity = (v) => v;
 // bin/capture -- both identities on macOS, where every helper speaks points;
 // on Windows the helpers speak physical pixels and main.js supplies
 // Electron's DIP conversions.
+//
+// `now` is the main process's clock in seconds. Pauses and the webcam's
+// start are measured on it and mapped into source time through clock-sync.js,
+// fed by the timestamps on every helper line.
 function createRecorder({
   binDir, spawnHelper, stopHelper, onError,
-  platform = process.platform, toDipPoint = identity, toCaptureRect = identity
+  platform = process.platform, toDipPoint = identity, toCaptureRect = identity,
+  now = () => performance.now() / 1000
 }) {
   const captureFile = captureFileName(platform);
   let captureChild = null;
@@ -60,6 +69,16 @@ function createRecorder({
   let zoomState = createZoomState();
   let clicks = [];
   let cursorTrack = [];
+  // Recording additions (docs/EDITOR-V2.md section 7): shortcut presses,
+  // pause ranges, the computer-sound file capture reports writing, and
+  // non-fatal helper warnings (e.g. computer sound failed; video carries on).
+  let keysEnabled = false;
+  let keys = [];
+  let systemAudioRequested = false;
+  let systemAudioFile = null;
+  let warnings = [];
+  let sync = createClockSync();
+  let pauses = createPauseTracker();
   const pending = [];
 
   function consume(msg) {
@@ -83,6 +102,9 @@ function createRecorder({
       case 'cursor':
         cursorTrack.push({ t, x: msg.x - sourceOriginX, y: msg.y - sourceOriginY, shape: msg.shape });
         break;
+      case 'key':
+        if (keysEnabled && validKeyLabel(msg.label)) keys.push({ t, label: msg.label });
+        break;
       default:
         break;
     }
@@ -96,13 +118,24 @@ function createRecorder({
     // NDJSON line while the process is still alive. Route it through the
     // exact same path a spawn failure takes so the user is told either way.
     if (msg.type === 'error') { onInputError({ message: msg.message }); return; }
+    // Every event is stamped when it happened and sent right away: a clock
+    // sample (clock-sync.js), taken on arrival before any buffering.
+    sync.observe(msg.clock, now());
     // Buffer until the capture clock origin is known, then rebase.
     if (captureClock === null) { pending.push(msg); return; }
     consume(msg);
   }
 
   function onCapture(msg) {
-    if (msg.type === 'started') {
+    // Only `now` (stamped as the line is written) is a valid sample here: a
+    // frame's `clock` is its presentation time, which ScreenCaptureKit can
+    // put a few milliseconds after the line was written.
+    sync.observe(msg.now, now());
+    if (msg.type === 'system_audio') {
+      if (systemAudioRequested) systemAudioFile = msg.file;
+    } else if (msg.type === 'warning') {
+      if (typeof msg.message === 'string') warnings.push(msg.message);
+    } else if (msg.type === 'started') {
       captureClock = msg.clock;
       for (const m of pending) consume(m);
       pending.length = 0;
@@ -191,6 +224,15 @@ function createRecorder({
     sourceOriginY = originY === undefined ? 0 : originY;
     hasMic = Boolean(opts.mic);
     zoomEnabled = opts.zoomEnabled !== false;
+    // Keystrokes ride on the same event hook as zoom, so they need the same
+    // permission (Accessibility on macOS) and come and go with it.
+    keysEnabled = Boolean(opts.keys) && zoomEnabled;
+    keys = [];
+    systemAudioRequested = Boolean(opts.systemAudio);
+    systemAudioFile = null;
+    warnings = [];
+    sync = createClockSync();
+    pauses = createPauseTracker();
     captureClock = null;
     zoomState = createZoomState();
     clicks = [];
@@ -204,6 +246,9 @@ function createRecorder({
 
     const args = ['--source', source, '--out', path.join(dir, captureFile),
                   '--mic', hasMic ? '1' : '0'];
+    // Computer sound goes into its own file beside the video (system.m4a);
+    // capture reports the name it wrote with {"type":"system_audio","file"}.
+    if (systemAudioRequested) args.push('--system-audio', '1');
     // Every Loupe-owned overlay window that could be on screen when capture
     // starts -- the control bar (always) and, with the outline still
     // open, the region-selection overlay -- must be excluded.
@@ -235,7 +280,8 @@ function createRecorder({
       // How zooming is triggered (modifier key / mouse side button) --
       // settings.js's inputTapArgs, from the user's saved choice.
       const inputtap = helperCommand(binDir, 'inputtap', platform);
-      inputChild = spawnHelper(inputtap.file, [...inputtap.args, ...(opts.inputTapArgs ?? [])], {
+      const keyArgs = keysEnabled ? ['--keys', '1'] : [];
+      inputChild = spawnHelper(inputtap.file, [...inputtap.args, ...(opts.inputTapArgs ?? []), ...keyArgs], {
         onMessage: (msg) => { if (gen === generation) onInput(msg); },
         onMalformed: (l) => console.error('inputtap malformed:', l),
         // A non-zero exit here (e.g. Accessibility revoked mid-recording,
@@ -261,7 +307,32 @@ function createRecorder({
     recording = true;
   }
 
-  async function stop() {
+  // Pause/resume while recording: the helpers keep running, only the range
+  // is remembered (pauses.js). Each returns whether anything changed.
+  function pause() {
+    if (!recording) return false;
+    return pauses.pause(now());
+  }
+
+  function resume() {
+    if (!recording) return false;
+    return pauses.resume(now());
+  }
+
+  // A main-process moment (seconds on `now`) as source time, or null before
+  // the helpers have said anything to align with.
+  function toSourceTime(localTime) {
+    const helperTime = sync.toHelper(localTime);
+    if (helperTime === null || captureClock === null || !Number.isFinite(localTime)) return null;
+    return helperTime - captureClock;
+  }
+
+  // `webcam`, when the camera bubble recorded, is { file, startLocal, width,
+  // height } -- or a promise of it, so the bubble can finish its file while
+  // the helpers stop (ipc/camera.js finish()). startLocal is when webcam.webm's first frame was taken, on the
+  // `now` clock (see ipc/camera.js), so its offset into the recording is
+  // that moment in source time -- negative when the camera started first.
+  async function stop({ webcam = null } = {}) {
     // stop() can be reached from a stop button or a global hotkey, either of
     // which may fire with no recording ever started (source is still null).
     // Rather than throwing out of an async function, resolve to null: a
@@ -274,6 +345,8 @@ function createRecorder({
     // second time and return a second success result.
     if (source === null || stopped) return null;
     stopped = true;
+    // Stopping while paused ends the pause here, before the helpers go.
+    const stopLocal = now();
 
     // Capture and clear the shared references before awaiting, the same way
     // onCaptureError already does. Otherwise a delayed capture 'error' that
@@ -306,8 +379,30 @@ function createRecorder({
     project.removedZooms = [];
     project.clicks = clicks;
 
+    // Version-2 fields (recording-v2.js documents exactly what is written).
+    const sourcePauses = toSourcePauses(pauses.ranges(stopLocal), toSourceTime, duration);
+    let webcamSource = null;
+    webcam = await Promise.resolve(webcam).catch(() => null);
+    if (webcam && typeof webcam.file === 'string') {
+      webcamSource = {
+        file: webcam.file,
+        offset: toSourceTime(webcam.startLocal) ?? 0,
+        width: webcam.width,
+        height: webcam.height
+      };
+    }
+    project.sources = {
+      main: buildMainSource({
+        source: project.source, captureFile, duration, hasMic,
+        systemAudioFile, webcam: webcamSource, keysRecorded: keysEnabled,
+        clicks, pauses: sourcePauses
+      })
+    };
+    project.clips = clipsFromPauses(duration, sourcePauses);
+
     saveProject(dir, project);
     writeCursorTrack(dir, cursorTrack);
+    if (keysEnabled) writeKeys(dir, keys);
     return { dir, project, cursorTrack };
   }
 
@@ -315,11 +410,13 @@ function createRecorder({
     return {
       recording, zoomEnabled, tapReenables, duration, error, hasMic,
       zoomKeyframes: zoomState.keyframes, clicks, cursorTrack,
-      zoom: zoomState.target
+      zoom: zoomState.target,
+      keys, systemAudio: systemAudioFile, systemAudioRequested, warnings,
+      paused: pauses.isPaused(), pausedSeconds: pauses.pausedTotal(now())
     };
   }
 
-  return { start, stop, state };
+  return { start, stop, state, pause, resume, toSourceTime };
 }
 
 module.exports = { createRecorder };

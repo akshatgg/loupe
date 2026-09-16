@@ -3,12 +3,13 @@ using static Loupe.Native.Win32;
 
 namespace Loupe.Native;
 
-// `loupe-native inputtap [--zoom-triggers option,mouse-side]`: the zoom
+// `loupe-native inputtap [--zoom-triggers option,mouse-side] [--keys 1]`: the zoom
 // gesture, clicks and cursor track, from low-level mouse and keyboard hooks.
 // The Windows counterpart of InputTap.swift, with the same messages:
 //   {"type":"zoom","clock","dy","x","y"}   a zoom-trigger scroll (swallowed)
 //   {"type":"click","clock","x","y","button"}
 //   {"type":"cursor","clock","x","y","shape"}
+//   {"type":"key","clock","label"}         a keyboard shortcut (--keys 1; Keys.cs)
 // Coordinates are physical screen pixels (this process is per-monitor DPI
 // aware); main.js maps them to DIPs. Low-level hooks need no permission on
 // Windows, so there is no Accessibility step.
@@ -56,6 +57,7 @@ static class InputTap
     static int? buttonHeld;
     static bool zoomedDuringHold;
     static double lastCursorEmit;
+    static bool reportKeys;
     const double CursorInterval = 1.0 / 120.0;
 
     static readonly IntPtr ArrowCursor = LoadCursor(IntPtr.Zero, new IntPtr(IDC_ARROW));
@@ -71,6 +73,7 @@ static class InputTap
     public static int Run(string[] argv)
     {
         triggers = new Triggers(Args.Get(argv, "--zoom-triggers"));
+        reportKeys = Args.Get(argv, "--keys") == "1";
         uint thread = GetCurrentThreadId();
 
         mouseProc = MouseHook;
@@ -189,6 +192,18 @@ static class InputTap
         SendInput((uint)inputs.Length, inputs, Marshal.SizeOf<INPUT>());
     }
 
+    static void ReportShortcut(uint vk)
+    {
+        bool Held(params uint[] keys) => keys.Any(down.Contains);
+        // AltGr arrives as a left Ctrl press followed by right Alt.
+        bool altGr = Held(0xA5) && Held(0xA2);
+        var modifiers = new Keys.Modifiers(
+            Ctrl: Held(0x11, 0xA2, 0xA3), Alt: Held(0x12, 0xA4, 0xA5), Shift: Held(0x10, 0xA0, 0xA1),
+            Win: Held(0x5B, 0x5C), AltGr: altGr);
+        var label = Keys.ShortcutLabel(vk, modifiers, v => (char)(MapVirtualKey(v, MAPVK_VK_TO_CHAR) & 0x7FFFFFFF));
+        if (label != null) Out.Emit(new { type = "key", clock = Clock.Now(), label });
+    }
+
     static IntPtr KeyboardHook(int code, IntPtr wParam, IntPtr lParam)
     {
         if (code < 0) return CallNextHookEx(keyboardHook, code, wParam, lParam);
@@ -199,7 +214,9 @@ static class InputTap
         if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)
         {
             if (down.Count == 0) zoomedWhileModifierDown = false;
-            down.Add(e.vkCode);
+            // A key already down is auto-repeating: one press, one shortcut.
+            bool repeat = !down.Add(e.vkCode);
+            if (reportKeys && !repeat) ReportShortcut(e.vkCode);
         }
         else if (message == WM_KEYUP || message == WM_SYSKEYUP)
         {

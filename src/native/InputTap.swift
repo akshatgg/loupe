@@ -2,6 +2,7 @@ import Foundation
 import CoreGraphics
 import AppKit
 import QuartzCore
+import Carbon.HIToolbox
 
 let outputQueue = DispatchQueue(label: "tech.markai.loupe.inputtap.out")
 
@@ -65,6 +66,81 @@ final class TapState {
     // release), and whether any scroll-zoom happened while it was.
     var buttonHeld: Int64?
     var zoomedDuringHold = false
+    // `--keys 1`: report keyboard shortcuts (see shortcutLabel).
+    let keys = arg("--keys") == "1"
+}
+
+// ---- keyboard shortcuts -----------------------------------------------------
+// Only presses that are clearly commands are reported: a key held with ⌘, ⌃
+// or ⌥, or one of the keys that is a command on its own (Esc, Tab, Return,
+// Delete, the arrows, function keys). Plain typing -- letters, digits,
+// punctuation, with or without Shift -- is never reported, so nothing typed
+// (a password, a message) ends up in a recording. Password fields also turn
+// on Secure Event Input, which hides every key from event taps anyway.
+
+// Keys that are commands on their own, by virtual key code, with the symbol
+// macOS menus use for them.
+let standaloneKeys: [Int: String] = [
+    kVK_Escape: "⎋", kVK_Tab: "⇥", kVK_Return: "↩", kVK_ANSI_KeypadEnter: "⌤",
+    kVK_Delete: "⌫", kVK_ForwardDelete: "⌦",
+    kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑", kVK_DownArrow: "↓",
+    kVK_F1: "F1", kVK_F2: "F2", kVK_F3: "F3", kVK_F4: "F4", kVK_F5: "F5", kVK_F6: "F6",
+    kVK_F7: "F7", kVK_F8: "F8", kVK_F9: "F9", kVK_F10: "F10", kVK_F11: "F11", kVK_F12: "F12",
+    kVK_F13: "F13", kVK_F14: "F14", kVK_F15: "F15", kVK_F16: "F16", kVK_F17: "F17",
+    kVK_F18: "F18", kVK_F19: "F19", kVK_F20: "F20"
+]
+
+// Keys only worth naming as part of a shortcut.
+let namedKeys: [Int: String] = [
+    kVK_Space: "Space", kVK_Home: "↖", kVK_End: "↘", kVK_PageUp: "⇞", kVK_PageDown: "⇟"
+]
+
+// What the key prints with no modifiers, on the current keyboard layout, so
+// ⌘Z reads "⌘Z" on a QWERTZ keyboard too, and ⌘⇧2 is "⌘⇧2" rather than "⌘⇧@".
+func layoutCharacter(keyCode: Int) -> String? {
+    guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+          let raw = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData)
+    else { return nil }
+    let data = Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue() as Data
+    var deadKeys: UInt32 = 0
+    var chars = [UniChar](repeating: 0, count: 4)
+    var length = 0
+    let status = data.withUnsafeBytes { (ptr: UnsafeRawBufferPointer) -> OSStatus in
+        guard let layout = ptr.baseAddress?.assumingMemoryBound(to: UCKeyboardLayout.self) else {
+            return -1
+        }
+        return UCKeyTranslate(layout, UInt16(keyCode), UInt16(kUCKeyActionDisplay), 0,
+                              UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit),
+                              &deadKeys, chars.count, &length, &chars)
+    }
+    guard status == noErr, length > 0 else { return nil }
+    let text = String(utf16CodeUnits: chars, count: length).trimmingCharacters(in: .whitespacesAndNewlines)
+    return text.isEmpty ? nil : text.uppercased()
+}
+
+/// The label for a key press, like "⌘⇧K" -- or nil when the press is typing
+/// rather than a shortcut. Modifiers in the order macOS menus show them.
+func shortcutLabel(keyCode: Int, flags: CGEventFlags) -> String? {
+    let command = flags.contains(.maskCommand)
+    let control = flags.contains(.maskControl)
+    let option = flags.contains(.maskAlternate)
+    let shift = flags.contains(.maskShift)
+    let standalone = standaloneKeys[keyCode]
+    guard command || control || option || standalone != nil else { return nil }
+    // ⌥ with a character key (and no ⌘/⌃) types a character on macOS
+    // (⌥E for an accent, ⌥2 for € and so on): typing, not a shortcut.
+    // ⌥ with a named key (⌥←, ⌥Space, ⌥↩) is still a shortcut.
+    let named = standalone ?? namedKeys[keyCode]
+    if option && !command && !control && named == nil { return nil }
+    guard let key = named ?? layoutCharacter(keyCode: keyCode) else {
+        return nil
+    }
+    var label = ""
+    if control { label += "⌃" }
+    if option { label += "⌥" }
+    if shift { label += "⇧" }
+    if command { label += "⌘" }
+    return label + key
 }
 
 // A shortcut-button press that turned out NOT to be a zoom gesture is
@@ -146,6 +222,17 @@ let callback: CGEventTapCallBack = { _, type, event, userInfo in
         if !state.zoomedDuringHold { replayClick(button: button, at: location) }
         return nil
 
+    case .keyDown:
+        // Held keys repeat; one press is one shortcut.
+        guard state.keys, event.getIntegerValueField(.keyboardEventAutorepeat) == 0 else {
+            return Unmanaged.passUnretained(event)
+        }
+        let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        if let label = shortcutLabel(keyCode: keyCode, flags: event.flags) {
+            emit(["type": "key", "clock": now, "label": label])
+        }
+        return Unmanaged.passUnretained(event)
+
     case .leftMouseDown, .rightMouseDown:
         emit(["type": "click", "clock": now,
               "x": location.x, "y": location.y,
@@ -174,9 +261,22 @@ let callback: CGEventTapCallBack = { _, type, event, userInfo in
 // any CoreGraphics/AppKit APIs that require it.
 _ = NSApplication.shared
 
+// `inputtap --describe-key <keycode> <flags>` prints the label a press would
+// get ("" for plain typing) and exits, without installing a tap: lets
+// test/native-keys.test.js check the shortcut rules without pressing keys.
+if let i = CommandLine.arguments.firstIndex(of: "--describe-key"), i + 2 < CommandLine.arguments.count,
+   let keyCode = Int(CommandLine.arguments[i + 1]), let flags = UInt64(CommandLine.arguments[i + 2]) {
+    print(shortcutLabel(keyCode: keyCode, flags: CGEventFlags(rawValue: flags)) ?? "")
+    exit(0)
+}
+
 let state = TapState()
 
+// Key events only when asked for: without --keys the tap never sees a key.
+let keyMask: CGEventMask = state.keys ? (1 << CGEventType.keyDown.rawValue) : 0
+
 let mask: CGEventMask =
+    keyMask |
     (1 << CGEventType.scrollWheel.rawValue) |
     (1 << CGEventType.leftMouseDown.rawValue) |
     (1 << CGEventType.rightMouseDown.rawValue) |

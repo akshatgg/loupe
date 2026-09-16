@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- The platform-independent parts of loupe-native (picture and sound
-       processing), tested on any OS with: dotnet run project native-win/tests -->
+       processing, shortcut labels, the computer-sound file), tested on any OS with: dotnet run project native-win/tests -->
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
@@ -11,5 +11,7 @@
   <ItemGroup>
     <Compile Include="../Compositor.cs" Link="Compositor.cs" />
     <Compile Include="../AudioStretch.cs" Link="AudioStretch.cs" />
+    <Compile Include="../Keys.cs" Link="Keys.cs" />
+    <Compile Include="../WavFile.cs" Link="WavFile.cs" />
   </ItemGroup>
 </Project>
