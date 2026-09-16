@@ -134,6 +134,25 @@ test('a new project has pretty defaults and clips around pauses', () => {
   assert.deepStrictEqual(paused.clips.map((c) => [c.id, c.start, c.end]), [['c1', 0, 5], ['c2', 8, 20]]);
 });
 
+test('opening a recording whose clip runs through its pauses cuts them out; edited clips are left alone', () => {
+  const untouched = P.createProject({ main: MAIN });
+  const raw = {
+    ...untouched,
+    sources: { main: { ...untouched.sources.main, pauses: [{ start: 5, end: 8 }, { start: 12, end: 13 }] } },
+    transitions: [{ after: 'c1', type: 'fade', duration: 0.5 }]
+  };
+  const loaded = P.loadProjectData(JSON.parse(JSON.stringify(raw)));
+  assert.deepStrictEqual(loaded.clips.map((c) => [c.start, c.end]), [[0, 5], [8, 12], [13, 20]]);
+  assert.strictEqual(new Set(loaded.clips.map((c) => c.id)).size, 3);
+  assert.strictEqual(loaded.clips.at(-1).id, 'c1', 'the last piece keeps the id its transition points at');
+  assert.strictEqual(buildTimeline(loaded).duration, 16);
+
+  const trimmed = { ...raw, clips: [{ id: 'c1', source: 'main', start: 1, end: 20 }] };
+  assert.deepStrictEqual(P.loadProjectData(trimmed).clips.map((c) => [c.start, c.end]), [[1, 20]]);
+  const recorded = P.createProject({ main: { ...MAIN, pauses: [{ start: 5, end: 8 }] } });
+  assert.strictEqual(P.loadProjectData(recorded).clips.length, 2, 'already cut by the recorder: unchanged');
+});
+
 // ---------------------------------------------------------------- clip edits
 
 test('trimStart and trimEnd move clip edges, clamped, without touching the old project', () => {
