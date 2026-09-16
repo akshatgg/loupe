@@ -125,9 +125,9 @@ export default {
     const againLanguage = h('div', {});
     const editView = h('div', { class: 'cap-edit', hidden: true },
       section(null, show),
-      section('Look', size, position, box),
       section(null, count, h('p', { class: 'hint cap-list-hint' }, 'Click a time to jump there, and fix any words right here.'), list,
         h('div', { class: 'cap-buttons' }, addBtn, saveBtn)),
+      section('Look', size, position, box),
       section('Captions from speech', againLanguage, againHint, h('div', { class: 'cap-buttons' }, againBtn, keepBtn)));
 
     container.append(startView, workView, errorView, editView);
