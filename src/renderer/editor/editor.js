@@ -385,18 +385,23 @@ document.getElementById('export').onclick = async () => {
   exportBtn.disabled = true;
   setStatus('Exporting…');
   try {
-    const file = await window.loupe.exportVideo({ preset, codec: 'h264' });
-    setStatus(`Saved ${file}`);
+    const result = await window.loupe.exportVideo({ resolution: preset, codec: 'h264' });
+    setStatus(`Saved ${result.file}`);
   } catch (err) {
-    setStatus(`Export failed: ${err.message}`);
+    // ipcRenderer.invoke wraps a main-process error as "Error invoking
+    // remote method 'export:start': Error: <message>"; show only the message.
+    setStatus(`Export failed: ${String(err.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')}`);
   } finally {
     exportBtn.disabled = false;
   }
 };
 
 window.loupe.onExportProgress((p) => {
-  setStatus(p.total ? `Exporting… ${Math.min(100, Math.round((p.frame / p.total) * 100))}%`
-    : `Exporting… frame ${p.frame ?? ''}`.trim());
+  if (p.phase === 'video' && p.total) {
+    setStatus(`Exporting… ${Math.min(100, Math.round((p.frame / p.total) * 100))}%`);
+  } else {
+    setStatus(p.phase === 'sound' ? 'Exporting… preparing the sound' : 'Exporting… reading the recording');
+  }
 });
 
 if (window.loupe.platform === 'win32') {

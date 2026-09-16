@@ -102,7 +102,7 @@ module.exports = [
         performance: 'readonly', OffscreenCanvas: 'readonly', createImageBitmap: 'readonly',
         VideoDecoder: 'readonly', VideoEncoder: 'readonly', VideoFrame: 'readonly',
         AudioDecoder: 'readonly', AudioEncoder: 'readonly', AudioData: 'readonly',
-        EncodedVideoChunk: 'readonly', EncodedAudioChunk: 'readonly'
+        EncodedVideoChunk: 'readonly', EncodedAudioChunk: 'readonly', Blob: 'readonly'
       }
     },
     rules: {

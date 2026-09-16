@@ -21,7 +21,17 @@ function installElectronMock() {
   const shortcuts = new Map();
 
   class FakeWebContents {
+    constructor() {
+      this.handlers = {};
+      this.listeners = {};
+      // webContents.ipc: the hidden export window's own IPC (ipc/export.js).
+      this.ipc = {
+        handle: (channel, fn) => { this.handlers[channel] = fn; },
+        on: (channel, fn) => { this.listeners[channel] = fn; }
+      };
+    }
     send() {}
+    on() {}
   }
 
   class FakeBrowserWindow {
@@ -43,6 +53,7 @@ function installElectronMock() {
     setIgnoreMouseEvents() {}
     getMediaSourceId() { return 'window:0:0'; }
     isDestroyed() { return this._closed; }
+    destroy() { this.close(); }
     // Fires 'closed' listeners on a later tick, the same way real Electron's
     // window teardown is asynchronous relative to close() returning -- this
     // is exactly the race Finding 1's identity check has to survive.
@@ -93,24 +104,6 @@ function makeProjectDir(name) {
   const { saveProject, createProject } = require('../src/main/project');
   saveProject(dir, createProject({ width: 100, height: 100 }, { duration: 10 }));
   return dir;
-}
-
-// A fake helper child matching the shape stopHelper() (helpers.js) expects:
-// kill(), 'close'/'exit' listeners, exitCode/signalCode, __loupeClosed.
-function fakeChild() {
-  const listeners = {};
-  return {
-    __loupeClosed: false,
-    exitCode: null,
-    signalCode: null,
-    killedWith: null,
-    kill(sig) {
-      this.killedWith = sig;
-      this.exitCode = 0;
-      setImmediate(() => { for (const cb of listeners.close || []) cb(0); });
-    },
-    once(evt, cb) { (listeners[evt] ||= []).push(cb); }
-  };
 }
 
 test('opening a second editor closes the first and adopts the new directory', () => {
@@ -190,45 +183,46 @@ test('a rejected export leaves no partial output file behind', async () => {
   const dir = makeProjectDir('export-fail');
   main.__test__.openEditorWindow(dir);
 
-  // Stub out spawnHelper's binary invocation indirectly isn't possible
-  // without touching helpers.js, so instead drive the failure path the same
-  // way export:start's own executor does: call the handler, then simulate
-  // the underlying render helper failing before it produces output. This
-  // project has no raw.mov, so the render helper fails (or, without a built
-  // bin/render, spawnHelper's ENOENT path does) -- exercise that directly.
-  await assert.rejects(() => ipcHandlers['export:start']({}, { preset: '1080p', codec: 'h264' }));
+  // This project has no raw.mov, so the export is refused before anything
+  // is written.
+  await assert.rejects(() => ipcHandlers['export:start']({ sender: {} }, { resolution: '1080p', codec: 'h264' }),
+    /video file is missing/);
 
   const files = fs.readdirSync(dir);
   const partials = files.filter((f) => f.startsWith('export-'));
   assert.deepStrictEqual(partials, [], `expected no partial export file, found: ${partials}`);
-  assert.strictEqual(main.__test__.editorState().exportChild, null);
+  assert.strictEqual(main.__test__.exporter.busy(), false);
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('quitting mid-export stops the render helper and unlinks the partial file', async () => {
-  const { main, appHandlers } = freshMain();
+test('quitting mid-export cancels it and removes the partial file', async () => {
+  const { main, appHandlers, windows } = freshMain();
   const dir = makeProjectDir('quit-export');
   main.__test__.openEditorWindow(dir);
 
   const outPath = path.join(dir, 'export-100x100.mp4');
-  fs.writeFileSync(outPath, 'partial data');
-  const child = fakeChild();
-  main.__test__.setExportState(child, outPath);
+  const running = main.__test__.exporter.start({}, outPath);
+  running.catch(() => {});
+  // Wait for the partial file and the hidden export window.
+  for (let i = 0; i < 50 && !windows.some((w) => w.opts?.webPreferences?.sandbox); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  const exportWin = windows.find((w) => w.opts?.webPreferences?.sandbox);
+  assert.ok(exportWin, 'the export runs in a hidden window');
+  assert.strictEqual(fs.existsSync(`${outPath}.part`), true);
 
   let prevented = false;
   const fakeEvent = { preventDefault: () => { prevented = true; } };
   assert.ok(appHandlers['before-quit'] && appHandlers['before-quit'].length > 0);
   appHandlers['before-quit'][0](fakeEvent);
-
   assert.strictEqual(prevented, true, 'quit must be held off to stop the export cleanly');
-  assert.strictEqual(main.__test__.editorState().exportChild, null);
 
-  // Wait for stopHelper()'s kill -> 'close' -> unlink chain to finish.
-  await new Promise((resolve) => setTimeout(resolve, 50));
-
-  assert.strictEqual(child.killedWith, 'SIGTERM', 'the render helper must be asked to stop');
-  assert.strictEqual(fs.existsSync(outPath), false, 'the orphaned partial export must be removed');
+  await assert.rejects(running, /cancelled/);
+  assert.strictEqual(main.__test__.exporter.busy(), false);
+  assert.strictEqual(exportWin.isDestroyed(), true, 'the export window is closed');
+  assert.strictEqual(fs.existsSync(`${outPath}.part`), false, 'the partial export must be removed');
+  assert.strictEqual(fs.existsSync(outPath), false);
 
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -427,21 +421,16 @@ test('a bad speed paint is refused and nothing is saved', async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('export hands the renderer the retime plan for the current speed stretches', async () => {
+test('export builds its job from the project, speed stretches included', () => {
   const { main, ipcHandlers } = freshMain();
   const dir = makeProjectDir('speed-export');
   main.__test__.openEditorWindow(dir);
-  await ipcHandlers['project:paintSpeed']({}, { srcStart: 2, srcEnd: 6, rate: 2 });
-
-  // No raw.mov here, so the real render helper fails -- after main has
-  // already written what it hands over.
-  await assert.rejects(() => ipcHandlers['export:start']({}, { preset: '1080p', codec: 'h264' }));
-
-  const plan = JSON.parse(fs.readFileSync(path.join(dir, 'retime.json'), 'utf8'));
-  assert.strictEqual(plan.fps, 60);
-  assert.strictEqual(plan.frames.length, Math.ceil(plan.outputDuration * 60 - 1e-6));
-  assert.ok(plan.audio.length > 0);
-  assert.strictEqual(typeof plan.preservePitch, 'boolean');
-
+  ipcHandlers['project:paintSpeed']({}, { srcStart: 2, srcEnd: 6, rate: 2 });
+  fs.writeFileSync(path.join(dir, 'raw.mov'), '');
+  const { buildJob } = require('../src/main/ipc/export');
+  const { job, out } = buildJob(dir, { resolution: '1080p' });
+  assert.strictEqual(job.project.version, 2);
+  assert.deepStrictEqual(job.project.speed.map((s) => [s.start, s.end, s.rate]), [[2, 6, 2]]);
+  assert.strictEqual(path.dirname(out), dir);
   fs.rmSync(dir, { recursive: true, force: true });
 });

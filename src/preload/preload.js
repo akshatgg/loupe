@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('loupe', {
   restoreZooms: () => ipcRenderer.invoke('project:restoreZooms'),
   setShowCursor: (show) => ipcRenderer.invoke('project:setShowCursor', show),
   paintSpeed: (paint) => ipcRenderer.invoke('project:paintSpeed', paint),
+  // Export runs in a hidden window (src/main/ipc/export.js): resolves with
+  // { file, ... } once saved; progress arrives as { phase, frame, total }.
   exportVideo: (opts) => ipcRenderer.invoke('export:start', opts),
+  cancelExport: () => ipcRenderer.invoke('export:cancel'),
   onExportProgress: (cb) => ipcRenderer.on('export:progress', (_e, d) => cb(d))
 });

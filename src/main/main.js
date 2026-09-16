@@ -14,12 +14,13 @@ const { solveCamera } = require('./camera');
 const {
   zoomSegments, validateSegment, removeZoom, undoRemoveZoom, restoreAllZooms
 } = require('./segments');
-const { loadProject, saveProject, readCursorTrack, writeCameraTrack } = require('./project');
+const { loadProject, saveProject, readCursorTrack } = require('./project');
 const { validateRegion, clampRegionToBounds } = require('./region');
 const { transition } = require('./bar-state');
 const { createLiveCamera, stepLiveCamera } = require('./live-camera');
 const { loadSettings, saveSettings, applySettingsPatch, inputTapArgs } = require('./settings');
-const { validateSpeedPaint, paintSpeed, retimePlan, outputDuration } = require('./speed');
+const { validateSpeedPaint, paintSpeed, outputDuration } = require('./speed');
+const { createExportRunner, registerExportIpc } = require('./ipc/export');
 const {
   helperCommand, recordingsRoot, coordinateMapper, attachThumbnails
 } = require('./platform');
@@ -711,16 +712,16 @@ app.whenReady().then(() => {
 let editorWindow = null;
 let editorDir = null;
 
-// Tracks the render helper for an in-flight export (if any), and the output
-// path it is writing to. Both are read by the editor window's 'closed'
-// handler (to stop an orphaned render) and by export:start (to refuse a
-// second concurrent export -- see the comment there for why "refuse" was
-// chosen over "coalesce").
-let exportChild = null;
-let exportOutPath = null;
+// Exports run one at a time in a hidden window (ipc/export.js). The editor
+// window's 'closed' handler and before-quit cancel one still running.
+const exporter = createExportRunner({
+  BrowserWindow,
+  preload: path.join(__dirname, '..', 'preload', 'exporter.js'),
+  page: path.join(__dirname, '..', 'renderer', 'exporter', 'index.html')
+});
+registerExportIpc({ ipcMain, runner: exporter, projectDir: () => editorDir });
 
-// editorDir/editorWindow/exportChild/exportOutPath are a single global
-// "current editor" slot, not one per calling window. Two choices were
+// editorDir/editorWindow are a single global "current editor" slot, not one per calling window. Two choices were
 // available for fixing the corruption this caused (record, leave the editor
 // open, record again -- the stale editor's project:load/deleteZoom/export
 // silently target the new recording's directory): key this state by
@@ -777,19 +778,9 @@ function openEditorWindow(dir) {
     // (or worse, leave dangling) the state of the editor that is actually
     // live, which is the exact corruption this fix exists to prevent.
     if (editorWindow === win) editorWindow = null;
-    // Closing the editor mid-export would otherwise orphan bin/render: it
-    // keeps running, holds the output file open, burns CPU on a render
-    // nobody will see, and its progress messages silently no-op against a
-    // destroyed window (editorWindow?.webContents.send above). Stop it the
-    // same way a normal export abort would, and remove the now-meaningless
-    // partial output so it can't be mistaken for a finished export.
-    if (exportChild) {
-      const child = exportChild;
-      const outPath = exportOutPath;
-      stopHelper(child).then(() => {
-        if (outPath) fs.promises.unlink(outPath).catch(() => {});
-      });
-    }
+    // Closing the editor mid-export stops the export: nobody is left to see
+    // it finish, and its partial file is removed (ipc/export.js).
+    if (exporter.busy()) exporter.cancel();
   });
   return editorWindow;
 }
@@ -804,47 +795,6 @@ function cameraFor(dir) {
     width: project.source.width,
     height: project.source.height
   });
-}
-
-// Export presets are expressed as a target HEIGHT (the number of vertical
-// lines the "p" in e.g. "1080p" conventionally refers to) rather than a
-// fixed WxH pair. A fixed 1920x1080 (16:9) pair would stretch or crop any
-// source whose aspect ratio differs -- and it does here: this machine's
-// display is 1470x956, an aspect ratio of 1.54, not 1.78. Scaling by the
-// height and deriving the width from the SOURCE's own aspect ratio
-// guarantees the exported picture is never distorted, at the cost of
-// "1080p" not always meaning literally 1920x1080 -- it means "downscaled/
-// upscaled so the picture is 1080 lines tall, at the source's true shape."
-// Targeting height (rather than the longer edge) matters because "p" is a
-// vertical-resolution convention: a source that is wider than 16:9 would,
-// under a long-edge target, come out shorter than the preset name promises
-// (e.g. a 1470x956 source at "1080p" would previously yield 1080x702 --
-// fewer lines than 720p, and a quarter of the pixels a real 1080p frame
-// carries) -- exactly backwards from what selecting "1080p" should mean.
-// Dimensions are rounded to the nearest even number because H.264/HEVC
-// encoders require even width/height.
-//
-// Upscaling is intentionally allowed: a preset taller than the source's own
-// pixels (e.g. picking 4k against a source shorter than 2160) does not add
-// real detail to the full frame, but the exported canvas is not just the
-// full frame -- the camera track can zoom into a crop of it, and a larger
-// export canvas gives that crop more room to be rendered without looking
-// blocky. Refusing to honor the chosen preset would take that headroom away
-// for a modest, and arguably wrong, file-size saving.
-const EXPORT_PRESETS = { '1080p': 1080, '1440p': 1440, '4k': 2160 };
-
-function evenRound(n) {
-  return Math.max(2, Math.round(n / 2) * 2);
-}
-
-function resolveExportSize(preset, source) {
-  const heightTarget = EXPORT_PRESETS[preset];
-  if (!heightTarget) throw new Error(`Unknown export preset: ${JSON.stringify(preset)}`);
-  const scale = heightTarget / source.height;
-  return {
-    width: evenRound(source.width * scale),
-    height: evenRound(source.height * scale)
-  };
 }
 
 ipcMain.handle('project:load', () => {
@@ -913,77 +863,6 @@ function updateZooms(change) {
   };
 }
 
-ipcMain.handle('export:start', async (_e, { preset, codec }) => {
-  // Nothing else guards against two exports running at once: the output
-  // path is derived purely from the resolved dimensions, so two exports at
-  // the same preset would target the SAME file and both call
-  // writeCameraTrack on the same project directory concurrently. The
-  // renderer disables its export button while an export is running, but
-  // that is a UI nicety, not a guarantee -- a second IPC call can still
-  // reach here (e.g. a stale enabled button, a replayed message, a bug in
-  // the renderer). Rejecting outright (rather than returning the in-flight
-  // promise to the second caller) was chosen because a second call may ask
-  // for a different preset/codec than the one already running; silently
-  // handing back a different export's result would be surprising and could
-  // resolve with the wrong file. Rejecting gives the renderer an explicit,
-  // actionable error it already knows how to surface on its status line.
-  if (exportChild) {
-    throw new Error('An export is already in progress.');
-  }
-  const project = loadProject(editorDir);
-  const { width, height } = resolveExportSize(preset, project.source);
-  // The renderer draws from camera.bin, not from zoomKeyframes directly, so
-  // it must be rewritten here to reflect any deletions made in the editor --
-  // otherwise a deleted zoom would still show up in the exported file even
-  // though the preview no longer shows it.
-  writeCameraTrack(editorDir, cameraFor(editorDir));
-  // Which moment of the recording each exported frame shows, and how to
-  // stretch the audio to match -- speed.js computes it, bin/render follows
-  // it. Always written, even with no speed stretches: the plan is then just
-  // the recording at a steady 60fps.
-  const plan = retimePlan(project.speedSegments ?? [], project.capture.duration, rampMsOf(project));
-  fs.writeFileSync(path.join(editorDir, 'retime.json'), JSON.stringify({
-    ...plan, preservePitch: project.settings?.preserveVoicePitch !== false
-  }));
-  const out = path.join(editorDir, `export-${width}x${height}.mp4`);
-  exportOutPath = out;
-  return new Promise((resolve, reject) => {
-    const settle = (fn, arg) => {
-      exportChild = null;
-      exportOutPath = null;
-      // Only the editor-closed path (see openEditorWindow's 'closed'
-      // handler) used to unlink a partial export. A failed or rejected
-      // export here left `out` behind, named exactly like a finished
-      // export.mp4 -- not data loss (the raw recording is untouched) but a
-      // half-written file that looks done is a trap for later. `fn === reject`
-      // is the failure path; a successful export must keep its output, so
-      // this must never run for `fn === resolve`.
-      if (fn === reject) fs.promises.unlink(out).catch(() => {});
-      fn(arg);
-    };
-    const render = helperCommand(BIN_DIR, 'render');
-    exportChild = spawnHelper(render.file, [
-      ...render.args,
-      '--project', editorDir, '--out', out,
-      '--width', String(width), '--height', String(height), '--codec', codec || 'h264'
-    ], {
-      onMessage: (m) => {
-        if (m.type === 'progress') editorWindow?.webContents.send('export:progress', m);
-        if (m.type === 'error') settle(reject, new Error(m.message));
-      },
-      // Silently dropping helper output here is exactly the pattern that
-      // hid the writer-failure bug this fix addresses elsewhere -- log it
-      // instead of discarding it, even though it isn't fatal to the export.
-      onMalformed: (l) => console.error('render malformed:', l),
-      onExit: (code) => settle(
-        code === 0 ? resolve : reject,
-        code === 0 ? out : new Error(`render exited ${code}`)
-      ),
-      onError: (err) => settle(reject, err)
-    });
-  });
-});
-
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 
 // Quitting mid-recording (Cmd+Q, dock "Quit", etc.) is an ordinary way for a
@@ -1004,15 +883,9 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 // than hanging on Cmd+Q forever.
 let quitting = false;
 app.on('before-quit', (event) => {
-  // Originally only ever considered barWindow (the bar covers both "armed"
-  // and "recording", including a session that never got past arming), so
-  // quitting mid-export (no bar open, but bin/render still running) skipped
-  // this whole block and fell straight to will-quit's synchronous
-  // teardownArmedState -- which knows nothing about exports -- orphaning
-  // bin/render holding its output file open. exportChild is the same
-  // in-flight-export signal export:start already uses to refuse a second
-  // concurrent export, so it is checked here the same way barWindow is.
-  if (quitting || (!barWindow && !exportChild)) return;
+  // Quitting mid-export is just another way an export never finishes: it is
+  // cancelled and its partial file removed before the app goes.
+  if (quitting || (!barWindow && !exporter.busy())) return;
   event.preventDefault();
   quitting = true;
   const tasks = [];
@@ -1021,21 +894,7 @@ app.on('before-quit', (event) => {
       console.error('Loupe: failed to stop recording cleanly while quitting:', err);
     }));
   }
-  if (exportChild) {
-    // stopHelper() already handles graceful termination (SIGTERM, then
-    // SIGKILL after its own timeout) and is a no-op on an already-exited
-    // child, so it's safe to reuse verbatim here. The abandoned partial
-    // output is unlinked the same as the rejection and editor-closed paths,
-    // since quitting mid-export is just another way an export never
-    // finishes.
-    const child = exportChild;
-    const outPath = exportOutPath;
-    exportChild = null;
-    exportOutPath = null;
-    tasks.push(stopHelper(child).then(() => {
-      if (outPath) return fs.promises.unlink(outPath).catch(() => {});
-    }));
-  }
+  if (exporter.busy()) tasks.push(exporter.cancel());
   Promise.race([
     Promise.all(tasks),
     new Promise((resolve) => setTimeout(resolve, 8000))
@@ -1061,8 +920,8 @@ module.exports = {
   // in the app itself uses these.
   __test__: {
     openEditorWindow,
-    editorState: () => ({ editorDir, editorWindow, exportChild, exportOutPath }),
-    setExportState: (child, outPath) => { exportChild = child; exportOutPath = outPath; },
+    editorState: () => ({ editorDir, editorWindow }),
+    exporter,
     validateStartOptions
   }
 };
