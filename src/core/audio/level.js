@@ -1,7 +1,7 @@
 // Volume levelling ("Even out volume" in the editor; project field
 // audio.mic.level).
 //
-//   measureLoudness(channels, sampleRate) -> { integrated, blocks }
+//   measureLoudness(channels, sampleRate) -> { integrated, blocks, range }
 //   level(channels, sampleRate, { target, ... }) -> { channels, inputLoudness,
 //                                                     outputLoudness, gainDb }
 //
@@ -69,7 +69,7 @@ export function measureLoudness(channels, sampleRate) {
   const blockLen = Math.round(0.4 * sampleRate);
   const hop = Math.round(0.1 * sampleRate);
   const n = channels[0].length;
-  if (n < blockLen) return { integrated: -Infinity, blocks: 0 };
+  if (n < blockLen) return { integrated: -Infinity, blocks: 0, range: 0 };
   const blocks = Math.floor((n - blockLen) / hop) + 1;
   // Per-block mean-square, summed across channels with their weights. Built
   // from 100 ms sub-block sums so each sample is squared once.
@@ -106,18 +106,25 @@ export function measureLoudness(channels, sampleRate) {
   }
   let sum = 0;
   let count = 0;
+  const heard = new Float32Array(blocks);
   for (let j = 0; j < blocks; j++) {
-    if (toLufs(power[j]) > ABSOLUTE_GATE) { sum += power[j]; count++; }
+    const l = toLufs(power[j]);
+    if (l > ABSOLUTE_GATE) { sum += power[j]; heard[count++] = l; }
   }
-  if (count === 0) return { integrated: -Infinity, blocks };
+  if (count === 0) return { integrated: -Infinity, blocks, range: 0 };
   const relative = toLufs(sum / count) + RELATIVE_GATE;
+  // range: how far the loudest moments (99th percentile block) rise above
+  // the quiet floor (10th percentile). Speech with its pauses spans 8-15 LU;
+  // a fan, hum or hiss on its own stays within about 1 LU.
+  const sorted = heard.subarray(0, count).sort();
+  const range = sorted[Math.floor(0.99 * (count - 1))] - sorted[Math.floor(0.1 * (count - 1))];
   sum = 0;
   count = 0;
   for (let j = 0; j < blocks; j++) {
     const l = toLufs(power[j]);
     if (l > ABSOLUTE_GATE && l > relative) { sum += power[j]; count++; }
   }
-  return { integrated: count ? toLufs(sum / count) : -Infinity, blocks };
+  return { integrated: count ? toLufs(sum / count) : -Infinity, blocks, range };
 }
 
 // ---------------------------------------------------------------------------
@@ -158,13 +165,23 @@ const scale = (channels, g) => channels.map((c) => {
   return o;
 });
 
+// Below this range a track has nothing rising above its background: the mic
+// was left on but nobody spoke. See measureLoudness(). Kept low on purpose:
+// a real take with speech half-buried in fan noise measured 3.8 LU, and
+// holding back a voice is worse than raising a steady hum a little.
+const MIN_VOICE_RANGE = 3;
+
 // maxGainDb caps how far a very quiet take is raised: past ~30 dB the result
-// is mostly room noise, and a silent track should stay silent.
+// is mostly room noise, and a silent track should stay silent. A track with
+// no voice in it (steady fan or hiss only) is never raised at all -- turning
+// it up to speech level would fill the video with noise.
 export function level(channels, sampleRate, {
   target = VOICE_TARGET_LUFS, ceilingDb = -1, compressor = true, maxGainDb = 30
 } = {}) {
   assertChannels(channels, sampleRate);
-  const inputLoudness = measureLoudness(channels, sampleRate).integrated;
+  const measured = measureLoudness(channels, sampleRate);
+  const inputLoudness = measured.integrated;
+  if (measured.range < MIN_VOICE_RANGE) maxGainDb = Math.min(maxGainDb, 0);
   if (!Number.isFinite(inputLoudness)) {
     return { channels: channels.map((c) => new Float32Array(c)), inputLoudness, outputLoudness: inputLoudness, gainDb: 0 };
   }

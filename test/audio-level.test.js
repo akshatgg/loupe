@@ -101,10 +101,31 @@ test('levelling real speech (macOS say), stereo, quiet and loud', (t) => {
   }
 });
 
-test('custom target, and a noisy-but-steady signal', () => {
-  const x = [whiteNoise(SR * 10, 0.05, 3)];
+test('custom target', () => {
+  const x = [speechLike(10, SR, { amplitude: 0.05, seed: 8 })];
   const res = level(x, SR, { target: -23 });
-  assert.ok(Math.abs(res.outputLoudness + 23) <= 1);
+  assert.ok(Math.abs(res.outputLoudness + 23) <= 1, `output ${res.outputLoudness}`);
+});
+
+test('a mic left on with nobody talking (fan, hiss) is never turned up', () => {
+  for (const amp of [0.0005, 0.01, 0.05]) {
+    const fan = [whiteNoise(SR * 20, amp, 3)];
+    const m = measureLoudness(fan, SR);
+    assert.ok(m.range < 2, `steady noise range ${m.range}`);
+    const res = level(fan, SR);
+    assert.ok(res.gainDb <= 0, `amp ${amp}: gain ${res.gainDb}`);
+    assert.ok(res.outputLoudness <= m.integrated + 0.1, `amp ${amp}: ${m.integrated} -> ${res.outputLoudness}`);
+  }
+  // Steady noise louder than the target is still brought down to it.
+  const loud = level([whiteNoise(SR * 10, 0.9, 4)], SR);
+  assert.ok(Math.abs(loud.outputLoudness - VOICE_TARGET_LUFS) <= 1, `loud ${loud.outputLoudness}`);
+  // Speech has range, and quiet speech over the same fan is still raised.
+  const speech = speechLike(20, SR, { amplitude: 0.08, seed: 6 });
+  const noise = whiteNoise(SR * 20, 0.0005, 3);
+  const talk = [speech.map((v, i) => v + noise[i])];
+  assert.ok(measureLoudness(talk, SR).range > 6);
+  const raised = level(talk, SR);
+  assert.ok(raised.gainDb > 10 && Math.abs(raised.outputLoudness - VOICE_TARGET_LUFS) <= 1, `talk ${raised.outputLoudness}`);
 });
 
 test('silence stays silent; very quiet input is not raised past maxGainDb', () => {
