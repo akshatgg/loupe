@@ -91,9 +91,10 @@ item is attached to.
       video: "raw.mov",          // raw.mp4 on Windows
       duration, fps: 60,
       mic: true,                 // mic track inside the video file
-      systemAudio: "system.m4a", // or null
+      systemAudio: "system.m4a", // "system.wav" on Windows (16-bit PCM), or null
       webcam: { file: "webcam.webm", offset: 0.12, width, height } | null,
                                  // offset = source time at which webcam.webm starts
+                                 // (negative when the camera started before the capture)
       cursor: "cursor.bin",
       keys: "keys.json" | null,  // [{t, label: "⌘K"}] shortcut presses
       clicks: [{t,x,y,button}],
@@ -244,7 +245,14 @@ frame, total }`). The page: `demux.js` (mp4box), `video-source.js` (newest
 frame at or before t, VFR-safe, resets the decoder on jumps), `audio.js`,
 `encode.js` (H.264 High/Main/Baseline, hardware then software; HEVC Main),
 `pipeline.js`. The sound of each recording is placed by `core/audio/tracks.js`
-(mic + system audio through `follow.js`/`wsola.js`, then `mix.js`).
+(mic + system audio through `follow.js`/`wsola.js`, then `mix.js`, the one
+mixer the audio features also use: `mixTracks(tracks, { duration, sampleRate })`
+with per-track gain curves). Windows' `system.wav` is read by
+`core/audio/wav.js` (WebCodecs has no WAV decoder); everything else goes
+through mp4box + `AudioDecoder`. Clean-up, levelling, music and voiceover
+exist as core modules (`denoise.js`, `level.js`, `music.js`, `voiceover.js`,
+`duck.js`) and IPC, but the exporter does not apply them yet
+(`exportMix(..., { extraTracks })` is where they plug in).
 
 Two things WebCodecs does that the pipeline corrects (both covered by e2e):
 Chromium's `AudioDecoder` starts its output timestamps at 0 whatever the first
@@ -263,23 +271,48 @@ out of the editor (`webContents.startDrag`), Share link.
 ## 7. Recording additions (native helpers + recorder)
 
 - **System audio**: macOS `SCStreamConfiguration.capturesAudio` into
-  `system.m4a`; Windows WASAPI loopback into `system.m4a` (or `.wav`).
-  `capture --system-audio 1`. Same clock alignment as the video.
+  `system.m4a`; Windows WASAPI loopback into `system.wav` (16-bit PCM,
+  `native-win/SystemAudio.cs` + `WavFile.cs`). `capture --system-audio 1`.
+  Same clock alignment as the video.
 - **Keystrokes**: `inputtap --keys 1` emits `{"type":"key","clock","label"}`
   only for shortcuts (a key pressed with ⌘/⌃/⌥/Win/Ctrl, or Esc/Tab/Return/
   arrows/function keys) — never plain typing, so passwords are not recorded.
-- **Pause/resume** on the bar: recording keeps running; paused ranges are saved
-  in `sources.main.pauses` and removed from the clips at stop.
+- **Pause/resume** on the bar, or the shortcut ⌃⌥P (Ctrl+Alt+P on Windows),
+  held only while recording: capture keeps running; paused ranges
+  (`src/main/pauses.js`) are saved in `sources.main.pauses` and removed from
+  the clips at stop; the bar timer leaves paused time out.
 - **Countdown** 3-2-1 on the bar before capture starts (setting, default on).
 - **Webcam**: a small always-on-top bubble window (the user sees themselves; it
   is excluded from the screen capture) records `webcam.webm` with
   MediaRecorder; its start is aligned to the capture clock via the main
   process's high-resolution clock (same base as the helpers' clocks).
 
+How it is wired: `src/main/ipc/recording.js` (`registerRecordingExtras`,
+called from main.js) owns the countdown (`countdown.js`), the pause shortcut,
+the camera bubble (`ipc/camera.js`, page `src/renderer/camera/`) and the
+picker's `recordingSettings:get/set`; `recording-v2.js` writes the v2
+`project.json` at stop (`clock-sync.js` aligns the webcam, `webm.js` reads
+its length). The bar's phases are in `bar-state.js`
+(armed → counting → recording ⇄ paused). The choices live in `settings.json`
+(below); `recording-settings.js` translates them to the picker's flat shape
+(`countdown, systemAudio, recordKeys ← showKeystrokes, camera ← recordCamera,
+cameraDeviceId ← camera.id`), so the picker and the Settings window always
+agree. A settings problem never stops a recording: the defaults apply.
+Checks: `npm run test:e2e:recording` (bar UI, camera bubble, the real helpers,
+and the whole app recording with every addition on).
+
 ## 8. App shell
 
 - **Library** window: recent recordings (thumbnail, title, date, length),
   open, rename, duplicate, reveal, move to Trash/Recycle Bin, "New recording".
+- **Settings** (`src/main/settings.js`, one `settings.json` in userData via
+  `settings-store.js`; forgiving to read, strict to write; `settings:changed`
+  goes to every window). Keys: `zoomTriggers, recordingsFolder, countdown,
+  openAtLogin, microphone, camera ({id,label}|null), recordCamera,
+  systemAudio, showKeystrokes, exportDefaults {format,resolution,quality},
+  checkForUpdates, saveCrashReports, presets [{id,name,style}],
+  defaultPresetId` (+ `lastUpdateCheck`, `lastNotifiedVersion`, main-only).
+  `recordingsFolder` and presets are not writable through `settings:set`.
 - **Settings** window: General (recordings folder, countdown, open at login
   off by default), Recording (zoom shortcuts, microphone, system audio, webcam
   device, show keystrokes), Export defaults, Updates, Privacy (crash reports),
@@ -294,6 +327,10 @@ out of the editor (`webContents.startDrag`), Share link.
   macOS: the app is not signed, so self-update is not possible; show the new
   version with "brew upgrade --cask loupe" (Homebrew installs) or a Download
   button. The release workflow publishes `latest.yml`.
+- Wiring: `src/main/app-shell.js` (`createAppShell`) builds the Library
+  (`ipc/library.js`), Settings (`ipc/settings.js`), presets (`ipc/presets.js`),
+  updates (`ipc/updates.js`), About/help (`ipc/about.js`) and menus; those
+  windows use `src/preload/shell.js`. Checks: `electron test/e2e/shell.e2e.js`.
 - **Crash reporting**: Electron crashReporter and error logs stored locally in
   userData/logs; Help > Report a problem opens a pre-filled GitHub issue with
   version, OS and recent log lines the user can review first. Nothing is
@@ -302,7 +339,31 @@ out of the editor (`webContents.startDrag`), Share link.
   certificate; the build already signs when those secrets exist (documented in
   README). Not something code can supply.
 
+### Captions (wired so far)
+
+- `src/core/captions/` (index.js re-exports): model (`defaultCaptions`,
+  `normalizeCaptions`, `segmentsAt`; segments may carry `words`), lines,
+  edit operations, `captionsToOutput(segments, tl)` (source → output cues,
+  split by cuts), SRT/VTT `format.js`, `chunks.js`, `languages.js`,
+  `mp4-audio.js` (reads the mic track for transcription).
+- `src/core/layers/captions.js`: layer 8; `draw(ctx, state)` shows
+  `project.captions` at `outT` over the whole frame when `show` is on
+  (cues cached per segments array + timeline); `drawCaptions`/`layoutCaptions`
+  for the editor's hit-testing.
+- `src/renderer/captions/` (client.js → module worker.js, vendored
+  `src/vendor/transformers/`): on-device speech to text, WebGPU or wasm.
+- `src/main/ipc/captions.js` + `speech-models.js`: model download to
+  userData/speech-models and saving .srt/.vtt; preload `window.loupe.captions.
+  { models, ensureModel, cancelModel, removeModel, onModelProgress,
+  saveSubtitles }`. Check: `npm run test:e2e:captions`.
+- Not yet: the editor's Captions panel is still the placeholder
+  (`panels/captions.js`).
+
 ## 9. Share links
+
+Wired: `src/main/ipc/share.js` (`share:status|upload|cancel`, progress on
+`share:progress`) and `ipc/fileActions.js` (copy, reveal, drag-out, copy
+text); checks in `test/e2e/share.e2e.js` and `file-actions.e2e.js`.
 
 A Vercel Function in `web/api/` issues a one-time upload token for Vercel Blob;
 the app uploads the exported MP4 and gets `https://loupeapp.vercel.app/v/<id>`

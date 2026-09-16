@@ -28,7 +28,8 @@ const COMMAND = 0x100000;
 const F15 = 113;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const work = fs.mkdtempSync(path.join(os.tmpdir(), 'loupe-e2e-app-'));
+// Real path: the app resolves the recordings folder (/var is /private/var).
+const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'loupe-e2e-app-')));
 const home = path.join(work, 'home');
 const userData = path.join(work, 'userData');
 fs.mkdirSync(home);
