@@ -37,10 +37,12 @@ const MAX_BYTES = 500 * 1024 * 1024;
 const TTL_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TTL_MS = TTL_DAYS * DAY_MS;
-// The upload token outlives a slow upload of the biggest allowed file on a
-// poor connection, but not by much: a leaked token is only good for its own
-// pathname anyway.
-const TOKEN_TTL_MS = 60 * 60 * 1000;
+// The upload token is checked on every part of a multipart upload, so it has
+// to outlive the slowest upload people will sit through: 500 MB at 1 Mbit/s
+// (a weak hotel or phone connection) takes about 70 minutes, and the SDK's
+// one-hour default would fail it near the end. A leaked token is only good
+// for its own pathname, once, and never above the announced size.
+const TOKEN_TTL_MS = 6 * 60 * 60 * 1000;
 const PREFIX = 'shares/';
 const DEFAULT_SITE_URL = 'https://loupeapp.vercel.app';
 const CONTENT_TYPES = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'image/gif': 'gif' };

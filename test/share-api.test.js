@@ -101,7 +101,7 @@ test('upload issues a token for a server-chosen pathname and writes meta.json fi
   assert.strictEqual(claims.maximumSizeInBytes, 1234);
   assert.strictEqual(claims.addRandomSuffix, false);
   assert.strictEqual(claims.allowOverwrite, false);
-  assert.strictEqual(claims.validUntil, T0 + 60 * 60 * 1000);
+  assert.strictEqual(claims.validUntil, T0 + 6 * 60 * 60 * 1000);
 
   // meta.json exists before the token is handed out.
   assert.strictEqual(calls.put.length, 1);
