@@ -80,7 +80,28 @@ export function createAudioLane({ store, player, editor, view }) {
       ctx.fillStyle = 'rgba(197, 138, 249, 0.75)';
       const a = Math.max(0, sx(0));
       const b = Math.min(w, sx(tl.duration));
-      if (b > a) roundRect(ctx, a + 1, HEIGHT - 5, b - a - 2, 3, 1.5), ctx.fill();
+      if (b > a) {
+        roundRect(ctx, a + 1, HEIGHT - 6, b - a - 2, 4, 2);
+        ctx.fill();
+        // Its name where the line starts in view, so the line reads as music.
+        const name = String(p.audio.music.file ?? '').split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
+        if (name && b - a > 60) {
+          ctx.font = '600 10.5px system-ui, sans-serif';
+          ctx.textBaseline = 'top';
+          const text = `♪ ${name}`;
+          const width = Math.min(ctx.measureText(text).width, b - a - 12);
+          ctx.fillStyle = 'rgba(28, 28, 32, 0.85)';
+          roundRect(ctx, a + 4, 3, width + 10, 15, 4);
+          ctx.fill();
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(a + 4, 3, width + 10, 15);
+          ctx.clip();
+          ctx.fillStyle = 'rgba(215, 174, 251, 0.95)';
+          ctx.fillText(text, a + 9, 5.5);
+          ctx.restore();
+        }
+      }
     }
 
     // Voiceover takes.

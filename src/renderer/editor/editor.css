@@ -236,8 +236,12 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 .tl-zoom { color: var(--ink-3); }
 
 /* ---- timeline */
+/* Room kept for the usual tracks (captions and a notes lane included), so the
+   preview doesn't jump smaller each time one appears. Short windows keep
+   more of the preview. */
 #timeline {
-  position: relative; display: grid; grid-template-columns: 76px minmax(0, 1fr);
+  min-height: min(300px, 36vh);
+  position: relative; display: grid; grid-template-columns: 76px minmax(0, 1fr); align-content: start;
   background: var(--surface); border-top: 1px solid var(--line); padding-bottom: 10px;
 }
 .tl-labels { border-right: 1px solid var(--line); }
