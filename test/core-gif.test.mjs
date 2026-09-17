@@ -3,6 +3,7 @@ import assert from 'node:assert';
 import * as G from '../src/core/gif.js';
 import { createGifWriter } from '../src/renderer/exporter/gif.js';
 import { parseGif } from './e2e/media-parse.mjs';
+import { quantize } from '../src/vendor/gifenc/gifenc.mjs';
 
 test('frame delays add up to the exact length', () => {
   // 15 fps is 6.67 cs a frame: 7, 6, 7, 7, 6, 7, ...
@@ -142,4 +143,72 @@ test('a small change costs a small frame', async () => {
   assert.strictEqual(gif.frames.reduce((n, f) => n + f.delayCs, 0), 50);
   const [first, ...rest] = gif.frames;
   for (const f of rest) assert.ok(f.bytes * 5 < first.bytes, `a moved square is ${f.bytes} bytes, the whole picture ${first.bytes}`);
+});
+
+// What a viewer sees after each frame, following exporter/gif.js's addFrame,
+// plus the palette in use (to compare with drawing the frame afresh).
+function simulateGif(frames, w, h, dither) {
+  let map = null;
+  let screen = null;
+  let shown = null;
+  for (const rgba of frames) {
+    let next = map;
+    if (!next || G.paletteError(rgba, next) > G.NEW_PALETTE_ERROR) next = G.createColorMap(quantize(G.subsample(rgba, w, h), 255));
+    const transparent = next.palette.length;
+    const index = G.mapToPalette(rgba, w, h, next, { dither });
+    if (screen) {
+      if (G.keepUnchanged(rgba, index, next.palette, transparent, screen) === 0) continue;
+    } else {
+      screen = G.createScreen(rgba, index, next.palette);
+      shown = new Uint8Array(w * h * 3);
+    }
+    map = next;
+    for (let p = 0; p < w * h; p++) if (index[p] !== transparent) shown.set(next.palette[index[p]], p * 3);
+  }
+  return { shown, map };
+}
+
+function fakeScreen(w, h, seed) {
+  const out = new Uint8ClampedArray(w * h * 4);
+  let s = seed;
+  const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      // Dark editor with a sidebar and lines of coloured text.
+      const text = y % 12 < 6 && rnd() < 0.45;
+      const c = text ? [120 + rnd() * 110, 120 + rnd() * 110, 130 + rnd() * 110] : x < w / 4 ? [38, 40, 46] : [28, 30, 34];
+      out.set([c[0], c[1], c[2], 255], (y * w + x) * 4);
+    }
+  }
+  return out;
+}
+
+test('no ghost of an earlier picture is left behind a title card or the next page', () => {
+  const w = 96;
+  const h = 64;
+  const before = fakeScreen(w, h, 7);
+  const card = solid(w, h, [22, 26, 36]);
+  const after = fakeScreen(w, h, 99);
+  const mix = (a, b, f) => a.map((v, i) => (i % 4 === 3 ? 255 : Math.round(v * (1 - f) + b[i] * f)));
+  const frames = [before, before];
+  for (let k = 1; k <= 6; k++) frames.push(mix(before, card, k / 6));
+  frames.push(card, card);
+  for (let k = 1; k <= 6; k++) frames.push(mix(card, after, k / 6));
+  frames.push(after, after);
+  const off = (a, i, b, j) => Math.max(Math.abs(a[i] - b[j]), Math.abs(a[i + 1] - b[j + 1]), Math.abs(a[i + 2] - b[j + 2]));
+  for (const dither of [false, true]) {
+    for (const n of [10, frames.length]) {
+      const { shown, map } = simulateGif(frames.slice(0, n), w, h, dither);
+      const now = frames[n - 1];
+      // Every pixel on screen is as close to the picture as drawing it afresh
+      // with the same palette, give or take compression noise.
+      const fresh = G.mapToPalette(now, w, h, map, { dither });
+      let ghosts = 0;
+      for (let p = 0; p < w * h; p++) {
+        const drawn = map.palette[fresh[p]];
+        if (off(shown, p * 3, now, p * 4) > off(drawn, 0, now, p * 4) + G.NOISE_TOLERANCE) ghosts++;
+      }
+      assert.strictEqual(ghosts, 0, `dither ${dither}, after frame ${n}`);
+    }
+  }
 });

@@ -335,7 +335,8 @@ through vendored `webm-muxer`; the Opus delay is measured like AAC's. GIF
 (`exporter/gif.js` + pure `core/gif.js`, vendored `gifenc`): a 255-colour
 palette per scene (made again when the picture no longer fits it), optional
 4x4 ordered dithering, frame differencing (unchanged pixels are transparent
-over the kept frame, compared by palette colour so fades leave no ghosts),
+over the kept frame, kept only while what is shown is as close to the new
+picture as a fresh draw, so fades and title cards leave no ghosts),
 unchanged frames merged, delays rounded on the running total so they add up
 exactly. Size limits: the first pass uses the limit's bitrate with a keyframe
 every 10 s; an encoder that overshoots gets a lower-bitrate pass, then 30 fps,

@@ -122,12 +122,16 @@ export function subsample(rgba, width, height, stride = 2) {
   return out;
 }
 
-// Frame differencing. A pixel is drawn again unless what the GIF shows there
-// would come out the same (same palette colour) -- or the recording only
-// flickered by compression noise since it was drawn (within `tolerance` of
-// the source colour then). Comparing palette colours, not only source
-// colours, matters: during a fade each step is small, and comparing sources
-// alone would leave the last drawn step behind as a ghost of old text.
+// Frame differencing. A pixel is left as it is on screen when what the GIF
+// would draw there comes out the same (same palette colour), or when the
+// colour already shown is as close to the picture now as a fresh draw would
+// be, give or take `tolerance` (compression noise flickering between two
+// neighbouring palette colours). Judging by what is shown against the
+// picture NOW matters twice over: during a fade each step is small, and a
+// screen drawn with a poorer palette (or dithered) can differ from a new
+// picture of almost the same colour -- a dark title card over a dark editor
+// -- by more than the step; comparing sources alone left those behind as a
+// faint copy of the old picture.
 // Unchanged pixels become `transparentIndex`, so the frame before shows
 // through and the GIF carries only what changed.
 //
@@ -159,10 +163,10 @@ export function keepUnchanged(rgba, index, palette, transparentIndex, screen, to
       same[p] = 1;
       continue;
     }
-    const dr = rgba[o] - source[s];
-    const dg = rgba[o + 1] - source[s + 1];
-    const db = rgba[o + 2] - source[s + 2];
-    if (dr <= tolerance && dr >= -tolerance && dg <= tolerance && dg >= -tolerance && db <= tolerance && db >= -tolerance) {
+    // Largest channel difference: shown vs now, and a fresh draw vs now.
+    const shownOff = Math.max(Math.abs(rgba[o] - drawn[s]), Math.abs(rgba[o + 1] - drawn[s + 1]), Math.abs(rgba[o + 2] - drawn[s + 2]));
+    const drawOff = Math.max(Math.abs(rgba[o] - c[0]), Math.abs(rgba[o + 1] - c[1]), Math.abs(rgba[o + 2] - c[2]));
+    if (shownOff <= drawOff + tolerance) {
       same[p] = 1;
     } else {
       changed++;
