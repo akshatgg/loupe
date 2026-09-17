@@ -399,10 +399,14 @@ window.loupe.onExportProgress((p) => {
     : `Exporting… frame ${p.frame ?? ''}`.trim());
 });
 
+if (window.loupe.platform === 'win32') {
+  document.getElementById('undoZoom').title = 'Bring back the last zoom you removed (Ctrl+Z)';
+}
+
 (async function load() {
   try {
     state = await window.loupe.loadProject();
-    video.src = `file://${state.video}`;
+    video.src = state.videoUrl ?? `file://${state.video}`;
     video.load();
     showCursorEl.checked = showCursor();
     video.preservesPitch = state.project.settings?.preserveVoicePitch !== false;
