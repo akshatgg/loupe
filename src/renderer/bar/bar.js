@@ -2,9 +2,9 @@
 
 // 'full' reads as "Full window" for a window source -- same mode, no crop.
 const AREA_MODES = [
-  { mode: 'full', label: { display: 'Full screen', window: 'Full window' } },
-  { mode: 'rect', label: 'Rectangle' },
-  { mode: 'draw', label: 'Draw' }
+  { mode: 'full', label: { display: 'Full screen', window: 'Full window' }, hint: 'Record all of it' },
+  { mode: 'rect', label: 'Box an area', hint: 'Record only what is inside a box you move and resize' },
+  { mode: 'draw', label: 'Draw an area', hint: 'Record only an area you drag out on the screen' }
 ];
 
 const armedEl = document.getElementById('armed');
@@ -35,11 +35,12 @@ function clock(seconds) {
 function buildAreaModes(enabled, sourceKind) {
   areaModesEl.textContent = '';
   if (!enabled) { modesBuilt = false; return; }
-  for (const { mode, label } of AREA_MODES) {
+  for (const { mode, label, hint } of AREA_MODES) {
     const b = document.createElement('button');
     b.type = 'button';
     b.dataset.mode = mode;
     b.textContent = typeof label === 'string' ? label : label[sourceKind] ?? label.display;
+    b.title = hint;
     b.setAttribute('aria-pressed', String(mode === currentAreaMode));
     b.onclick = () => window.loupe.setAreaMode(mode);
     areaModesEl.appendChild(b);
