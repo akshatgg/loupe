@@ -71,6 +71,10 @@ test/e2e/              Electron-driven tests: npm run test:e2e
 Renderer pages are ESM and sandboxed; they reach the main process only through
 `window.loupe` (preload). Add preload methods per feature; keep them narrow and
 validate every payload in main (the renderer is not a trust boundary).
+Channels that act on the open recording (project, export, append, voiceover,
+music, captions, background, share, file actions) are registered through
+main.js's `editorIpc`: only the editor window may call them, and only while it
+is open. Every window page carries a Content-Security-Policy.
 
 ## 3. Project format v2 (`project.json`)
 
@@ -404,6 +408,9 @@ and the whole app recording with every addition on).
 
 - **Library** window: recent recordings (thumbnail, title, date, length),
   open, rename, duplicate, reveal, move to Trash/Recycle Bin, "New recording".
+  A recording whose project.json can't be read is still listed ("Can't be
+  opened"), so it can be revealed or trashed; project files over 64 MB are
+  refused plainly when opened.
 - **Settings** (`src/main/settings.js`, one `settings.json` in userData via
   `settings-store.js`; forgiving to read, strict to write; `settings:changed`
   goes to every window). Keys: `zoomTriggers, recordingsFolder, countdown,
@@ -526,7 +533,10 @@ the app uploads the exported MP4 and gets `https://loupeapp.vercel.app/v/<id>`
 (a small player page). Links expire after 7 days; a daily cron deletes expired
 blobs. The Share button is hidden unless the backend reports it is configured
 (`GET /api/share/status`). Provisioning the Blob store is an account action the
-owner confirms.
+owner confirms. The API rate-limits by the platform's client address
+(`x-real-ip`, never the client-supplied first `x-forwarded-for` entry), limits
+link lookups per address, lets the edge cache "not found", and without
+`CRON_SECRET` runs an open cleanup at most every ten minutes (set the secret).
 
 ## 10. Testing
 
