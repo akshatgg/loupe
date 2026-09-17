@@ -157,7 +157,6 @@ function buildJob(dir, rawOptions, { out } = {}) {
   const background = bgFile ? pathToFileURL(bgFile).href : null;
 
   const ex = project.export;
-  const size = plan.outputSize(project, ex);
   const job = {
     project, sources, background,
     // Music and voiceover takes, checked to be inside this project's folder.
@@ -165,7 +164,18 @@ function buildJob(dir, rawOptions, { out } = {}) {
     format: ex.format, resolution: ex.resolution, codec: ex.codec, quality: ex.quality, fps: ex.fps,
     sizeLimit: ex.sizeLimit, gifWidth: ex.gifWidth, gifFps: ex.gifFps, dither: ex.dither
   };
-  return { job, project, subtitles: opts.subtitles === true, out: out ?? path.join(dir, plan.exportFileName(ex, size)) };
+  return { job, project, subtitles: opts.subtitles === true, out: out ?? freeExportPath(dir, (n) => plan.exportFileName(ex, project.title, n)) };
+}
+
+// The first "<title>.mp4", "<title> 2.mp4", ... in `dir` with no file of
+// that name yet (nor its subtitles or a partial file), so an export never
+// replaces an earlier one or the recording itself.
+function freeExportPath(dir, nameFor) {
+  for (let n = 1; ; n++) {
+    const file = path.join(dir, nameFor(n));
+    const srt = path.join(dir, `${path.basename(file, path.extname(file))}.srt`);
+    if (![file, `${file}.part`, srt].some((f) => fs.existsSync(f))) return file;
+  }
 }
 
 function cancelledError() {
@@ -192,13 +202,17 @@ function createExportRunner({ BrowserWindow, preload, page, show = false }) {
   function start(job, out, { onProgress = () => {} } = {}) {
     if (active) return Promise.reject(new Error('An export is already in progress.'));
     const part = `${out}.part`;
-    const state = { part, out, settled: false, done: null, writes: Promise.resolve(), handle: null, win: null };
+    const state = { part, out, settled: false, done: null, writes: Promise.resolve(), handle: null, win: null, opening: null };
     active = state;
 
     state.done = new Promise((resolve, reject) => {
       const finish = async (err, summary) => {
         if (state.settled) return;
         state.settled = true;
+        // A cancel straight after start can land before the file is even
+        // open: wait for it, so it is closed and removed rather than created
+        // after the clean-up and left behind (with its handle).
+        await state.opening;
         // Let writes already under way land (or fail) before closing the file.
         await state.writes.catch(() => {});
         // A size-limited export may have run twice, the second pass shorter:
@@ -222,8 +236,9 @@ function createExportRunner({ BrowserWindow, preload, page, show = false }) {
       };
       state.finish = finish;
 
-      fs.promises.open(part, 'w').then((handle) => {
-        state.handle = handle;
+      const opening = fs.promises.open(part, 'w');
+      state.opening = opening.then((handle) => { state.handle = handle; }, () => {});
+      opening.then((handle) => {
         if (state.settled) return;
         const win = new BrowserWindow({
           show, width: 480, height: 270, title: 'Loupe — Exporting',

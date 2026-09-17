@@ -259,7 +259,8 @@ export function migrate(v1, { createdAt = null } = {}) {
   const exp = v1.export ?? {};
   const project = {
     version: VERSION,
-    title: defaultTitle(createdAt),
+    // A v1 recording renamed in the Library keeps its name.
+    title: typeof v1.title === 'string' && v1.title.trim() ? v1.title.trim().slice(0, MAX_TITLE) : defaultTitle(createdAt),
     createdAt,
     sources: { main },
     clips: main.pauses.length && isNum(duration)

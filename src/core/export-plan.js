@@ -39,21 +39,46 @@ export function fileExtension(format) {
 }
 
 // The output's pixel size. Videos use the resolution preset; a GIF keeps the
-// same shape at `gifWidth` pixels wide (never wider than the 1080p video
-// would be, so a portrait GIF isn't blown up).
+// same shape with its longer side `gifWidth` pixels (never bigger than the
+// 1080p video would be). The longer side, not the width: a 9:16 GIF "960"
+// wide would be 1706 tall, three times the pixels of a wide one and a file
+// its own warning calls too big.
 export function outputSize(project, exp = project.export) {
   if (exp.format !== 'gif') return exportSize(project, exp.resolution);
   const ref = exportSize(project, '1080p');
-  const width = Math.min(exp.gifWidth ?? 960, ref.width);
-  return { width: even(width), height: even((width * ref.height) / ref.width) };
+  const scale = Math.min(1, (exp.gifWidth ?? 960) / Math.max(ref.width, ref.height));
+  return { width: even(ref.width * scale), height: even(ref.height * scale) };
 }
 
 export function outputFps(exp) {
   return exp.format === 'gif' ? (exp.gifFps ?? 15) : exp.fps;
 }
 
-export function exportFileName(exp, { width, height }) {
-  return `export-${width}x${height}.${fileExtension(exp.format)}`;
+// A file name from the video's title that every system accepts: no path or
+// reserved characters ("04:36" becomes "04.36"), no trailing dots or spaces
+// (Windows drops them), not a reserved Windows device name, not too long.
+const RESERVED_WINDOWS = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+const MAX_NAME = 80;
+
+export function exportBaseName(title) {
+  let name = String(title ?? '')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/:/g, '.')
+    .replace(/[\\/*?"<>|]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^\.+/, '');
+  if (name.length > MAX_NAME) name = name.slice(0, MAX_NAME);
+  name = name.replace(/[. ]+$/, '');
+  if (!name) return 'Loupe video';
+  if (RESERVED_WINDOWS.test(name)) return `${name} video`;
+  return name;
+}
+
+// "<title>.mp4", or "<title> 2.mp4" for the second file of that name: an
+// export never replaces an earlier one (main picks `n`).
+export function exportFileName(exp, title, n = 1) {
+  return `${exportBaseName(title)}${n > 1 ? ` ${n}` : ''}.${fileExtension(exp.format)}`;
 }
 
 export function qualityBitrate({ format = 'mp4', width, height, fps, quality = 'balanced' }) {

@@ -77,7 +77,8 @@ test('export:start saves the .srt only when asked, and only after the video is s
   };
   registerExportIpc({ ipcMain, runner, projectDir: () => dir });
   const sender = { send: () => {}, isDestroyed: () => false };
-  const srt = path.join(dir, 'export-1280x720.srt');
+  const title = JSON.parse(fs.readFileSync(path.join(dir, 'project.json'), 'utf8')).title;
+  const srt = path.join(dir, `${title} 2.srt`);
 
   const plain = await handlers['export:start']({ sender }, { resolution: '720p' });
   assert.strictEqual(plain.subtitles, undefined);

@@ -274,7 +274,7 @@ const CASES = [
     assert.strictEqual(await ed.js('window.__editor.exportDialog.state'), 'done', await ed.js('document.getElementById("exportError")?.textContent ?? ""'));
     await ed.shot('10-export-done');
     const file = await ed.js('document.querySelector(".export-dialog").dataset.file');
-    assert.strictEqual(file, path.join(dir, 'export-1152x720.mp4'));
+    assert.strictEqual(file, path.join(dir, `${readProject(dir).title.replace(/:/g, '.')}.mp4`), 'named after the video');
     assert.strictEqual(readProject(dir).export.resolution, '720p');
     assert.strictEqual(readProject(dir).export.quality, 'small');
     const inspection = await lab.call('inspect', pathToFileURL(file).href, {
@@ -298,7 +298,7 @@ const CASES = [
     await waitFor(() => ed.js('document.getElementById("exportPercent")?.textContent !== "0%"'), 'export progress');
     await ed.clickOn('#exportCancel');
     await waitFor(() => ed.js('window.__editor.exportDialog.state === "settings"'), 'the cancel');
-    assert.deepStrictEqual(fs.readdirSync(dir).filter((f) => f.startsWith('export-')), [], 'cancel leaves nothing');
+    assert.deepStrictEqual(fs.readdirSync(dir).filter((f) => f.endsWith('.part') || /\.(mp4|gif|webm)$/.test(f) && f !== 'raw.mp4'), [], 'cancel leaves nothing');
   }]
 ];
 

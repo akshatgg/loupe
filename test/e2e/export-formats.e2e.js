@@ -182,7 +182,7 @@ const pointsFor = ({ width, height }) => [{ x: width * 0.25, y: height * 0.2 }, 
 const CASES = [
   ['WebM: VP9 + Opus, size, every frame on time, picture and sound', async (lab, runner, fx) => {
     const c = await exportTo(runner, 'webm', patternProject(fx), { format: 'webm', resolution: '720p' });
-    assert.ok(c.out.endsWith('export-1152x720.webm'));
+    assert.strictEqual(path.basename(c.out), E.exportFileName({ format: 'webm' }, c.project.title), 'named after the video');
     const times = [0.5, 2.25, 4.75, 6.5, 7.9].map((t) => Math.round(t * 60) / 60);
     const size = { width: 1152, height: 720 };
     const w = await lab.fx('inspectWebm', pathToFileURL(c.out).href, {
@@ -218,7 +218,7 @@ const CASES = [
     const c = await exportTo(runner, 'gif', p, {});
     const size = E.outputSize(c.project);
     assert.deepStrictEqual(size, { width: 960, height: 600 });
-    assert.ok(c.out.endsWith('export-960x600.gif'));
+    assert.ok(c.out.endsWith('.gif'));
     assert.strictEqual(c.result.fps, 15);
     assert.strictEqual(c.result.audio, false);
     const times = [0.5, 2.2, 4.8, 6.5, 7.8];
@@ -305,10 +305,11 @@ const CASES = [
       assert.deepStrictEqual(await js('window.loupe.recentExports()'), []);
       const mp4 = await js(`window.loupe.exportVideo({ format: 'mp4', resolution: '720p' })`);
       const gif = await js(`window.loupe.exportVideo({ format: 'gif', gifWidth: 480 })`);
-      assert.strictEqual(gif.file, path.join(dir, 'export-480x300.gif'));
+      const title = JSON.parse(fs.readFileSync(path.join(dir, 'project.json'), 'utf8')).title;
+      assert.strictEqual(gif.file, path.join(dir, E.exportFileName({ format: 'gif' }, title)));
       assert.strictEqual(gif.format, 'gif');
       const recent = await js('window.loupe.recentExports()');
-      assert.deepStrictEqual(recent.map((r) => r.name), ['export-480x300.gif', 'export-1152x720.mp4']);
+      assert.deepStrictEqual(recent.map((r) => r.name), [path.basename(gif.file), path.basename(mp4.file)]);
       assert.strictEqual(recent[0].file, gif.file);
       assert.strictEqual(recent[0].bytes, fs.statSync(gif.file).size);
       assert.strictEqual(recent[1].width, 1152);

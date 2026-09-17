@@ -181,7 +181,7 @@ test('a rejected export leaves no partial output file behind', async () => {
     /video file is missing/);
 
   const files = fs.readdirSync(dir);
-  const partials = files.filter((f) => f.startsWith('export-'));
+  const partials = files.filter((f) => f.endsWith('.part') || /\.(mp4|webm|gif)$/.test(f));
   assert.deepStrictEqual(partials, [], `expected no partial export file, found: ${partials}`);
   assert.strictEqual(main.__test__.exporter.busy(), false);
 

@@ -17,9 +17,27 @@ const { pathToFileURL } = require('node:url');
 
 const THUMB = 'thumb.jpg';
 const MAX_TITLE = 120;
-// Export outputs are big and can be made again; a duplicate doesn't need them.
 const ABANDONED_COPY_MS = 60 * 60 * 1000;
-const SKIP_ON_DUPLICATE = /^export-.*\.(mp4|mov|webm|gif)$/i;
+// Export outputs are big and can be made again; a duplicate doesn't need
+// them. They sit at the top of the folder, named after the video, so they
+// are told apart from the recording's own files by what project.json names.
+const EXPORT_LIKE = /\.(mp4|mov|m4v|webm|gif|srt)$/i;
+const RECORDING_FILES = ['raw.mov', 'raw.mp4', 'webcam.webm'];
+
+function recordingFileNames(dir) {
+  const names = new Set(RECORDING_FILES);
+  try {
+    const p = readJson(path.join(dir, 'project.json'));
+    for (const src of Object.values(p.sources ?? {})) {
+      if (typeof src?.video === 'string') names.add(src.video);
+      if (typeof src?.webcam?.file === 'string') names.add(src.webcam.file);
+    }
+    if (typeof p.capture?.file === 'string') names.add(p.capture.file);
+  } catch {
+    // An unreadable project copies whatever is there.
+  }
+  return names;
+}
 
 function defaultTitle(createdAt, locale) {
   const when = new Intl.DateTimeFormat(locale, {
@@ -222,12 +240,14 @@ function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
     }
     // cp wants a target that doesn't exist yet; `work` only reserves the name.
     const target = path.join(work, 'copy');
+    const keep = recordingFileNames(dir);
+    const isExport = (src) => path.dirname(src) === dir && EXPORT_LIKE.test(src) && !keep.has(path.basename(src));
     let copyId;
     copying.add(work);
     try {
       await fs.promises.cp(dir, target, {
         recursive: true, errorOnExist: true, force: false,
-        filter: (src) => src === dir || !(path.dirname(src) === dir && SKIP_ON_DUPLICATE.test(path.basename(src)))
+        filter: (src) => src === dir || !isExport(src)
       });
       const file = path.join(target, 'project.json');
       const project = readJson(file);

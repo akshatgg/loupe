@@ -334,6 +334,10 @@ export function createExportDialog({ store, loupe, player, beforeExport }) {
   // ---------------------------------------------------------------- running
 
   async function run() {
+    // Start pressed again before the first press took the button away (a
+    // double-click, a key repeat) must not start a second export: main would
+    // refuse it and the dialog would show that refusal over the running one.
+    if (state === 'running') return;
     state = 'running';
     player.pause();
     const ex = store.project.export;

@@ -37,12 +37,16 @@ test('output size and frame rate per format', () => {
   assert.deepStrictEqual(E.outputSize(p, gif), { width: 960, height: 600 });
   assert.strictEqual(E.outputFps(gif), 15);
   assert.deepStrictEqual(E.outputSize(p, { ...gif, gifWidth: 480 }), { width: 480, height: 300 });
-  // Portrait: 1080p 9:16 is 1080 wide, so a 960 GIF stays 960 and keeps the shape.
+  // Portrait: the longer side is the GIF size, so a 9:16 GIF is 540x960, not 960x1706.
   const portrait = P.setStyle(p, { aspect: '9:16' });
-  assert.deepStrictEqual(E.outputSize(portrait, gif), { width: 960, height: 1706 });
-  assert.strictEqual(E.exportFileName(gif, { width: 960, height: 600 }), 'export-960x600.gif');
-  assert.strictEqual(E.exportFileName({ format: 'webm' }, { width: 2, height: 2 }), 'export-2x2.webm');
-  assert.strictEqual(E.exportFileName({ format: 'mp4' }, { width: 2, height: 2 }), 'export-2x2.mp4');
+  assert.deepStrictEqual(E.outputSize(portrait, gif), { width: 540, height: 960 });
+  assert.deepStrictEqual(E.outputSize(portrait, { ...gif, gifWidth: 480 }), { width: 270, height: 480 });
+  assert.strictEqual(E.exportFileName(gif, 'Recording 17 Sep 2026, 04:36'), 'Recording 17 Sep 2026, 04.36.gif');
+  assert.strictEqual(E.exportFileName({ format: 'webm' }, 'Demo', 2), 'Demo 2.webm');
+  assert.strictEqual(E.exportFileName({ format: 'mp4' }, 'a/b\\c*?"<>|'), 'a-b-c------.mp4');
+  assert.strictEqual(E.exportFileName({ format: 'mp4' }, '  ... \u0007 '), 'Loupe video.mp4');
+  assert.strictEqual(E.exportFileName({ format: 'mp4' }, 'con'), 'con video.mp4');
+  assert.strictEqual(E.exportFileName({ format: 'mp4' }, `${'x'.repeat(79)}. y`), `${'x'.repeat(79)}.mp4`);
 });
 
 test('a size limit picks the bitrate from the duration', () => {

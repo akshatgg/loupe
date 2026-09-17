@@ -187,7 +187,9 @@ holds loaded images (background image, etc). Draw order:
 8. captions
 9. transition blend at clip boundaries
 
-With `aspect: "source"` the recording is fitted, centred, inside the padded
+With `aspect: "source"` the output takes the main recording's shape (not
+the first clip's; a very wide strip is capped at twice the preset's 16:9 width
+and 4096 px) and the recording is fitted, centred, inside the padded
 area (never cropped); with a chosen aspect it fills the padded area and the
 camera pans. Sizes scale with the output's short side (reference 1080p) so 1080p/4K/9:16 look
 alike. Layers live in `core/layers/*.js` and are registered in order in
@@ -325,9 +327,11 @@ After export: Show in Finder/Explorer, Copy (file to clipboard), drag the file
 out of the editor (`webContents.startDrag`), Share link.
 
 How formats, limits and the dialog are wired: `core/export-plan.js` (pure)
-decides the output size (`outputSize`: videos by resolution, GIFs
-`gifWidth` wide in the same shape), frame rate, file name
-(`export-WxH.mp4|webm|gif`), the bitrate for a quality or `sizeLimit` (MB =
+decides the output size (`outputSize`: videos by resolution, GIFs with
+their longer side `gifWidth` in the same shape), frame rate, file name
+(`exportFileName`: the video's title made safe for every system; main's
+`freeExportPath` numbers it "Title 2.mp4" so an export never replaces an
+earlier file), the bitrate for a quality or `sizeLimit` (MB =
 1,000,000 bytes) and the dialog's "up to about" estimate and warnings.
 `project.export` gains `sizeLimit: null|MB, gifWidth: 480|720|960,
 gifFps: 10|15|20, dither: true`. WebM is VP9 (`vp09.00.<level>.08`) + Opus

@@ -87,7 +87,7 @@ test('a v1 project becomes a v2 job with file URLs and the output beside it', ()
   assert.strictEqual(job.sources.main.systemAudio, null);
   assert.deepStrictEqual(job.audioFiles, { music: null, voiceover: {} });
   // 1440x900 at 720p keeps the recording's shape.
-  assert.strictEqual(out, path.join(dir, 'export-1152x720.mp4'));
+  assert.strictEqual(out, path.join(dir, 'Recording.mp4'), 'named after the video');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -177,6 +177,21 @@ test('cancelling, or the window going away, removes the partial file', async () 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('cancelling straight after start leaves no partial file behind', async () => {
+  const dir = tempDir('cancel-now');
+  const { BrowserWindow } = fakeElectron();
+  const runner = createExportRunner({ BrowserWindow, preload: 'p.js', page: 'index.html' });
+  for (let i = 0; i < 5; i++) {
+    const running = runner.start({}, path.join(dir, `video-${i}.mp4`));
+    await runner.cancel();
+    await assert.rejects(running, /cancelled/);
+  }
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepStrictEqual(fs.readdirSync(dir), []);
+  assert.strictEqual(runner.busy(), false);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('export:start exports the open recording and sends progress to the editor', async () => {
   const dir = v1Dir('ipc');
   const handlers = {};
@@ -195,7 +210,7 @@ test('export:start exports the open recording and sends progress to the editor',
   open = dir;
   await assert.rejects(handlers['export:start']({ sender }, { resolution: 'huge' }), /Unknown export size/);
   const result = await handlers['export:start']({ sender }, { preset: '1080p' });
-  assert.strictEqual(result.file, path.join(dir, 'export-1728x1080.mp4'));
+  assert.strictEqual(result.file, path.join(dir, 'Recording.mp4'));
   assert.deepStrictEqual(sent, [['export:progress', { frame: 1 }]]);
   assert.strictEqual(await handlers['export:cancel'](), false);
   fs.rmSync(dir, { recursive: true, force: true });
@@ -246,9 +261,29 @@ test('a GIF job is named .gif at its own size', () => {
   const { job, out } = buildJob(dir, { format: 'gif', gifWidth: 720 });
   assert.strictEqual(job.format, 'gif');
   assert.strictEqual(job.gifWidth, 720);
-  // 1440x900 is 1728x1080 at 1080p; 720 wide keeps the shape.
-  assert.strictEqual(out, path.join(dir, 'export-720x450.gif'));
-  assert.strictEqual(path.basename(buildJob(dir, { format: 'webm', resolution: '720p' }).out), 'export-1152x720.webm');
+  assert.strictEqual(out, path.join(dir, 'Recording.gif'));
+  assert.strictEqual(path.basename(buildJob(dir, { format: 'webm', resolution: '720p' }).out), 'Recording.webm');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('an export never replaces an earlier file: it is named after the video, then numbered', () => {
+  const dir = v1Dir('names');
+  const project = JSON.parse(fs.readFileSync(path.join(dir, 'project.json'), 'utf8'));
+  project.title = 'Demo: sign up / log in';
+  fs.writeFileSync(path.join(dir, 'project.json'), JSON.stringify(project));
+  const first = buildJob(dir, { resolution: '1080p' }).out;
+  assert.strictEqual(first, path.join(dir, 'Demo. sign up - log in.mp4'));
+  fs.writeFileSync(first, 'earlier export');
+  const second = buildJob(dir, { resolution: '1080p' }).out;
+  assert.strictEqual(second, path.join(dir, 'Demo. sign up - log in 2.mp4'));
+  fs.writeFileSync(path.join(dir, 'Demo. sign up - log in 2.srt'), 'subtitles of another');
+  assert.strictEqual(path.basename(buildJob(dir, { resolution: '1080p' }).out), 'Demo. sign up - log in 3.mp4');
+  // A title that is also the recording's own file name doesn't overwrite it.
+  project.title = 'raw';
+  fs.writeFileSync(path.join(dir, 'project.json'), JSON.stringify(project));
+  assert.strictEqual(path.basename(buildJob(dir, { format: 'webm' }).out), 'raw.webm');
+  fs.writeFileSync(path.join(dir, 'raw.mp4'), 'a Windows recording');
+  assert.strictEqual(path.basename(buildJob(dir, {}).out), 'raw 2.mp4');
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

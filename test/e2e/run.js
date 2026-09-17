@@ -591,7 +591,8 @@ const CASES = [
         .then((r) => resolve({ r, progress }), (e) => resolve({ error: e.message, progress }));
     })`);
     assert.ok(!result.error, result.error);
-    assert.strictEqual(result.r.file, path.join(dir, 'export-1152x720.mp4'));
+    assert.strictEqual(path.dirname(result.r.file), dir);
+    assert.match(path.basename(result.r.file), /^Recording .*\.mp4$/, 'named after the video');
     const video = result.progress.filter((p) => p.phase === 'video');
     assert.ok(video.length > 0 && video.at(-1).frame === video.at(-1).total, 'progress reaches the last frame');
     const duration = outputDuration(project.speedSegments, 8, 200);
@@ -609,7 +610,7 @@ const CASES = [
       window.loupe.exportVideo({ resolution: '720p' }).then(() => resolve('finished'), (e) => resolve(e.message));
     })`);
     assert.match(cancelled, /cancelled/);
-    const left = fs.readdirSync(dir).filter((f) => f.startsWith('export-'));
+    const left = fs.readdirSync(dir).filter((f) => f.endsWith('.part') || /^Recording .*\.mp4$/.test(f));
     assert.deepStrictEqual(left, [], 'a cancelled export leaves nothing behind');
     await editor.close();
   }]

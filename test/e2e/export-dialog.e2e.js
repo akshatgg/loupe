@@ -20,6 +20,7 @@ const { startMockShareServer } = require('../fixtures/mock-share-server');
 const { openEditor, openLab, makeFixture, freshRecording, readProject, waitFor, sleep, log } = require('./editor-harness');
 const { createFileActions } = require('../../src/main/ipc/fileActions');
 const { parseGif } = require('./media-parse.mjs');
+const { exportFileName } = require('../../src/core/export-plan.js');
 
 const MOD = process.platform === 'darwin' ? 'meta' : 'control';
 
@@ -77,12 +78,13 @@ async function main() {
       await ed.clickOn('#exportStart');
       await waitFor(() => ed.js('window.__editor.exportDialog.state === "done"'), 'the GIF', 60000);
       gifFile = await ed.js('document.querySelector(".export-dialog").dataset.file');
-      assert.strictEqual(gifFile, path.join(dir, 'export-480x300.gif'));
+      const gifName = exportFileName({ format: 'gif' }, readProject(dir).title);
+      assert.strictEqual(gifFile, path.join(dir, gifName), 'named after the video');
       const gif = parseGif(fs.readFileSync(gifFile));
       assert.strictEqual(gif.width, 480);
       assert.strictEqual(gif.frames.reduce((n, f) => n + f.delayCs, 0), 800);
       assert.strictEqual(readProject(dir).export.gifWidth, 480);
-      assert.match(await text('#exportFile'), /export-480x300\.gif/);
+      assert.strictEqual(await text('#exportFile'), gifName);
       await waitFor(() => ed.js('!document.getElementById("exportShare").hidden'), 'the Share button');
       await ed.shot('export-2-gif-done');
 
@@ -115,7 +117,7 @@ async function main() {
       await ed.clickOn('#exportDone');
       await ed.key('e', [MOD]);
       await waitFor(() => ed.js('!!document.getElementById("exportRecent")'), 'recent exports');
-      assert.match(await text('#exportRecent'), /export-480x300\.gif/);
+      assert.ok((await text('#exportRecent')).includes(path.basename(gifFile)));
       await ed.clickOn('#exportRecent .icon-btn[aria-label^="Show"]');
       assert.deepStrictEqual(shown.slice(-1), [gifFile]);
 
@@ -133,7 +135,8 @@ async function main() {
       await waitFor(async () => (await ed.project()).export.sizeLimit === 3, 'the custom limit');
       assert.match(await text('#exportSummary'), /under 3 MB/);
       await ed.shot('export-4-size-limit');
-      await ed.clickOn('#exportStart');
+      // Pressed many times at once: one export, and the dialog follows it.
+      await ed.js('(() => { const b = document.getElementById("exportStart"); for (let i = 0; i < 10; i++) b.click(); })()');
       await waitFor(() => ed.js('window.__editor.exportDialog.state === "done"'), 'the MP4', 60000);
       const file = await ed.js('document.querySelector(".export-dialog").dataset.file');
       assert.ok(file.endsWith('.mp4'));
@@ -142,7 +145,7 @@ async function main() {
       assert.strictEqual(readProject(dir).export.sizeLimit, 3);
       await ed.clickOn('#exportDone');
       await ed.key('e', [MOD]);
-      await waitFor(async () => /export-1152x720\.mp4[\s\S]*export-480x300\.gif/.test(await text('#exportRecent') ?? ''), 'both in recent');
+      await waitFor(async () => { const t = await text('#exportRecent') ?? ''; const i = t.indexOf(path.basename(file)); return i >= 0 && t.indexOf(path.basename(gifFile)) > i; }, 'both in recent');
       await ed.shot('export-5-recent');
       await ed.key('Escape');
     });

@@ -270,6 +270,11 @@ async function main() {
       await waitFor(() => ed.js('window.__editor.exportDialog.isOpen'), 'the export dialog');
       assert.strictEqual(await ed.js('document.getElementById("exportBurnCaptions").checked'), true, 'burn follows "Show captions"');
       assert.strictEqual(await ed.js('document.getElementById("exportSubtitles").checked'), false);
+      // A GIF can burn captions in, but has no use for a .srt.
+      await ed.clickOn('#exportFormat .seg-btn[data-value="gif"]');
+      assert.strictEqual(await ed.js('!!document.getElementById("exportBurnCaptions")'), true);
+      assert.strictEqual(await ed.js('!!document.getElementById("exportSubtitles")'), false, 'no .srt choice for a GIF');
+      await ed.clickOn('#exportFormat .seg-btn[data-value="mp4"]');
       await ed.clickOn('#exportResolution .seg-btn[data-value="720p"]');
       await ed.clickOn('label:has(#exportSubtitles)');
       assert.strictEqual(await ed.js('document.getElementById("exportSubtitles").checked'), true);
@@ -278,7 +283,7 @@ async function main() {
       await waitFor(() => ed.js('window.__editor.exportDialog.state !== "running"'), 'the export', 120000);
       assert.strictEqual(await ed.js('window.__editor.exportDialog.state'), 'done', await ed.js('document.getElementById("exportError")?.textContent ?? ""'));
       exported = await ed.js('document.querySelector(".export-dialog").dataset.file');
-      assert.match(await ed.js('document.getElementById("exportSubtitlesNote").textContent'), /Subtitles saved as export-\d+x720\.srt/);
+      assert.match(await ed.js('document.getElementById("exportSubtitlesNote").textContent'), /Subtitles saved as .+\.srt$/);
       await ed.shot('captions-09-export-done');
       await ed.clickOn('.export-dialog .btn.primary');
     });

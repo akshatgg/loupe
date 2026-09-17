@@ -46,6 +46,19 @@ test('export size: source shape keeps v1 sizes, chosen shapes use the short side
   assert.throws(() => aspectRatio('wide'), /aspect/);
 });
 
+test('export size: a very wide recording is capped, and the main recording decides the shape', () => {
+  const strip = P.createProject({ main: { ...MAIN, width: 1470, height: 81 } });
+  assert.deepStrictEqual(exportSize(strip), { width: 3840, height: 212 });
+  assert.deepStrictEqual(exportSize(strip, '720p'), { width: 2560, height: 142 });
+  assert.deepStrictEqual(exportSize(strip, '4k'), { width: 4096, height: 226 });
+  const p = P.createProject({ main: { ...MAIN, width: 640, height: 400 } });
+  const two = P.appendRecording(p, 'src2', { dir: '/abs/other', width: 1280, height: 720, duration: 4, video: 'raw.mp4' });
+  const moved = P.moveClip(two, 1, 0);
+  assert.strictEqual(moved.clips[0].source, 'src2');
+  assert.deepStrictEqual(exportSize(moved, '720p'), exportSize(p, '720p'), 'moving an added recording first keeps the shape');
+  assert.deepStrictEqual(exportSize(p, '720p'), { width: 1152, height: 720 });
+});
+
 test('layout insets by the padding and scales sizes with the short side', () => {
   const p = P.setStyle(P.createProject({ main: MAIN }), { padding: 0.1, radius: 20 });
   const a = layout(p, { width: 1920, height: 1080 });

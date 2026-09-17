@@ -132,6 +132,9 @@ test('duplicate copies the folder (not its exports) under a new name next to the
   const dir = v1(root, '1788954728479', { title: 'Demo' });
   fs.writeFileSync(path.join(dir, 'cursor.bin'), Buffer.alloc(32));
   fs.writeFileSync(path.join(dir, 'export-1920x1080.mp4'), 'big');
+  fs.writeFileSync(path.join(dir, 'Demo.mp4'), 'big');
+  fs.writeFileSync(path.join(dir, 'Demo 2.gif'), 'big');
+  fs.writeFileSync(path.join(dir, 'Demo.srt'), 'subs');
   fs.mkdirSync(path.join(dir, 'voice'));
   fs.writeFileSync(path.join(dir, 'voice', 'take1.m4a'), 'audio');
   const t = 1790000000000;

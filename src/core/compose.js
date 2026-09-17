@@ -45,6 +45,8 @@ export const LAYERS = [
 ];
 
 const EXPORT_HEIGHTS = { '720p': 720, '1080p': 1080, '1440p': 1440, '4k': 2160 };
+// The widest frame H.264, HEVC and VP9 hardware encoders reliably accept.
+const MAX_EXPORT_WIDTH = 4096;
 
 function even(n) {
   return Math.max(2, Math.round(n / 2) * 2);
@@ -67,8 +69,17 @@ export function exportSize(project, resolution = project.export.resolution) {
   if (!target) throw new Error(`Unknown export resolution: ${JSON.stringify(resolution)}`);
   const ratio = aspectRatio(project.style.aspect);
   if (ratio === null) {
-    const main = project.sources[project.clips[0].source];
-    return { width: even((main.width * target) / main.height), height: even(target) };
+    // The main recording decides the shape, not whichever clip was moved to
+    // the front: an added recording is fitted inside it like any other.
+    const main = project.sources.main ?? project.sources[project.clips[0].source];
+    const width = (main.width * target) / main.height;
+    // A very wide strip of screen (1470x81) would otherwise ask for a
+    // 19600-pixel-wide video no encoder makes: the width is capped at twice
+    // the preset's 16:9 width and at what encoders accept, the height
+    // following the shape.
+    const maxWidth = Math.min(MAX_EXPORT_WIDTH, (target * 32) / 9);
+    if (width > maxWidth) return { width: even(maxWidth), height: even((maxWidth * main.height) / main.width) };
+    return { width: even(width), height: even(target) };
   }
   if (ratio >= 1) return { width: even(target * ratio), height: even(target) };
   return { width: even(target), height: even(target / ratio) };

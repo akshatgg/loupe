@@ -33,6 +33,7 @@ test('migrates a real v1 project into sources.main and one whole clip', () => {
   assert.deepStrictEqual(p.zooms, []);
   assert.deepStrictEqual(p.speed, []);
   assert.match(p.title, /^Recording \d{1,2} [A-Z][a-z]{2} 2026, \d\d:\d\d$/);
+  assert.strictEqual(P.migrate({ ...V1_CLICKS, title: '  Sign-up demo ' }).title, 'Sign-up demo', 'a Library rename is kept');
   assert.strictEqual(p.createdAt, 1789562219597);
 });
 

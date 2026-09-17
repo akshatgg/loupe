@@ -4,7 +4,8 @@
 //   Burn captions into the video    starts as the Captions panel's "Show
 //                                   captions on the video"
 //   Also save subtitles (.srt)      a .srt beside the video, for players and
-//                                   sites that show their own captions
+//                                   sites that show their own captions (not
+//                                   for a GIF: nothing plays subtitles with one)
 //
 //   const cap = createExportCaptions({ store });
 //   cap.fields()      -> the section to put in the dialog (null without captions)
@@ -20,6 +21,7 @@ export function createExportCaptions({ store }) {
   let burn = null; // null until changed here: follow the panel's switch
 
   const has = () => store.project.captions.segments.length > 0;
+  const gif = () => store.project.export.format === 'gif';
 
   return {
     fields() {
@@ -36,11 +38,11 @@ export function createExportCaptions({ store }) {
         onChange: (v) => { subtitles = v; }
       });
       srtRow.input.id = 'exportSubtitles';
-      return h('div', { class: 'export-captions' }, burnRow, srtRow);
+      return h('div', { class: 'export-captions' }, burnRow, gif() ? null : srtRow);
     },
     options() {
       if (!has()) return {};
-      return { burnCaptions: burn ?? store.project.captions.show, subtitles };
+      return { burnCaptions: burn ?? store.project.captions.show, subtitles: subtitles && !gif() };
     },
     doneNote(result) {
       if (result?.subtitlesError) return h('p', { class: 'hint export-subtitles-note', id: 'exportSubtitlesNote' }, result.subtitlesError);
