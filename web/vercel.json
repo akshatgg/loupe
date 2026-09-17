@@ -3,7 +3,7 @@
   "cleanUrls": true,
   "trailingSlash": false,
   "rewrites": [
-    { "source": "/v/:id", "destination": "/v.html" }
+    { "source": "/v/:id", "destination": "/v" }
   ],
   "crons": [
     { "path": "/api/share/cleanup", "schedule": "17 4 * * *" }
