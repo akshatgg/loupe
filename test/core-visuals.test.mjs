@@ -270,3 +270,10 @@ test('a new recording’s v2 fields and default style come through the migration
   // Without keys recorded, badges stay off.
   assert.strictEqual(P.migrate({ ...v1, sources: undefined }).style.keystrokes.show, false);
 });
+
+test('captions give way to a full-screen title card', () => {
+  let p = P.setCaptions(plain(), { show: true, segments: [{ id: 'k1', source: 'main', start: 0, end: 6, text: 'Spoken words' }] });
+  p = P.addAnnotation(p, { type: 'title', start: 0, end: 3, text: 'Card', color: '#202124', size: 1 });
+  assert.deepStrictEqual(texts(render(p, { outT: 1.5 }).ctx), ['Card'], 'hidden behind the card');
+  assert.ok(texts(render(p, { outT: 4 }).ctx).includes('Spoken words'), 'back once the card is gone');
+});

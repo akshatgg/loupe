@@ -70,6 +70,12 @@ export function rangePieces(project, layout, source, start, end) {
   return pieces;
 }
 
+// How long a range plays in the video: its pieces' output lengths, so a zoom
+// reaching over a cut doesn't count the time that was cut out.
+export function shownLength(pieces) {
+  return pieces.reduce((n, p) => n + Math.max(0, p.outEnd - p.outStart), 0);
+}
+
 export function zoomPieces(project, layout) {
   return project.zooms.flatMap((zoom) =>
     rangePieces(project, layout, zoom.source, zoom.start, zoom.end).map((p) => ({ ...p, zoom })));

@@ -98,7 +98,12 @@ export default {
       section('Timing', length, h('div', { class: 'chips' }, toPlayhead)),
       section(null, remove));
 
-    container.append(h('div', { class: 'anno-top' }, intro, addSection, list), detail);
+    const top = h('div', { class: 'anno-top' }, intro, addSection, list);
+    const back = h('button', {
+      type: 'button', class: 'chip anno-back', onclick: () => editor.select(null)
+    }, icon('back', { size: 14 }), 'All annotations');
+    detail.prepend(back);
+    container.append(top, detail);
 
     function renderList() {
       const p = store.project;
@@ -119,7 +124,11 @@ export default {
     function update() {
       const a = selected();
       detail.hidden = !a;
-      container.querySelector('.anno-top').hidden = Boolean(a);
+      // The add buttons stay: with one selected they sit under its settings,
+      // so a second annotation is one click away.
+      top.hidden = Boolean(a);
+      if (a) detail.append(addSection);
+      else top.insertBefore(addSection, list);
       if (!a) {
         renderList();
         return;

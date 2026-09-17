@@ -213,6 +213,32 @@ const CASES = [
     const titlePixel = await pixel(ed, 6, 6);
     assert.ok(dist(titlePixel, [0x1f, 0x1f, 0x23]) < 12, `title card corner ${titlePixel}`);
     await ed.shot('visuals-06-title');
+
+    // With one selected, the add buttons are still there for the next one,
+    // and a click on the empty space beside the preview lets go of it.
+    assert.deepStrictEqual(await ed.js('window.__editor.store.selection'), { kind: 'annotation', id: title.id });
+    assert.strictEqual(await ed.js('[...document.querySelectorAll(".add-tile")].filter((b) => b.offsetParent).length'), 5, 'add tiles stay visible');
+    assert.strictEqual(await ed.js('!!document.querySelector(".anno-back")?.offsetParent'), true, 'a way back to the list');
+    const stage = await ed.box('#stage');
+    await ed.click(Math.round(stage.x + 8), Math.round(stage.y + stage.h / 2));
+    assert.strictEqual(await ed.js('window.__editor.store.selection'), null, 'clicking beside the preview deselects');
+    assert.strictEqual(await ed.js('[...document.querySelectorAll(".add-tile")].filter((b) => b.offsetParent).length'), 5);
+  }],
+
+  ['style: a background on a recording with no room around it makes some; tabs open at their top', async (ed, dir) => {
+    await ed.clickOn('#tabs .tab[data-panel=style]');
+    await ed.js('window.__editor.store.apply((p) => ({ ...p, style: { ...p.style, padding: 0, background: { type: "none", value: null } } }))');
+    await ed.settle();
+    await ed.js('document.querySelector(".panel-body[data-panel=style] .swatch:not(.swatch-none)").scrollIntoView()');
+    await ed.clickOn('.panel-body[data-panel=style] .swatch:not(.swatch-none)');
+    await ed.settle();
+    const style = readProject(dir).style;
+    assert.notStrictEqual(style.background.type, 'none');
+    assert.ok(style.padding > 0, `padding ${style.padding}: the background shows`);
+    await ed.js('document.querySelector(".panel-wrap").scrollTop = 600');
+    await ed.clickOn('#tabs .tab[data-panel=audio]');
+    assert.strictEqual(await ed.js('document.querySelector(".panel-wrap").scrollTop'), 0, 'Audio opens at its top');
+    await ed.shot('visuals-06b-background-room');
   }],
 
   ['transitions: click the join between clips and pick a crossfade', async (ed, dir) => {

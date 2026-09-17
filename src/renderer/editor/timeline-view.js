@@ -123,7 +123,7 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
       h('div', { class: 'handle start', dataset: { edge: 'start' } }),
       h('div', { class: 'clip-label' },
         many ? h('span', { class: 'clip-name' }, `Clip ${i + 1}`) : null,
-        h('span', { class: 'clip-dur' }, formatTime(len, { fraction: len < 10 }))),
+        h('span', { class: 'clip-dur' }, formatTime(len, { fraction: true }))),
       h('div', { class: 'handle end', dataset: { edge: 'end' } }));
       return el;
     }));

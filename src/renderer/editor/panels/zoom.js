@@ -5,7 +5,7 @@
 import { h, icon, slider, segmented, section } from '../ui.js';
 import { updateZoom, removeZoom, ZOOM_LEVEL_MAX } from '../../../core/project.js';
 import { viewSize } from '../../../core/camera.js';
-import { clipLayout, rangePieces, formatTime, newZoomRange, clamp } from '../timeline-math.js';
+import { clipLayout, rangePieces, shownLength, formatTime, newZoomRange, clamp } from '../timeline-math.js';
 
 
 export default {
@@ -149,7 +149,7 @@ export default {
       const pieces = rangePieces(p, clipLayout(p, store.tl), z.source, z.start, z.end);
       heading.textContent = z.recorded ? 'Zoom from your recording' : 'Selected zoom';
       when.textContent = pieces.length
-        ? `${formatTime(pieces[0].outStart, { fraction: true })} – ${formatTime(pieces.at(-1).outEnd, { fraction: true })} · ${(z.end - z.start).toFixed(1)} s`
+        ? `${formatTime(pieces[0].outStart, { fraction: true })} – ${formatTime(pieces.at(-1).outEnd, { fraction: true })} · ${shownLength(pieces).toFixed(1)} s`
         : 'This part of the recording is cut from the video.';
       level.set(z.level);
       mode.set(z.follow ? 'follow' : 'fixed');

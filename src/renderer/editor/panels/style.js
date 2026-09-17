@@ -27,6 +27,9 @@ const ASPECT_LABELS = [
   { value: '4:5', label: '4:5', w: 11, h: 13.75 }
 ];
 
+// The padding a new project starts with (core/project.js defaults).
+const BACKGROUND_ROOM = 0.06;
+
 const sameBackground = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 function aspectIcon(w, hgt) {
@@ -44,11 +47,18 @@ export default {
     const style = () => store.project.style;
 
     // ---- background
+    // A background only shows around the recording. A recording from an
+    // older Loupe has no room around it (padding 0), so picking one there
+    // would change nothing on screen: it also makes a little room.
+    const setBackground = (bg, gesture = null) => {
+      const room = bg.type !== 'none' && style().padding === 0 ? { padding: BACKGROUND_ROOM } : {};
+      edit({ background: bg, ...room }, gesture);
+    };
     const swatches = [];
     const swatch = (bg, title, paint) => {
       const b = h('button', {
         type: 'button', class: 'swatch', title, 'aria-label': title,
-        onclick: () => { edit({ background: bg }); done(); }
+        onclick: () => { setBackground(bg); done(); }
       });
       Object.assign(b.style, paint);
       b.bg = bg;
@@ -61,10 +71,10 @@ export default {
       { background: `linear-gradient(${g.angle}deg, ${g.stops.join(', ')})` }));
     const cols = COLOURS.map((c) => swatch({ type: 'color', value: c }, `Colour ${c}`, { background: c }));
     const picker = h('input', { type: 'color', value: '#1a73e8', 'aria-label': 'Pick any colour' });
-    picker.addEventListener('input', () => edit({ background: { type: 'color', value: picker.value } }, 'style:colour'));
+    picker.addEventListener('input', () => setBackground({ type: 'color', value: picker.value }, 'style:colour'));
     picker.addEventListener('change', done);
     const custom = h('label', { class: 'swatch swatch-custom', title: 'Pick any colour' }, picker);
-    const pictures = picturesRow(editor, { onPick: (bg) => { edit({ background: bg }); done(); } });
+    const pictures = picturesRow(editor, { onPick: (bg) => { setBackground(bg); done(); } });
     const presets = presetsSection(editor);
     const keys = keystrokesSection(editor);
 

@@ -185,6 +185,8 @@ async function start() {
   function showPanel(id, { focus = false } = {}) {
     const panel = panelById(id);
     if (!panel) return;
+    // Another panel opens at its top, not at the last one's scroll position.
+    if (currentPanel !== id) panelBox.closest('.panel-wrap').scrollTop = 0;
     currentPanel = id;
     for (const b of tabs.children) b.setAttribute('aria-selected', String(b.dataset.panel === id));
     for (const [pid, m] of mounted) m.el.hidden = pid !== id;
@@ -220,6 +222,11 @@ async function start() {
   });
   const firstRun = createFirstRunHint({ parent: $('stage') });
   const overlay = createAnnotationOverlay({ canvas: $('preview'), stage: $('stage'), store, player, editor });
+  // A click on the empty space around the preview lets go of what's selected,
+  // as a click on an empty part of the picture does.
+  $('stage').addEventListener('pointerdown', (e) => {
+    if (e.button === 0 && (e.target === $('stage') || e.target === $('canvasBox'))) editor.select(null);
+  });
   const exportDialog = createExportDialog({ store, loupe, player, beforeExport: () => saver.flush() });
   const cheat = createCheatSheet(loupe.platform);
 

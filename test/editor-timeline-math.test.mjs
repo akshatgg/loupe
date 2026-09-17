@@ -110,3 +110,9 @@ test('the store records edits for undo, drops a dead selection, and reports refu
   assert.equal(store.tl.duration, 20);
   assert.ok(seen.includes('selection') && seen.includes('project'));
 });
+
+test('a zoom reaching over a cut shows only the time that still plays', () => {
+  const p = P.cutRange(project(), 5, 10); // recording 5-10 s is gone
+  const pieces = M.rangePieces(p, layoutOf(p), 'main', 3, 12);
+  near(M.shownLength(pieces), 4, 1e-6); // 3-5 and 10-12
+});

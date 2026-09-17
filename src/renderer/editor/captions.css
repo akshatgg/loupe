@@ -73,7 +73,8 @@
 .caption:hover { background: rgba(232, 234, 237, .2); }
 .caption.selected { background: var(--ink); border-color: var(--ink); color: var(--bg); }
 .caption-label {
-  position: absolute; inset: 0 7px; display: flex; align-items: center; font-size: 11px;
+  /* A block, not a flex box: text-overflow only cuts a block's own text with "…". */
+  position: absolute; left: 7px; right: 7px; top: 50%; transform: translateY(-50%); display: block; font-size: 11px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
 }
 .caption .handle { width: 7px; }

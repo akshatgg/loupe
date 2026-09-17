@@ -23,6 +23,7 @@
 
 import { captionsToOutput } from '../captions/timeline.js';
 import { segmentsAt } from '../captions/model.js';
+import { visibleAnnotations, opacityAt } from './annotations.js';
 
 export const name = 'captions';
 
@@ -143,7 +144,14 @@ function cuesFor(segments, tl) {
 export function draw(ctx, state) {
   const captions = state.project.captions;
   if (!captions?.show || !captions.segments?.length) return;
+  // A full-screen title card covers the video, captions included: they
+  // fade out as it fades in, rather than sitting on top of its words.
+  const cover = visibleAnnotations(state).reduce((m, a) => (a.type === 'title' ? Math.max(m, opacityAt(a, state.t)) : m), 0);
+  if (cover >= 1) return;
   const { width, height } = state.size;
   const cues = segmentsAt(cuesFor(captions.segments, state.tl), state.outT);
+  ctx.save();
+  ctx.globalAlpha *= 1 - cover;
   drawCaptions(ctx, { x: 0, y: 0, w: width, h: height }, cues, captions.style);
+  ctx.restore();
 }
