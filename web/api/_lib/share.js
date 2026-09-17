@@ -136,9 +136,14 @@ function clientIp(req) {
     const v = req.headers?.[name];
     return Array.isArray(v) ? v[0] : v;
   };
+  // Vercel sets x-real-ip itself. The first x-forwarded-for entry is whatever
+  // the client sent, so only the last one (added by the nearest proxy) is
+  // used, and only when nothing better is there.
+  const real = header('x-real-ip') || header('x-vercel-forwarded-for');
+  if (real) return String(real).split(',')[0].trim();
   const forwarded = header('x-forwarded-for');
-  if (forwarded) return String(forwarded).split(',')[0].trim();
-  return header('x-real-ip') || req.socket?.remoteAddress || 'unknown';
+  if (forwarded) return String(forwarded).split(',').pop().trim();
+  return req.socket?.remoteAddress || 'unknown';
 }
 
 function sendJson(res, status, body, headers = {}) {
@@ -150,8 +155,10 @@ function sendJson(res, status, body, headers = {}) {
 
 function sendError(res, err) {
   if (err instanceof HttpError) {
-    return sendJson(res, err.status, { error: err.code, message: err.message },
-      { 'Cache-Control': 'no-store' });
+    // A link that doesn't exist stays that way: the edge answers repeats, so
+    // guessing ids doesn't cost a storage listing each time.
+    const cache = err.status === 404 ? 'public, max-age=0, s-maxage=300' : 'no-store';
+    return sendJson(res, err.status, { error: err.code, message: err.message }, { 'Cache-Control': cache });
   }
   console.error('share: unexpected error', err);
   return sendJson(res, 500, { error: 'server_error', message: 'Something went wrong. Please try again.' },
@@ -211,7 +218,12 @@ function createShareApi(deps) {
   const {
     blob, env = process.env, now = Date.now, randomBytes = nodeCrypto.randomBytes,
     fetch: fetchImpl = globalThis.fetch,
-    limiter = createRateLimiter({ limit: 20, windowMs: 60 * 60 * 1000, now })
+    limiter = createRateLimiter({ limit: 20, windowMs: 60 * 60 * 1000, now }),
+    // Opening share links: generous for people, not for a script listing ids.
+    viewLimiter = createRateLimiter({ limit: 120, windowMs: 60 * 1000, now }),
+    // Without CRON_SECRET anyone can start a cleanup; it only ever deletes
+    // expired shares, but each run lists the store, so one every ten minutes.
+    cleanupLimiter = createRateLimiter({ limit: 1, windowMs: 10 * 60 * 1000, now })
   } = deps;
   const token = () => env.BLOB_READ_WRITE_TOKEN || '';
   const requireEnabled = () => {
@@ -303,6 +315,9 @@ function createShareApi(deps) {
       onlyMethod(req, 'GET');
       const id = requestId(req);
       if (!isShareId(id)) throw new HttpError(404, 'not_found', 'This link does not exist.');
+      if (!viewLimiter.take(clientIp(req))) {
+        throw new HttpError(429, 'rate_limited', 'Too many requests. Please try again in a minute.');
+      }
       requireEnabled();
       const { blobs } = await blob.list({ prefix: `${PREFIX}${id}/`, limit: 10, token: token() });
       const metaBlob = blobs.find((b) => b.pathname === `${PREFIX}${id}/meta.json`);
@@ -349,6 +364,9 @@ function createShareApi(deps) {
       onlyMethod(req, 'GET');
       if (env.CRON_SECRET && req.headers?.authorization !== `Bearer ${env.CRON_SECRET}`) {
         throw new HttpError(401, 'unauthorized', 'Unauthorized.');
+      }
+      if (!env.CRON_SECRET && !cleanupLimiter.take('cleanup')) {
+        throw new HttpError(429, 'rate_limited', 'A cleanup ran a moment ago.');
       }
       requireEnabled();
       const cutoff = now() - TTL_MS;

@@ -276,6 +276,9 @@ test('helpers', () => {
   assert.strictEqual(isShareId('AAAAAAAAAAAAAAA'), false);
   assert.strictEqual(clientIp({ headers: { 'x-real-ip': '192.0.2.1' } }), '192.0.2.1');
   assert.strictEqual(clientIp({ headers: {}, socket: { remoteAddress: '::1' } }), '::1');
+  // A client can't pick its own address by sending x-forwarded-for.
+  assert.strictEqual(clientIp({ headers: { 'x-forwarded-for': '203.0.113.9, 198.51.100.7', 'x-real-ip': '198.51.100.7' } }), '198.51.100.7');
+  assert.strictEqual(clientIp({ headers: { 'x-forwarded-for': '203.0.113.9, 198.51.100.7' } }), '198.51.100.7');
 
   const p = parseClientPayload(JSON.stringify({
     title: 'a\u0000b\nc', contentType: 'image/gif', size: 5, width: -1, height: 99999, duration: 'x', extra: 1
@@ -283,4 +286,19 @@ test('helpers', () => {
   assert.deepStrictEqual(p, { contentType: 'image/gif', size: 5, title: 'a b c', width: null, height: null, duration: null });
   assert.throws(() => parseClientPayload(null), /Missing upload details/);
   assert.throws(() => parseClientPayload('[1]'), /Missing upload details/);
+});
+
+test('guessing links is limited and cached; an open cleanup runs at most every ten minutes', async () => {
+  let t = T0;
+  const { api } = setup({ now: () => t });
+  let last;
+  for (let i = 0; i < 121; i++) last = await call(api.meta, fakeReq({ query: { id: 'AAAAAAAAAAAAAAAA' }, headers: { 'x-real-ip': '192.0.2.5' } }));
+  assert.strictEqual(last.statusCode, 429);
+  const other = await call(api.meta, fakeReq({ query: { id: 'AAAAAAAAAAAAAAAA' }, headers: { 'x-real-ip': '192.0.2.6' } }));
+  assert.strictEqual(other.statusCode, 404);
+  assert.match(other.headers['cache-control'] ?? other.headers['Cache-Control'], /s-maxage=300/);
+  assert.strictEqual((await call(api.cleanup, fakeReq())).statusCode, 200);
+  assert.strictEqual((await call(api.cleanup, fakeReq())).statusCode, 429);
+  t += 11 * 60 * 1000;
+  assert.strictEqual((await call(api.cleanup, fakeReq())).statusCode, 200);
 });
