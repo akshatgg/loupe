@@ -1,0 +1,72 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Captions test</title>
+<canvas id="c" width="1280" height="720"></canvas>
+<script type="module">
+  // Test page for test/e2e/captions.e2e.js: the real engine (worker, audio
+  // decode, preload bridge) driven from the test through window.captionsTest.
+  import { createCaptionsEngine } from '../../src/renderer/captions/client.js';
+  import { decodeMicTrack } from '../../src/renderer/captions/audio.js';
+  import { drawCaptions } from '../../src/core/layers/captions.js';
+
+  const engines = {};
+  const engineFor = (device) => (engines[device] ??= createCaptionsEngine({ device }));
+
+  window.captionsTest = {
+    async decode(url) {
+      const t0 = performance.now();
+      const { samples, sampleRate, duration } = await decodeMicTrack(url);
+      // Onsets of sound after at least `minGap` s of silence, from 50 ms frames.
+      const frame = sampleRate / 20;
+      const onsets = [];
+      let quiet = Infinity; // the start counts as silence
+      for (let f = 0; f * frame < samples.length; f++) {
+        let sum = 0;
+        for (let i = f * frame; i < Math.min(samples.length, (f + 1) * frame); i++) sum += samples[i] * samples[i];
+        const loud = Math.sqrt(sum / frame) > 0.01;
+        if (loud && (f === 0 || quiet >= 20)) onsets.push(f / 20);
+        quiet = loud ? 0 : quiet + 1;
+      }
+      let peak = 0;
+      for (let i = 0; i < samples.length; i++) peak = Math.max(peak, Math.abs(samples[i]));
+      return { duration, sampleRate, onsets, peak, ms: performance.now() - t0 };
+    },
+
+    async transcribe({ url, language = 'auto', model = 'standard', device = 'auto', cancelAfterProgress = false }) {
+      const engine = engineFor(device);
+      const stages = [];
+      let job;
+      const t0 = performance.now();
+      job = engine.transcribe({
+        url, language, model,
+        onProgress(p) {
+          const last = stages[stages.length - 1];
+          if (!last || last.stage !== p.stage) stages.push({ stage: p.stage, at: performance.now() - t0 });
+          if (cancelAfterProgress && p.stage === 'transcribe' && p.fraction > 0 && !job.cancelledAt) {
+            job.cancelledAt = performance.now();
+            job.cancel();
+          }
+        }
+      });
+      try {
+        const r = await job.promise;
+        return { ok: true, stages, ...r, transcribeMs: r.ms, ms: performance.now() - t0 };
+      } catch (err) {
+        return {
+          ok: false, code: err.code, message: err.message, stages,
+          cancelLatencyMs: job.cancelledAt ? performance.now() - job.cancelledAt : null
+        };
+      }
+    },
+
+    draw(cues, style) {
+      const ctx = document.getElementById('c').getContext('2d');
+      ctx.fillStyle = '#336';
+      ctx.fillRect(0, 0, 1280, 720);
+      const box = drawCaptions(ctx, { x: 0, y: 0, w: 1280, h: 720 }, cues, style);
+      const px = (x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data);
+      return { box, center: box && px(Math.round(box.x + 4), Math.round(box.y + box.h / 2)), outside: px(5, 5) };
+    }
+  };
+  window.captionsTestReady = true;
+</script>

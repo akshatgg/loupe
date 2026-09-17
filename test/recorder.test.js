@@ -97,7 +97,7 @@ test('stop() records the real source width, height and title on project.source',
   sinks.capture({ type: 'started', clock: 0 });
   sinks.capture({ type: 'stopped', duration: 5 });
 
-  const { project } = await rec.stop();
+  const { recording: project } = await rec.stop();
   assert.strictEqual(project.source.width, 1920);
   assert.strictEqual(project.source.height, 1080);
   assert.strictEqual(project.source.title, 'Built-in Display');
@@ -144,7 +144,7 @@ test('duration from a prior recording does not leak into the next one', async ()
   assert.strictEqual(rec.state().duration, 0, 'duration should reset on start()');
   sinks.capture({ type: 'started', clock: 0 });
 
-  const { project } = await rec.stop();
+  const { recording: project } = await rec.stop();
   assert.strictEqual(project.capture.duration, 0);
 });
 
@@ -373,7 +373,7 @@ test("stop() records the source's origin onto project.source", async () => {
   sinks.capture({ type: 'started', clock: 0 });
   sinks.capture({ type: 'stopped', duration: 1 });
 
-  const { project } = await rec.stop();
+  const { recording: project } = await rec.stop();
   assert.strictEqual(project.source.originX, 400);
   assert.strictEqual(project.source.originY, 200);
 });
@@ -563,9 +563,53 @@ test('stop() keeps an untouched copy of the recorded zooms for the editor to res
   sinks.inputtap({ type: 'zoom', clock: 1, dy: 40, x: 100, y: 100 });
   sinks.capture({ type: 'stopped', duration: 5 });
 
-  const { project } = await rec.stop();
+  const { recording: project } = await rec.stop();
   assert.strictEqual(project.zoomKeyframes.length, 1);
   assert.deepStrictEqual(project.recordedZoomKeyframes, project.zoomKeyframes);
   assert.notStrictEqual(project.recordedZoomKeyframes, project.zoomKeyframes, 'a copy, not the same array');
   assert.deepStrictEqual(project.removedZooms, []);
+});
+
+test('a capture that fails before its first frame writes no project and says so', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loupe-failed-'));
+  const { rec, sinks } = harness();
+  await rec.start({ source: 'display:1', mic: false, dir });
+  sinks.capture({ type: 'error', message: 'display not found: display:1' });
+  const result = await rec.stop();
+  assert.deepStrictEqual(result, { dir, failed: true, message: 'display not found: display:1' });
+  assert.deepStrictEqual(fs.readdirSync(dir), [], 'no project.json, cursor.bin or keys.json');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('a capture that fails after it started keeps what was recorded', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loupe-failed-'));
+  const { rec, sinks } = harness();
+  await rec.start({ source: 'display:1', mic: false, dir });
+  sinks.capture({ type: 'started', clock: 10 });
+  sinks.capture({ type: 'error', message: 'writer failed' });
+  const result = await rec.stop();
+  assert.ok(!result.failed);
+  assert.ok(fs.existsSync(path.join(dir, 'project.json')));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('capture gets time to finish its file when stopped; inputtap the usual few seconds', async () => {
+  const { CAPTURE_STOP_MS } = require('../src/main/recorder');
+  const grace = {};
+  const spawnHelper = (bin, args, opts) => ({ name: bin.endsWith('capture') ? 'capture' : 'inputtap', opts, kill() {} });
+  const stopHelper = async (child, timeoutMs) => { grace[child.name] = timeoutMs; return 0; };
+  const rec = createRecorder({ binDir: '/fake', spawnHelper, stopHelper });
+  await rec.start({ source: 'display:1', mic: false, dir: require('node:os').tmpdir() + '/loupe-grace', zoomEnabled: true });
+  require('node:fs').mkdirSync(require('node:os').tmpdir() + '/loupe-grace', { recursive: true });
+  await rec.stop();
+  assert.ok(CAPTURE_STOP_MS >= 30000);
+  assert.strictEqual(grace.capture, CAPTURE_STOP_MS);
+  assert.strictEqual(grace.inputtap, undefined, 'inputtap keeps the default');
+  require('node:fs').rmSync(require('node:os').tmpdir() + '/loupe-grace', { recursive: true, force: true });
 });

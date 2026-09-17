@@ -1,0 +1,13 @@
+:root { color-scheme: dark; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
+             -webkit-user-select: none; user-select: none; }
+/* The whole bubble is the drag handle: there is nothing to click inside it. */
+#bubble { position: absolute; inset: 6px; border-radius: 50%; overflow: hidden;
+          background: #202124; -webkit-app-region: drag;
+          box-shadow: 0 0 0 3px rgba(255,255,255,.9), 0 4px 14px rgba(0,0,0,.45); }
+/* Mirrored, like looking in a mirror -- the recording itself is not. */
+#video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+#message { position: absolute; inset: 0; margin: 0; display: grid; place-items: center;
+           padding: 24px; text-align: center; font: 12px -apple-system, system-ui;
+           color: #e8eaed; }

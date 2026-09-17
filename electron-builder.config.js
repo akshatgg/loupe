@@ -62,7 +62,8 @@ module.exports = {
     extendInfo: {
       NSMicrophoneUsageDescription:
         'Loupe records your microphone when you turn it on before recording.',
-      NSCameraUsageDescription: 'Not used.'
+      NSCameraUsageDescription:
+        'Loupe shows and records your camera in a small bubble when you turn Camera on before recording.'
     }
   },
 

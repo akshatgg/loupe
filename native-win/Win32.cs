@@ -128,6 +128,8 @@ static class Win32
     public struct MOUSEINPUT { public int dx, dy; public uint mouseData, dwFlags, time; public UIntPtr dwExtraInfo; }
     [StructLayout(LayoutKind.Sequential)]
     public struct KEYBDINPUT { public ushort wVk, wScan; public uint dwFlags, time; public UIntPtr dwExtraInfo; public uint padding1, padding2; }
+    [DllImport("user32.dll")] public static extern uint MapVirtualKey(uint code, uint mapType);
+    public const uint MAPVK_VK_TO_CHAR = 2;
     [DllImport("user32.dll")] public static extern uint SendInput(uint count, INPUT[] inputs, int size);
     public const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1, KEYEVENTF_KEYUP = 2;
     public const uint MOUSEEVENTF_MIDDLEDOWN = 0x20, MOUSEEVENTF_MIDDLEUP = 0x40, MOUSEEVENTF_XDOWN = 0x80, MOUSEEVENTF_XUP = 0x100;

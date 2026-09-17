@@ -1,6 +1,7 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>Loupe</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' file: data: blob:; media-src 'self' blob: mediastream:">
+<title>New recording</title>
 <link rel="stylesheet" href="picker.css">
 <body>
   <header>
@@ -23,7 +24,42 @@
         <span class="glyph" aria-hidden="true">🎙</span>
         Record microphone
       </label>
-      <input type="checkbox" id="mic" class="switch">
+      <div class="rowcontrols">
+        <select id="micDevice" aria-label="Which microphone" hidden></select>
+        <input type="checkbox" id="mic" class="switch">
+      </div>
+    </div>
+    <div class="optionrow">
+      <label for="systemAudio">
+        <span class="glyph" aria-hidden="true">🔊</span>
+        Record computer sound
+      </label>
+      <input type="checkbox" id="systemAudio" class="switch">
+    </div>
+    <div class="optionrow">
+      <label for="camera">
+        <span class="glyph" aria-hidden="true">📷</span>
+        Camera
+      </label>
+      <div class="rowcontrols">
+        <select id="cameraDevice" aria-label="Which camera" hidden></select>
+        <span id="cameraNote" class="note" hidden></span>
+        <input type="checkbox" id="camera" class="switch">
+      </div>
+    </div>
+    <div class="optionrow">
+      <label for="recordKeys">
+        <span class="glyph" aria-hidden="true">⌨️</span>
+        Show keyboard shortcuts I press (never what I type)
+      </label>
+      <input type="checkbox" id="recordKeys" class="switch">
+    </div>
+    <div class="optionrow">
+      <label for="countdown">
+        <span class="glyph" aria-hidden="true">⏱</span>
+        Count down 3, 2, 1 before recording
+      </label>
+      <input type="checkbox" id="countdown" class="switch">
     </div>
     <div class="optionrow">
       <span class="rowlabel" id="zoomLabel">
@@ -44,10 +80,12 @@
   </div>
 
   <footer>
+    <button id="recordings" class="ghost" title="Your recordings">Recordings</button>
     <button id="refresh" class="ghost">Refresh</button>
     <p id="hint" class="hint"></p>
     <button id="record" disabled>Continue</button>
   </footer>
 
+  <script src="../shared/zoom-shortcuts.js"></script>
   <script src="picker.js"></script>
 </body>

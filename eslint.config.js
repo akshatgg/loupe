@@ -2,7 +2,7 @@
 module.exports = [
   {
     files: ['**/*.js'],
-    ignores: ['src/renderer/**', 'web/**'],
+    ignores: ['src/renderer/**', 'web/**', 'src/core/**', 'test/e2e/lab.js', 'test/e2e/visuals-lab.js', 'test/e2e/export-lab.js'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'commonjs',
@@ -10,7 +10,8 @@ module.exports = [
                  console: 'readonly', __dirname: 'readonly', Buffer: 'readonly',
                  setTimeout: 'readonly', clearTimeout: 'readonly',
                  setInterval: 'readonly', clearInterval: 'readonly',
-                 setImmediate: 'readonly', fetch: 'readonly' }
+                 setImmediate: 'readonly', fetch: 'readonly',
+                 AbortController: 'readonly' }
     },
     rules: {
       'no-unused-vars': 'error',
@@ -28,6 +29,7 @@ module.exports = [
   // doing permanently even though it is clean today.
   {
     files: ['src/renderer/**/*.js'],
+    ignores: ['src/renderer/exporter/**', 'src/renderer/editor/**'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'script',
@@ -45,6 +47,27 @@ module.exports = [
       'no-undef': 'error',
       'prefer-const': 'error',
       eqeqeq: 'error'
+    }
+  },
+  // The Library and Settings windows are ES modules (docs/EDITOR-V2.md).
+  {
+    files: ['src/renderer/library/**/*.js', 'src/renderer/settings/**/*.js'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: { Intl: 'readonly', CSS: 'readonly', Option: 'readonly', location: 'readonly' }
+    }
+  },
+  // The webcam bubble is an ES module page (docs/EDITOR-V2.md: new renderer
+  // code is ESM).
+  {
+    files: ['src/renderer/camera/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: {
+        window: 'readonly', document: 'readonly', navigator: 'readonly',
+        console: 'readonly', performance: 'readonly', MediaRecorder: 'readonly'
+      }
     }
   },
   // The website (web/, deployed to Vercel) is plain browser scripts too.
@@ -71,5 +94,119 @@ module.exports = [
       eqeqeq: 'error'
     }
   },
-  { ignores: ['bin/', 'node_modules/', 'dist/', '.build-native/', 'web/node_modules/'] }
+  // The shared core (src/core, docs/EDITOR-V2.md) is ES modules used by
+  // main, the renderer windows and the tests alike, so it may only lean on
+  // what every one of those has: no DOM, no Node APIs.
+  {
+    files: ['src/core/**/*.js', 'test/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: {
+        console: 'readonly', structuredClone: 'readonly', URL: 'readonly',
+        globalThis: 'readonly', process: 'readonly', fetch: 'readonly',
+        WebAssembly: 'readonly', Blob: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly'
+      }
+    },
+    rules: {
+      'no-unused-vars': 'error',
+      'no-undef': 'error',
+      'prefer-const': 'error',
+      eqeqeq: 'error'
+    }
+  },
+  // Captions (src/core/captions, the burn-in layer, src/renderer/captions):
+  // the page side and its module worker also use Worker and WebAudio/
+  // WebCodecs globals; these add to the core block above for those files.
+  {
+    files: ['src/core/captions/**/*.js', 'src/core/layers/captions.js', 'src/renderer/captions/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: {
+        self: 'readonly', window: 'readonly', globalThis: 'readonly', console: 'readonly',
+        fetch: 'readonly', URL: 'readonly', Worker: 'readonly', postMessage: 'readonly',
+        performance: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly',
+        AbortController: 'readonly', OfflineAudioContext: 'readonly', AudioDecoder: 'readonly',
+        EncodedAudioChunk: 'readonly'
+      }
+    },
+    rules: {
+      'no-unused-vars': 'error',
+      'no-undef': 'error',
+      'prefer-const': 'error',
+      eqeqeq: 'error'
+    }
+  },
+  // The exporter window (src/renderer/exporter) is ES modules running in a
+  // hidden, sandboxed page: browser and WebCodecs globals, no Node. The e2e
+  // lab page is the same kind of page.
+  {
+    files: ['src/renderer/exporter/**/*.js', 'test/e2e/lab.js', 'test/e2e/visuals-lab.js', 'test/e2e/export-lab.js'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: {
+        window: 'readonly', document: 'readonly', console: 'readonly', fetch: 'readonly',
+        URL: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly',
+        performance: 'readonly', OffscreenCanvas: 'readonly', createImageBitmap: 'readonly',
+        VideoDecoder: 'readonly', VideoEncoder: 'readonly', VideoFrame: 'readonly',
+        AudioDecoder: 'readonly', AudioEncoder: 'readonly', AudioData: 'readonly',
+        EncodedVideoChunk: 'readonly', EncodedAudioChunk: 'readonly', Blob: 'readonly',
+        MediaRecorder: 'readonly',
+        OfflineAudioContext: 'readonly',
+        ImageDecoder: 'readonly'
+      }
+    },
+    rules: {
+      'no-unused-vars': 'error',
+      'no-undef': 'error',
+      'prefer-const': 'error',
+      eqeqeq: 'error'
+    }
+  },
+  // The editor window (src/renderer/editor) is ES modules too, in a sandboxed
+  // page that reaches main only through window.loupe.
+  {
+    files: ['src/renderer/editor/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: {
+        window: 'readonly', document: 'readonly', console: 'readonly', fetch: 'readonly',
+        URL: 'readonly', setTimeout: 'readonly', clearTimeout: 'readonly', performance: 'readonly',
+        requestAnimationFrame: 'readonly', cancelAnimationFrame: 'readonly', ResizeObserver: 'readonly',
+        Audio: 'readonly', Node: 'readonly'
+      }
+    },
+    rules: {
+      'no-unused-vars': 'error',
+      'no-undef': 'error',
+      'prefer-const': 'error',
+      eqeqeq: 'error'
+    }
+  },
+  // The website's Vercel Functions (web/api/) are CommonJS Node, not browser code.
+  {
+    files: ['web/api/**/*.js'],
+    languageOptions: {
+      sourceType: 'commonjs',
+      globals: { require: 'readonly', module: 'writable', process: 'readonly',
+                 Buffer: 'readonly', globalThis: 'readonly' }
+    }
+  },
+  // The editor's sound (audio-preview.js and its module worker, the
+  // voiceover recorder): Web Audio, workers and WebCodecs on top of the
+  // editor block above.
+  {
+    files: ['src/renderer/editor/**/*.js'],
+    languageOptions: {
+      globals: {
+        AudioContext: 'readonly', Worker: 'readonly', self: 'readonly',
+        setInterval: 'readonly', clearInterval: 'readonly'
+      }
+    }
+  },
+  // Local git worktrees of this repo are checked out under it; each lints itself.
+  { ignores: ['src/vendor/', 'test/e2e/out/', 'bin/', 'node_modules/', 'dist/', '.build-native/', 'web/node_modules/'] }
 ];

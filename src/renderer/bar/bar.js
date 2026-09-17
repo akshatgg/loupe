@@ -2,13 +2,18 @@
 
 // 'full' reads as "Full window" for a window source -- same mode, no crop.
 const AREA_MODES = [
-  { mode: 'full', label: { display: 'Full screen', window: 'Full window' } },
-  { mode: 'rect', label: 'Rectangle' },
-  { mode: 'draw', label: 'Draw' }
+  { mode: 'full', label: { display: 'Full screen', window: 'Full window' }, hint: 'Record all of it' },
+  { mode: 'rect', label: 'Box an area', hint: 'Record only what is inside a box you move and resize' },
+  { mode: 'draw', label: 'Draw an area', hint: 'Record only an area you drag out on the screen' }
 ];
 
 const armedEl = document.getElementById('armed');
 const recordingEl = document.getElementById('recording');
+const countdownEl = document.getElementById('countdown');
+const pauseBtn = document.getElementById('pause');
+const cancelCountdownBtn = document.getElementById('cancelCountdown');
+// The OS's own way of writing a shortcut, for the pause button's tooltip.
+const IS_WINDOWS = window.loupe.platform === 'win32';
 const sourceLabelEl = document.getElementById('sourceLabel');
 const areaModesEl = document.getElementById('areaModes');
 const backBtn = document.getElementById('back');
@@ -30,11 +35,12 @@ function clock(seconds) {
 function buildAreaModes(enabled, sourceKind) {
   areaModesEl.textContent = '';
   if (!enabled) { modesBuilt = false; return; }
-  for (const { mode, label } of AREA_MODES) {
+  for (const { mode, label, hint } of AREA_MODES) {
     const b = document.createElement('button');
     b.type = 'button';
     b.dataset.mode = mode;
     b.textContent = typeof label === 'string' ? label : label[sourceKind] ?? label.display;
+    b.title = hint;
     b.setAttribute('aria-pressed', String(mode === currentAreaMode));
     b.onclick = () => window.loupe.setAreaMode(mode);
     areaModesEl.appendChild(b);
@@ -42,9 +48,19 @@ function buildAreaModes(enabled, sourceKind) {
   modesBuilt = true;
 }
 
+function shortcutText(accelerator) {
+  if (!accelerator) return '';
+  const parts = accelerator.split('+');
+  if (IS_WINDOWS) return parts.map((p) => (p === 'Control' ? 'Ctrl' : p)).join('+');
+  const mac = { Control: '⌃', Alt: '⌥', Shift: '⇧', Command: '⌘' };
+  return parts.map((p) => mac[p] ?? p).join('');
+}
+
 function renderArmed(d) {
   armedEl.hidden = false;
   recordingEl.hidden = true;
+  countdownEl.hidden = true;
+  document.getElementById('armedNote').textContent = d.cameraError ? `Camera: ${d.cameraError}` : '';
   sourceLabelEl.textContent = d.sourceLabel || '';
   currentAreaMode = d.areaMode || 'full';
   if (!modesBuilt || !d.canPickArea) buildAreaModes(d.canPickArea, d.sourceKind);
@@ -55,15 +71,39 @@ function renderArmed(d) {
   }
 }
 
+function renderCountdown(d) {
+  armedEl.hidden = true;
+  recordingEl.hidden = true;
+  countdownEl.hidden = false;
+  document.getElementById('count').textContent = String(d.count ?? '');
+}
+
 function renderRecording(d) {
   armedEl.hidden = true;
+  countdownEl.hidden = true;
   recordingEl.hidden = false;
   document.getElementById('time').textContent = clock(d.elapsed ?? 0);
+
+  // Paused: the timer stands still (main leaves paused time out of elapsed).
+  const paused = Boolean(d.paused);
+  recordingEl.classList.toggle('paused', paused);
+  document.getElementById('recDot').className = paused ? 'dot paused' : 'dot rec';
+  document.getElementById('pausedLabel').hidden = !paused;
+  // SVG elements have no `hidden` property: the attribute itself is toggled.
+  document.getElementById('pauseIcon').toggleAttribute('hidden', paused);
+  document.getElementById('resumeIcon').toggleAttribute('hidden', !paused);
+  const keys = shortcutText(d.pauseShortcut);
+  const label = paused ? 'Resume' : 'Pause';
+  pauseBtn.title = keys ? `${label} (${keys})` : label;
+  pauseBtn.setAttribute('aria-label', label);
+  pauseBtn.dataset.paused = String(paused);
   document.getElementById('zoom').textContent = `${(d.zoom ?? 1).toFixed(1)}×`;
   document.getElementById('mic').textContent = d.hasMic ? '🎤' : '';
 
   const warn = document.getElementById('warn');
   if (d.micRequested && !d.hasMic) warn.textContent = 'mic off';
+  else if (d.cameraError) warn.textContent = 'camera off';
+  else if (d.warnings?.length) warn.textContent = 'computer sound off';
   else if (!d.zoomEnabled) warn.textContent = 'zoom off';
   else if (d.tapReenables > 0) warn.textContent = `tap recovered ×${d.tapReenables}`;
   else warn.textContent = '';
@@ -77,6 +117,9 @@ function renderRecording(d) {
 
 window.loupe.onBarUpdate((d) => {
   if (d.state === 'recording') renderRecording(d);
+  else if (d.state === 'countdown') renderCountdown(d);
+  // A plain status update mid-countdown (no number): the countdown stays.
+  else if (d.state === 'counting') return;
   else renderArmed(d);
 });
 
@@ -92,14 +135,28 @@ startBtn.onclick = async () => {
   backBtn.disabled = true;
   setStartLabel('Starting…');
   try {
-    await window.loupe.startRecording();
+    // { cancelled: true } after Esc/Cancel in the countdown: main has sent
+    // the armed view back, ready to start again.
+    const result = await window.loupe.startRecording();
+    if (result?.cancelled) {
+      startBtn.disabled = false;
+      backBtn.disabled = false;
+      setStartLabel('Start recording');
+    }
   } catch (err) {
     startBtn.disabled = false;
     backBtn.disabled = false;
     setStartLabel('Start recording');
-    sourceLabelEl.textContent = `Could not start recording: ${err.message}`;
+    // IPC wraps the reason in "Error invoking remote method 'bar:start': Error: ".
+    const reason = String(err.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+    sourceLabelEl.textContent = `Could not start recording: ${reason}`;
   }
 };
 
 backBtn.onclick = () => { window.loupe.stopRecording(); };
 stopBtn.onclick = () => { window.loupe.stopRecording(); };
+pauseBtn.onclick = () => {
+  if (pauseBtn.dataset.paused === 'true') window.loupe.resumeRecording();
+  else window.loupe.pauseRecording();
+};
+cancelCountdownBtn.onclick = () => { window.loupe.cancelCountdown(); };

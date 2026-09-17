@@ -1,0 +1,9 @@
+{
+  "name": "loupe-website",
+  "private": true,
+  "description": "loupeapp.vercel.app: the download site and share links. Not part of the app.",
+  "type": "commonjs",
+  "dependencies": {
+    "@vercel/blob": "2.8.0"
+  }
+}

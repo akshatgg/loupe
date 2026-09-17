@@ -1,0 +1,86 @@
+/* Captions: the Captions panel (panels/captions.js), the captions track on
+   the timeline (captions-track.js) and the caption options in the export
+   dialog (export-captions.js). Uses the tokens from editor.css. */
+
+/* ---- panel */
+.select {
+  width: 100%; height: 32px; padding: 0 30px 0 10px; border: 1px solid var(--line-2); border-radius: 8px;
+  background: var(--well) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%23bdc1c6' stroke-width='1.5'/%3E%3C/svg%3E") no-repeat right 11px center;
+  color: var(--ink); font: 13px var(--font); appearance: none; cursor: pointer;
+}
+.select:hover { border-color: #4a4c53; }
+.select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.cap-start .panel-empty { padding-bottom: 18px; }
+.btn.wide { width: 100%; justify-content: center; gap: 8px; height: 36px; }
+.btn.primary:disabled { opacity: .45; cursor: default; background: var(--accent); }
+.cap-note {
+  display: flex; gap: 9px; align-items: flex-start; margin: 0 0 14px; padding: 10px 12px; border-radius: 9px;
+  background: var(--raised); border: 1px solid var(--line); color: var(--ink-2); font-size: 12px; line-height: 1.45;
+}
+.cap-note .icon { flex-shrink: 0; margin-top: 1px; color: var(--accent); }
+
+.cap-work { padding: 18px 0 0; }
+.panel-section h3.cap-work-title { margin: 0 0 14px; font-size: 14px; color: var(--ink); text-transform: none; letter-spacing: 0; }
+.cap-work .hint { margin: 10px 0 0; line-height: 1.45; }
+.cap-work .btn { margin-top: 16px; }
+.cap-error { padding: 18px 0 0; }
+.cap-error .btn { margin-top: 14px; }
+
+.cap-edit .panel-section:first-child { border-top: 0; padding-top: 4px; }
+.cap-list-hint { margin: -4px 0 10px; }
+.cap-list { display: flex; flex-direction: column; gap: 2px; margin: 0 -8px; }
+.cap-row {
+  padding: 6px 8px 7px; border-radius: 9px; border: 1px solid transparent;
+  transition: background .12s, border-color .12s;
+}
+.cap-row:hover { background: var(--raised); }
+.cap-row.playing { background: var(--accent-soft); }
+.cap-row.selected, .cap-row.editing { border-color: rgba(138, 180, 248, .55); }
+.cap-row.cut { opacity: .55; }
+.cap-row-head { display: flex; align-items: center; justify-content: space-between; min-height: 24px; }
+.cap-time {
+  border: 0; background: transparent; padding: 2px 6px; margin-left: -6px; border-radius: 6px; cursor: pointer;
+  color: var(--ink-3); font: 11.5px var(--font); font-variant-numeric: tabular-nums;
+}
+.cap-time:hover { color: var(--accent); background: var(--hover); }
+.cap-row.playing .cap-time { color: var(--accent); }
+.cap-actions { display: flex; gap: 0; opacity: 0; transition: opacity .12s; }
+.cap-row:hover .cap-actions, .cap-row.editing .cap-actions, .cap-row.selected .cap-actions,
+.cap-actions:focus-within { opacity: 1; }
+.cap-actions .icon-btn.small { width: 24px; height: 24px; border-radius: 6px; }
+.cap-actions .icon-btn:disabled { opacity: .3; cursor: default; }
+.cap-text {
+  display: block; width: 100%; margin: 1px 0 0; padding: 3px 6px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; color: var(--ink); font: 13px/1.45 var(--font); resize: none; overflow: hidden;
+  user-select: text; box-sizing: border-box;
+}
+.cap-text:hover { background: rgba(255,255,255,.03); }
+.cap-text:focus { outline: none; background: var(--well); border-color: var(--accent); }
+.cap-buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.cap-buttons .btn { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ---- timeline track */
+.lbl-captions, .tl-captions { height: 30px; }
+.tl-label.lbl-captions { margin-top: 4px; }
+.tl-captions::before {
+  content: ""; position: absolute; inset: 3px 0; border-radius: 7px; background: rgba(255,255,255,.025);
+}
+.caption {
+  position: absolute; top: 4px; bottom: 4px; border-radius: 6px; cursor: grab; overflow: hidden;
+  background: rgba(232, 234, 237, .12); border: 1px solid rgba(232, 234, 237, .28); color: var(--ink-2);
+}
+.caption:hover { background: rgba(232, 234, 237, .2); }
+.caption.selected { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+.caption-label {
+  /* A block, not a flex box: text-overflow only cuts a block's own text with "…". */
+  position: absolute; left: 7px; right: 7px; top: 50%; transform: translateY(-50%); display: block; font-size: 11px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+.caption .handle { width: 7px; }
+.caption .handle:hover, .caption.selected .handle { background: rgba(138, 180, 248, .45); }
+
+/* ---- export dialog */
+.export-captions { margin: 4px 0 2px; padding-top: 12px; border-top: 1px solid var(--line); }
+.export-captions .field { margin-bottom: 10px; }
+.export-subtitles-note { margin: 6px 0 0; }

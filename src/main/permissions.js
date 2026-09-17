@@ -5,13 +5,15 @@ const BASE = 'x-apple.systempreferences:com.apple.preference.security';
 const PANES = {
   screenRecording: `${BASE}?Privacy_ScreenCapture`,
   accessibility: `${BASE}?Privacy_Accessibility`,
-  microphone: `${BASE}?Privacy_Microphone`
+  microphone: `${BASE}?Privacy_Microphone`,
+  camera: `${BASE}?Privacy_Camera`
 };
 
 // Windows privacy settings: only the microphone is gated there. Screen
 // capture and the input hooks the zoom gesture uses need no grant.
 const WINDOWS_PANES = {
-  microphone: 'ms-settings:privacy-microphone'
+  microphone: 'ms-settings:privacy-microphone',
+  camera: 'ms-settings:privacy-webcam'
 };
 
 function createPermissions({ systemPreferences, shell, platform = process.platform }) {

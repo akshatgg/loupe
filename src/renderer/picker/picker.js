@@ -9,8 +9,8 @@ const BROWSERS = ['Chrome', 'Chromium', 'Edge', 'Brave', 'Arc', 'Safari'];
 // Displays first: recording the whole screen is the commonest case, and it is
 // also the tab that is never empty.
 const TABS = [
-  { kind: 'display', label: 'Entire screen', empty: 'No displays found.' },
-  { kind: 'window', label: 'Window', empty: 'No open windows found.' }
+  { kind: 'display', label: 'Entire screen', empty: 'No screens found. Press Refresh to look again.' },
+  { kind: 'window', label: 'Window', empty: 'No open windows found. Open the window you want, then press Refresh.' }
 ];
 
 const isBrowser = (s) =>
@@ -193,7 +193,12 @@ async function load() {
     list.textContent = '';
     const li = document.createElement('li');
     li.className = 'none';
-    li.textContent = `Could not list sources: ${err.message}`;
+    // The helper's own words ("CGS_REQUIRE_INIT", a command line) are for
+    // the log; the usual cause is a locked or sleeping screen.
+    console.error('Loupe: could not list sources:', err);
+    li.textContent = window.loupe.platform === 'win32'
+      ? "Loupe couldn't see your screens. Press Refresh to try again."
+      : "Loupe couldn't see your screens. If the screen is locked or asleep, unlock it, then press Refresh.";
     list.appendChild(li);
   }
   renderPreview();
@@ -249,174 +254,202 @@ recordButton.onclick = async () => {
 };
 
 // ---- zoom shortcuts ---------------------------------------------------------
-// Two slots, each set by clicking it and then pressing the button you want.
-// Saved in main.js (settings.js) and handed to bin/inputtap at record time.
-// Only buttons you can HOLD while scrolling without side effects are taken:
-// modifier keys and the middle/side mouse buttons. A letter key would type
-// into whatever is being recorded; left/right click are needed for the demo.
-
-// The saved names are the same on both systems (settings.js); Windows just
-// calls the keys Alt, Ctrl and the Windows key.
-const IS_WINDOWS = window.loupe.platform === 'win32';
-const TRIGGERS = IS_WINDOWS ? {
-  option: { label: 'Alt', key: 'Alt' },
-  control: { label: 'Ctrl', key: 'Ctrl' },
-  command: { label: '⊞ Windows key', key: '⊞ Win' },
-  shift: { label: '⇧ Shift', key: 'Shift' },
-  'mouse-side': { label: '🖱 Mouse side button', words: 'a mouse side button' },
-  'mouse-middle': { label: '🖱 Middle mouse button', words: 'the middle mouse button' }
-} : {
-  option: { label: '⌥ Option', key: '⌥' },
-  control: { label: '⌃ Control', key: '⌃' },
-  command: { label: '⌘ Command', key: '⌘' },
-  shift: { label: '⇧ Shift', key: '⇧' },
-  'mouse-side': { label: '🖱 Mouse side button', words: 'a mouse side button' },
-  'mouse-middle': { label: '🖱 Middle mouse button', words: 'the middle mouse button' }
-};
-const KEY_TRIGGERS = { Alt: 'option', Control: 'control', Meta: 'command', Shift: 'shift' };
-// MouseEvent.button: 1 middle, 3 back, 4 forward (0/2 are left/right).
-const MOUSE_TRIGGERS = { 1: 'mouse-middle', 3: 'mouse-side', 4: 'mouse-side' };
-
-const PROMPT = 'Press a key or mouse button…';
-const captureEls = [...document.querySelectorAll('.capture')];
-const clearEls = [...document.querySelectorAll('.clear')];
-
-let zoomTriggers = [null, null];
-let capturing = null; // slot index being set, or null
-let refusedTimer = null;
-
-// The header line spells out whatever is currently set. Built with DOM nodes
-// rather than innerHTML, like the rest of this window.
-function renderZoomHelp() {
-  const help = document.getElementById('zoomHelp');
-  help.textContent = '';
-  const set = zoomTriggers.filter(Boolean);
-  if (set.length === 0) {
-    help.textContent = 'Zoom is off — set a zoom shortcut below to turn it on.';
-    return;
-  }
-  help.append('Hold ');
-  set.forEach((t, i) => {
-    if (i > 0) help.append(' or ');
-    if (TRIGGERS[t].key) {
-      const kbd = document.createElement('kbd');
-      kbd.textContent = TRIGGERS[t].key;
-      help.append(kbd);
-    } else {
-      help.append(TRIGGERS[t].words);
-    }
-  });
-  help.append(' and scroll while recording: scroll up to zoom in, back down to zoom out.');
-}
-
-function renderShortcuts() {
-  captureEls.forEach((el, slot) => {
-    const t = zoomTriggers[slot];
-    el.classList.toggle('capturing', capturing === slot);
-    el.classList.remove('refused');
-    el.classList.toggle('empty', !t && capturing !== slot);
-    el.textContent = capturing === slot ? PROMPT : (t ? TRIGGERS[t].label : 'Click to set');
-    clearEls[slot].hidden = !t || capturing === slot;
-  });
-  renderZoomHelp();
-}
-
-function stopCapture() {
-  clearTimeout(refusedTimer);
-  capturing = null;
-  renderShortcuts();
-}
-
-// Says why a button wasn't taken, in the field itself, then goes back to
-// waiting for another press.
-function refuse(message) {
-  const el = captureEls[capturing];
-  clearTimeout(refusedTimer);
-  el.classList.add('refused');
-  el.textContent = message;
-  refusedTimer = setTimeout(() => {
-    if (capturing === null) return;
-    el.classList.remove('refused');
-    el.textContent = PROMPT;
-  }, 1600);
-}
-
-async function saveTriggers(next) {
-  try {
-    ({ zoomTriggers } = await window.loupe.setSettings({ zoomTriggers: next }));
-  } catch (err) {
+// The two shortcut fields (click one, press a button) are shared with the
+// Settings window: src/renderer/shared/zoom-shortcuts.js. Only the header
+// line that spells out what's set belongs to the picker.
+const zoomShortcuts = window.loupeZoomShortcuts.mount({
+  captureEls: [...document.querySelectorAll('.capture')],
+  clearEls: [...document.querySelectorAll('.clear')],
+  onRender: (triggers) => {
+    const help = document.getElementById('zoomHelp');
+    const any = window.loupeZoomShortcuts.describe(help, triggers, {
+      after: ' and scroll while recording: scroll up to zoom in, back down to zoom out.'
+    });
+    if (!any) help.textContent = 'Zoom is off — set a zoom shortcut below to turn it on.';
+  },
+  onError: (err) => {
     const banner = document.getElementById('banner');
     banner.hidden = false;
     banner.textContent = `Could not save the zoom shortcut: ${err.message}`;
   }
-  renderShortcuts();
+});
+
+window.loupe.getSettings().then((s) => zoomShortcuts.set(s.zoomTriggers));
+// Changed in the Settings window while this one is open.
+window.loupe.onSettingsChanged?.((s) => zoomShortcuts.set(s.zoomTriggers));
+
+document.getElementById('recordings').onclick = () => window.loupe.openLibrary();
+
+// ---- recording additions ------------------------------------------------------
+// Computer sound, the camera bubble, keyboard shortcuts and the countdown.
+// Saved as soon as they change (main.js, recording-settings.js) and read by
+// main when recording starts, so nothing here has to be passed along.
+
+const recordingSwitches = ['systemAudio', 'recordKeys', 'countdown'];
+const cameraSwitch = document.getElementById('camera');
+const cameraSelect = document.getElementById('cameraDevice');
+const cameraNote = document.getElementById('cameraNote');
+
+function showBanner(text, pane) {
+  const banner = document.getElementById('banner');
+  banner.hidden = false;
+  banner.textContent = text;
+  if (pane) addPaneButton(banner, 'Open Settings', pane);
 }
 
-function commit(trigger) {
-  const slot = capturing;
-  if (zoomTriggers[1 - slot] === trigger) {
-    refuse('Already your other shortcut');
+async function saveRecording(patch) {
+  try {
+    return await window.loupe.setRecordingSettings(patch);
+  } catch (err) {
+    showBanner(`Could not save that choice: ${err.message}`);
+    return null;
+  }
+}
+
+function setCameraNote(text) {
+  cameraNote.textContent = text;
+  cameraNote.hidden = !text;
+}
+
+async function videoInputs() {
+  try {
+    return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+  } catch {
+    return [];
+  }
+}
+
+// Camera names are only shown to a page that has used a camera once, so when
+// they are missing the camera is opened for a moment first. Returns the
+// cameras found.
+async function listCameras(selectedId) {
+  let cameras = await videoInputs();
+  if (cameras.some((c) => !c.label)) {
+    try {
+      const probe = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+      for (const track of probe.getTracks()) track.stop();
+    } catch {
+      // Unnamed cameras are still cameras.
+    }
+    cameras = await videoInputs();
+  }
+  cameraSelect.textContent = '';
+  cameras.forEach((cam, i) => {
+    const option = document.createElement('option');
+    option.value = cam.deviceId;
+    // Device labels come from drivers: textContent, never innerHTML.
+    option.textContent = cam.label || `Camera ${i + 1}`;
+    cameraSelect.appendChild(option);
+  });
+  if (cameras.some((c) => c.deviceId === selectedId)) cameraSelect.value = selectedId;
+  cameraSelect.hidden = cameras.length < 2;
+  return cameras;
+}
+
+async function turnCameraOn(selectedId) {
+  setCameraNote('');
+  const allowed = await window.loupe.requestCamera();
+  if (!allowed) {
+    cameraSwitch.checked = false;
+    cameraSelect.hidden = true;
+    showBanner('Loupe needs permission to use the camera. ', 'camera');
+    await saveRecording({ camera: false });
     return;
   }
-  const next = [...zoomTriggers];
-  next[slot] = trigger;
-  capturing = null;
-  clearTimeout(refusedTimer);
-  saveTriggers(next);
-}
-
-captureEls.forEach((el, slot) => {
-  el.addEventListener('click', () => {
-    capturing = slot;
-    renderShortcuts();
-  });
-});
-clearEls.forEach((el, slot) => {
-  el.addEventListener('click', () => {
-    const next = [...zoomTriggers];
-    next[slot] = null;
-    saveTriggers(next);
-  });
-});
-
-// Capture phase, so nothing else in the window reacts to the press being
-// recorded (e.g. Space/Enter re-"clicking" the focused field).
-document.addEventListener('keydown', (e) => {
-  if (capturing === null) return;
-  e.preventDefault();
-  e.stopPropagation();
-  if (e.key === 'Escape') { stopCapture(); return; }
-  const trigger = KEY_TRIGGERS[e.key];
-  if (trigger) commit(trigger);
-  else refuse(IS_WINDOWS ? 'Use Alt, Ctrl, Shift, Win or a mouse button' : 'Use ⌥ ⌃ ⌘ ⇧ or a mouse button');
-}, true);
-
-document.addEventListener('mousedown', (e) => {
-  if (capturing === null) return;
-  const trigger = MOUSE_TRIGGERS[e.button];
-  if (trigger) {
-    e.preventDefault();
-    e.stopPropagation();
-    commit(trigger);
-  } else if (e.button === 2) {
-    e.preventDefault();
-    refuse('Use a side or middle mouse button');
-  } else if (e.target !== captureEls[capturing]) {
-    stopCapture(); // an ordinary click elsewhere just cancels
+  const cameras = await listCameras(selectedId);
+  if (cameras.length === 0) {
+    cameraSwitch.checked = false;
+    setCameraNote('No camera found');
+    await saveRecording({ camera: false });
+    return;
   }
-}, true);
-
-// A side button's release would otherwise also count as browser Back/Forward.
-for (const type of ['mouseup', 'auxclick']) {
-  document.addEventListener(type, (e) => {
-    if (e.button === 3 || e.button === 4) e.preventDefault();
-  }, true);
+  await saveRecording({ camera: true, cameraDeviceId: cameraSelect.value || null });
 }
-window.addEventListener('blur', () => { if (capturing !== null) stopCapture(); });
 
-window.loupe.getSettings().then((s) => {
-  zoomTriggers = s.zoomTriggers;
-  renderShortcuts();
+cameraSwitch.addEventListener('change', async () => {
+  if (cameraSwitch.checked) {
+    await turnCameraOn(cameraSelect.value || null);
+  } else {
+    cameraSelect.hidden = true;
+    setCameraNote('');
+    await saveRecording({ camera: false });
+  }
+});
+
+cameraSelect.addEventListener('change', () => {
+  saveRecording({ cameraDeviceId: cameraSelect.value || null });
+});
+
+for (const id of recordingSwitches) {
+  document.getElementById(id).addEventListener('change', (e) => {
+    saveRecording({ [id]: e.target.checked });
+  });
+}
+
+// The Settings window changes the same choices; the switches follow it.
+window.loupe.onSettingsChanged?.(async (settings) => {
+  const s = await window.loupe.getRecordingSettings();
+  for (const id of recordingSwitches) document.getElementById(id).checked = s[id];
+  if (cameraSwitch.checked !== s.camera) {
+    cameraSwitch.checked = s.camera;
+    if (s.camera) await turnCameraOn(s.cameraDeviceId);
+    else { cameraSelect.hidden = true; setCameraNote(''); }
+  } else if (s.cameraDeviceId && [...cameraSelect.options].some((o) => o.value === s.cameraDeviceId)) {
+    cameraSelect.value = s.cameraDeviceId;
+  }
+  microphoneChoice = settings?.microphone ?? null;
+  listMicrophones();
+});
+
+// ---- which microphone ---------------------------------------------------------
+// The same choice as Settings > Recording (settings.microphone, { id, label }
+// or null for the computer's default). Only offered when there is more than
+// one to choose from; the recorder finds the chosen one by its name.
+
+const micSwitch = document.getElementById('mic');
+const micSelect = document.getElementById('micDevice');
+let microphoneChoice = null;
+
+async function listMicrophones() {
+  let mics = [];
+  try {
+    mics = (await navigator.mediaDevices.enumerateDevices())
+      .filter((d) => d.kind === 'audioinput' && d.deviceId !== 'default' && d.deviceId !== 'communications');
+  } catch {
+    mics = [];
+  }
+  micSelect.textContent = '';
+  micSelect.append(new window.Option('Same as your computer', ''));
+  mics.forEach((mic, i) => {
+    // Device labels come from drivers: Option() sets text, never markup.
+    micSelect.append(new window.Option(mic.label || `Microphone ${i + 1}`, mic.deviceId));
+  });
+  const chosen = microphoneChoice && mics.find((m) => m.deviceId === microphoneChoice.id);
+  micSelect.value = chosen ? chosen.deviceId : '';
+  // Names are only known once the page may use a microphone; without them a
+  // list of "Microphone 1, 2" helps nobody, so it stays hidden.
+  micSelect.hidden = !micSwitch.checked || mics.length < 2 || mics.every((m) => !m.label);
+}
+
+micSwitch.addEventListener('change', listMicrophones);
+micSelect.addEventListener('change', async () => {
+  const option = micSelect.selectedOptions[0];
+  const value = micSelect.value ? { id: micSelect.value, label: option.textContent } : null;
+  try {
+    await window.loupe.setSettings({ microphone: value });
+    microphoneChoice = value;
+  } catch (err) {
+    showBanner(`Could not save that choice: ${err.message}`);
+  }
+});
+navigator.mediaDevices?.addEventListener?.('devicechange', listMicrophones);
+window.loupe.getSettings().then((s) => { microphoneChoice = s.microphone ?? null; listMicrophones(); });
+
+window.loupe.getRecordingSettings().then(async (s) => {
+  for (const id of recordingSwitches) document.getElementById(id).checked = s[id];
+  cameraSwitch.checked = s.camera;
+  // Still there, still allowed? Otherwise the switch goes off with a reason.
+  if (s.camera) await turnCameraOn(s.cameraDeviceId);
 });
 
 window.addEventListener('focus', refreshPermissions);

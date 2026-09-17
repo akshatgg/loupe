@@ -96,6 +96,12 @@ final class CaptureState: @unchecked Sendable {
     }
 
     /// Must only be called from `queue`.
+    func startPTS() -> CMTime? {
+        dispatchPrecondition(condition: .onQueue(queue))
+        return firstPTS
+    }
+
+    /// Must only be called from `queue`.
     func hasFirstFrame() -> Bool {
         dispatchPrecondition(condition: .onQueue(queue))
         return firstPTS != nil
@@ -132,6 +138,22 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
     private let writer: AVAssetWriter
     private let videoInput: AVAssetWriterInput
     private let audioInput: AVAssetWriterInput?
+
+    // Computer sound (`--system-audio 1`): ScreenCaptureKit's own audio
+    // output, written to its own file (system.m4a next to raw.mov) rather
+    // than as a second track of raw.mov, so the editor can mix and mute it
+    // separately from the microphone. Its session starts at the same
+    // first-frame PTS as the video writer's, and ScreenCaptureKit stamps
+    // audio on the same host clock as frames, so second 0 of system.m4a is
+    // second 0 of raw.mov -- no offset to store. Touched only from `queue`
+    // (the audio stream output shares it with the screen output), plus
+    // `start()`/`finish()` which run before any sample / after the stream
+    // has stopped.
+    private let systemWriter: AVAssetWriter?
+    private let systemInput: AVAssetWriterInput?
+    private var systemSessionStarted = false
+    private var systemSamples = 0
+    private var systemFailureReported = false
     private var stream: SCStream?
     private var audioSession: AVCaptureSession?
 
@@ -177,7 +199,13 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
     // recording. Read/written only from `queue`.
     private var writerFailureReported = false
 
-    init(outURL: URL, width: Int, height: Int, withMic: Bool) throws {
+    // The microphone chosen in Settings, by the name the app showed for it
+    // (the browser's label for the device); nil for the system default.
+    private let micName: String?
+
+    init(outURL: URL, width: Int, height: Int, withMic: Bool, micName: String? = nil,
+         systemAudioURL: URL?) throws {
+        self.micName = micName
         writer = try AVAssetWriter(outputURL: outURL, fileType: .mov)
 
         videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: [
@@ -201,6 +229,25 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
         } else {
             audioInput = nil
         }
+
+        if let systemAudioURL {
+            let systemWriter = try AVAssetWriter(outputURL: systemAudioURL, fileType: .m4a)
+            // Stereo at 48 kHz: what SCStreamConfiguration is asked for
+            // below, so the encoder never has to resample or downmix.
+            let input = AVAssetWriterInput(mediaType: .audio, outputSettings: [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVNumberOfChannelsKey: 2,
+                AVSampleRateKey: 48000,
+                AVEncoderBitRateKey: 192000
+            ])
+            input.expectsMediaDataInRealTime = true
+            systemWriter.add(input)
+            self.systemWriter = systemWriter
+            systemInput = input
+        } else {
+            systemWriter = nil
+            systemInput = nil
+        }
         // `state` and the delegate-callback queue must be the exact same
         // DispatchQueue instance (not merely two queues with the same
         // label) so that CaptureState's dispatchPrecondition checks are
@@ -209,12 +256,32 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
         super.init()
     }
 
+    // The microphone called `name`, else the system default. Chromium's label
+    // for a device is its Core Audio name, sometimes with extra words around
+    // it ("Default - MacBook Pro Microphone"), so a label that contains a
+    // device's name matches it too -- the longest such name wins. A chosen
+    // microphone that was unplugged records from the default rather than not
+    // at all.
+    static func microphone(named name: String?) -> AVCaptureDevice? {
+        let fallback = AVCaptureDevice.default(for: .audio)
+        guard let name, !name.isEmpty else { return fallback }
+        let devices = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.microphone, .external], mediaType: .audio, position: .unspecified
+        ).devices
+        if let exact = devices.first(where: { $0.localizedName == name }) { return exact }
+        let contained = devices.filter { !$0.localizedName.isEmpty && name.contains($0.localizedName) }
+        if let best = contained.max(by: { $0.localizedName.count < $1.localizedName.count }) { return best }
+        emit(["type": "warning", "message": "microphone \"\(name)\" not found; using the default"])
+        return fallback
+    }
+
     func start(filter: SCContentFilter, config: SCStreamConfiguration) async throws {
         writer.startWriting()
+        systemWriter?.startWriting()
 
         if audioInput != nil {
             let session = AVCaptureSession()
-            guard let device = AVCaptureDevice.default(for: .audio),
+            guard let device = Self.microphone(named: micName),
                   let input = try? AVCaptureDeviceInput(device: device),
                   session.canAddInput(input) else {
                 fail("no microphone available")
@@ -230,6 +297,9 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
 
         let stream = SCStream(filter: filter, configuration: config, delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: queue)
+        if systemInput != nil {
+            try stream.addStreamOutput(self, type: .audio, sampleHandlerQueue: queue)
+        }
         try await stream.startCapture()
         self.stream = stream
 
@@ -252,6 +322,10 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
 
     func stream(_ stream: SCStream, didOutputSampleBuffer buffer: CMSampleBuffer,
                 of type: SCStreamOutputType) {
+        if type == .audio {
+            appendSystemAudio(buffer)
+            return
+        }
         guard type == .screen, buffer.isValid, CMSampleBufferGetNumSamples(buffer) > 0 else { return }
         guard let attachments = CMSampleBufferGetSampleAttachmentsArray(buffer,
                 createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
@@ -262,9 +336,18 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
 
         if let startPTS = state.recordFrame(pts: pts) {
             writer.startSession(atSourceTime: startPTS)
+            if let systemWriter {
+                systemWriter.startSession(atSourceTime: startPTS)
+                systemSessionStarted = true
+            }
             // The frame's own timestamp shares the mach timebase with
             // CACurrentMediaTime() in bin/inputtap, so this alignment is exact.
-            emit(["type": "started", "clock": startPTS.seconds])
+            // `now` is this helper's clock as the line is written: the
+            // recorder pairs it with its own clock on arrival to map between
+            // the two (src/main/clock-sync.js) -- Node's hrtime on macOS is
+            // mach_continuous_time, which runs on through sleep, so it is
+            // not the same number as CACurrentMediaTime.
+            emit(["type": "started", "clock": startPTS.seconds, "now": CACurrentMediaTime()])
         }
 
         guard let appended = appendAndTrack(buffer, pts: pts) else { return }
@@ -275,7 +358,8 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
         if frames % 60 == 0 {
             let bytes = (try? FileManager.default.attributesOfItem(
                 atPath: writer.outputURL.path)[.size] as? Int) ?? nil
-            emit(["type": "progress", "frames": frames, "bytes": bytes ?? 0])
+            emit(["type": "progress", "frames": frames, "bytes": bytes ?? 0,
+                  "now": CACurrentMediaTime()])
         }
     }
 
@@ -395,6 +479,32 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
               "message": "video append failed, writer status \(writer.status.rawValue): \(detail)"])
     }
 
+    /// Must only be called from `queue`. Sound from before the first video
+    /// frame is dropped; a buffer that straddles it is appended whole and
+    /// AVAssetWriter trims the part before the session start, which keeps
+    /// the file's start exactly on the video's first frame.
+    private func appendSystemAudio(_ buffer: CMSampleBuffer) {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard let systemInput, let systemWriter, systemSessionStarted,
+              buffer.isValid, CMSampleBufferGetNumSamples(buffer) > 0 else { return }
+        let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
+        let end = CMTimeAdd(pts, CMSampleBufferGetDuration(buffer))
+        if let startPTS = state.startPTS(), end <= startPTS { return }
+        guard systemInput.isReadyForMoreMediaData else { return }
+        if systemInput.append(buffer) {
+            if systemSamples == 0 {
+                emit(["type": "system_audio", "file": systemWriter.outputURL.lastPathComponent])
+            }
+            systemSamples += 1
+        } else if !systemFailureReported {
+            // Losing the computer sound is not worth losing the recording
+            // over: a warning, not an error, so the recorder keeps going.
+            systemFailureReported = true
+            let detail = systemWriter.error?.localizedDescription ?? "unknown error"
+            emit(["type": "warning", "message": "computer sound stopped recording: \(detail)"])
+        }
+    }
+
     func captureOutput(_ output: AVCaptureOutput, didOutput buffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
         guard let audioInput, state.hasFirstFrame(), audioInput.isReadyForMoreMediaData else { return }
@@ -419,6 +529,19 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate,
         videoInput.markAsFinished()
         audioInput?.markAsFinished()
         await writer.finishWriting()
+        if let systemWriter, let systemInput {
+            // A writer that never got a sample (a silent Mac delivers
+            // nothing at all) cannot finish into a valid file; remove the
+            // empty one rather than leave a file that fails to open.
+            let hadSamples = queue.sync { systemSamples > 0 }
+            if hadSamples {
+                systemInput.markAsFinished()
+                await systemWriter.finishWriting()
+            } else {
+                systemWriter.cancelWriting()
+                try? FileManager.default.removeItem(at: systemWriter.outputURL)
+            }
+        }
         let duration = state.finalDuration()
         emit(["type": "stopped", "duration": duration])
     }
@@ -439,10 +562,13 @@ struct CaptureTool {
         _ = NSApplication.shared
 
         guard let sourceId = arg("--source"), let out = arg("--out") else {
-            fail("usage: capture --source <id> --out <path> --mic <0|1> " +
+            fail("usage: capture --source <id> --out <path> --mic <0|1> [--mic-name <name>] [--system-audio <0|1>] " +
                  "[--exclude-window <id>]... [--crop-x N --crop-y N --crop-w N --crop-h N]")
         }
         let withMic = arg("--mic") == "1"
+        let micName = arg("--mic-name")
+        // Computer sound goes to system.m4a beside the video file.
+        let withSystemAudio = arg("--system-audio") == "1"
         // The control-bar redesign puts TWO Loupe windows on screen while
         // armed (the control bar itself, and the
         // region outline) where the old HUD-only design only ever had one --
@@ -538,12 +664,26 @@ struct CaptureTool {
             config.minimumFrameInterval = CMTime(value: 1, timescale: 60)
             config.pixelFormat = kCVPixelFormatType_32BGRA
             config.showsCursor = false      // drawn at render time instead
-            config.capturesAudio = false    // system audio is a non-goal
+            config.capturesAudio = withSystemAudio
+            if withSystemAudio {
+                config.sampleRate = 48000
+                config.channelCount = 2
+                // Loupe itself makes no sound worth keeping (and this helper
+                // none at all).
+                config.excludesCurrentProcessAudio = true
+            }
             config.queueDepth = 6
 
             let url = URL(fileURLWithPath: out)
             try? FileManager.default.removeItem(at: url)
-            let capture = try Capture(outURL: url, width: width, height: height, withMic: withMic)
+            var systemAudioURL: URL?
+            if withSystemAudio {
+                let systemURL = url.deletingLastPathComponent().appendingPathComponent("system.m4a")
+                try? FileManager.default.removeItem(at: systemURL)
+                systemAudioURL = systemURL
+            }
+            let capture = try Capture(outURL: url, width: width, height: height, withMic: withMic,
+                                      micName: micName, systemAudioURL: systemAudioURL)
             try await capture.start(filter: filter, config: config)
 
             // Ignore the default SIGTERM disposition *before* creating and
