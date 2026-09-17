@@ -29,6 +29,7 @@ const {
 const { registerRecordingExtras } = require('./ipc/recording');
 const { defaultPresetStyle } = require('./presets');
 const { installWebGuard } = require('./web-guard');
+const { captureProblem, discardFailedRecording } = require('./recording-failure');
 
 const IS_WINDOWS = process.platform === 'win32';
 // Physical pixels <-> DIPs on Windows; identities on macOS (platform.js).
@@ -43,9 +44,11 @@ function excludeFromCapture(win) {
   if (IS_WINDOWS) win.setContentProtection(true);
 }
 
+// LOUPE_BIN_DIR lets the end-to-end checks stand in failing helpers; a
+// packaged app always uses its own.
 const BIN_DIR = app.isPackaged
   ? path.join(process.resourcesPath, 'bin')
-  : path.join(__dirname, '..', '..', 'bin');
+  : process.env.LOUPE_BIN_DIR || path.join(__dirname, '..', '..', 'bin');
 const permissions = createPermissions({ systemPreferences, shell });
 // No window may leave its page or open new ones (web-guard.js).
 installWebGuard({ app });
@@ -66,16 +69,24 @@ function onRecorderError(err) {
 
   // A dead capture process means nothing is being written to raw.mov any
   // more -- this really is the end of the recording. Route it through the
-  // exact same finalize-and-reopen-the-picker path a normal Stop press
-  // takes, so whatever was captured up to this point is still saved to
-  // project.json/cursor.bin rather than discarded.
-  dialog.showErrorBox(
-    'Loupe',
-    `Recording stopped: ${err.message}`
-  );
+  // exact same finalize path a normal Stop press takes, so whatever was
+  // captured up to this point is still saved and opened in the editor. The
+  // helper's own message is for the log; stopRecording() tells the user in
+  // plain words, without a blocking alert.
+  console.error('Loupe: screen capture failed:', err.message);
+  captureFailed = true;
   stopRecording().catch((e) => {
     console.error('Loupe: failed to finalize the recording after a capture error:', e);
   });
+}
+// Set when capture died, so the stop that follows can say what happened.
+let captureFailed = false;
+
+// A plain, non-blocking message over `win` (or on its own).
+function tellUser(win, { message, detail }) {
+  const opts = { type: 'warning', message, detail, buttons: ['OK'] };
+  const shown = win && !win.isDestroyed() ? dialog.showMessageBox(win, opts) : dialog.showMessageBox(opts);
+  Promise.resolve(shown).catch(() => {});
 }
 
 const recorder = createRecorder({
@@ -460,12 +471,20 @@ async function stopRecording() {
   // back regardless of how stop() ends, so the recovery runs in `finally`
   // and the failure is re-thrown afterward rather than swallowed.
   let opened = false;
+  const failedCapture = captureFailed;
+  captureFailed = false;
   try {
     const result = await recorder.stop({ webcam, style: newProjectStyle() });
-    if (result?.dir) {
+    if (result?.failed) {
+      // Capture never had a frame: no empty recording is left behind.
+      discardFailedRecording(result.dir);
+      showPicker();
+      tellUser(pickerWindow, captureProblem({ started: false }));
+    } else if (result?.dir) {
       openEditorWindow(result.dir);
       opened = true;
       appShell.recordingsChanged();
+      if (failedCapture) tellUser(editorWindow, captureProblem({ started: true }));
     }
     return result;
   } finally {
@@ -751,6 +770,7 @@ ipcMain.handle('bar:start', async () => {
     }
 
     startedAt = Date.now();
+    captureFailed = false;
     try {
       await recorder.start({
         source: validated.source, width: validated.width, height: validated.height,

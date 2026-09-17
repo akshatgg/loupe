@@ -9,8 +9,8 @@ const BROWSERS = ['Chrome', 'Chromium', 'Edge', 'Brave', 'Arc', 'Safari'];
 // Displays first: recording the whole screen is the commonest case, and it is
 // also the tab that is never empty.
 const TABS = [
-  { kind: 'display', label: 'Entire screen', empty: 'No displays found.' },
-  { kind: 'window', label: 'Window', empty: 'No open windows found.' }
+  { kind: 'display', label: 'Entire screen', empty: 'No screens found. Press Refresh to look again.' },
+  { kind: 'window', label: 'Window', empty: 'No open windows found. Open the window you want, then press Refresh.' }
 ];
 
 const isBrowser = (s) =>
@@ -193,7 +193,12 @@ async function load() {
     list.textContent = '';
     const li = document.createElement('li');
     li.className = 'none';
-    li.textContent = `Could not list sources: ${err.message}`;
+    // The helper's own words ("CGS_REQUIRE_INIT", a command line) are for
+    // the log; the usual cause is a locked or sleeping screen.
+    console.error('Loupe: could not list sources:', err);
+    li.textContent = window.loupe.platform === 'win32'
+      ? "Loupe couldn't see your screens. Press Refresh to try again."
+      : "Loupe couldn't see your screens. If the screen is locked or asleep, unlock it, then press Refresh.";
     list.appendChild(li);
   }
   renderPreview();

@@ -371,6 +371,16 @@ function createRecorder({
     if (toStopCapture) await stopHelper(toStopCapture);
     recording = false;
 
+    // Capture failed before its first frame (a locked screen, a display
+    // that went away, permission withdrawn): there is no video at all, so
+    // no project is written -- an empty recording would only open as a
+    // broken editor and sit in the Library. The caller removes the folder.
+    if (captureClock === null && error?.source === 'capture') {
+      // Let the camera bubble finish its file first, so the folder can go.
+      await Promise.resolve(webcam).catch(() => null);
+      return { dir, failed: true, message: error.message };
+    }
+
     const project = createProject(
       { kind: source.split(':')[0], id: source, title: sourceTitle,
         width: sourceWidth, height: sourceHeight,

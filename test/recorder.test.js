@@ -569,3 +569,32 @@ test('stop() keeps an untouched copy of the recorded zooms for the editor to res
   assert.notStrictEqual(project.recordedZoomKeyframes, project.zoomKeyframes, 'a copy, not the same array');
   assert.deepStrictEqual(project.removedZooms, []);
 });
+
+test('a capture that fails before its first frame writes no project and says so', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loupe-failed-'));
+  const { rec, sinks } = harness();
+  await rec.start({ source: 'display:1', mic: false, dir });
+  sinks.capture({ type: 'error', message: 'display not found: display:1' });
+  const result = await rec.stop();
+  assert.deepStrictEqual(result, { dir, failed: true, message: 'display not found: display:1' });
+  assert.deepStrictEqual(fs.readdirSync(dir), [], 'no project.json, cursor.bin or keys.json');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('a capture that fails after it started keeps what was recorded', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'loupe-failed-'));
+  const { rec, sinks } = harness();
+  await rec.start({ source: 'display:1', mic: false, dir });
+  sinks.capture({ type: 'started', clock: 10 });
+  sinks.capture({ type: 'error', message: 'writer failed' });
+  const result = await rec.stop();
+  assert.ok(!result.failed);
+  assert.ok(fs.existsSync(path.join(dir, 'project.json')));
+  fs.rmSync(dir, { recursive: true, force: true });
+});

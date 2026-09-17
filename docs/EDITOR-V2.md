@@ -384,7 +384,13 @@ contains and falls back to the default (with a warning line) when it is gone;
 the picker offers the same choice when there is more than one microphone.
 After Stop the editor opens on the recording and the Library is told; the
 picker only comes back when nothing was recorded. A settings problem never
-stops a recording: the defaults apply.
+stops a recording: the defaults apply. When capture fails
+(`recording-failure.js`) the helper's message goes to the log and the user
+gets a plain, non-blocking message: a capture that never had a frame writes
+no project, its folder is removed and the picker comes back; one that failed
+later opens what was recorded. The picker says a failed source list in plain
+words too (`test/e2e/capture-failure.e2e.js`, with stand-in helpers from
+`LOUPE_BIN_DIR`, honoured only when not packaged).
 Checks: `npm run test:e2e:recording` (bar UI, camera bubble, the real helpers,
 and the whole app recording with every addition on).
 
