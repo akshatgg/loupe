@@ -31,7 +31,7 @@ import { renderProjectAudio } from '../../core/audio/project-audio.js';
 import { isWav, parseWav } from '../../core/audio/wav.js';
 import { Muxer as Mp4Muxer, StreamTarget as Mp4Target } from '../../vendor/mp4-muxer/mp4-muxer.mjs';
 import { Muxer as WebmMuxer, StreamTarget as WebmTarget } from '../../vendor/webm-muxer/webm-muxer.mjs';
-import { readFile, demux } from './demux.js';
+import { readFile, demux, openRecording } from './demux.js';
 import { openVideoSource } from './video-source.js';
 import { openVisuals } from './visuals.js';
 import { decodeAudioTrack, decodeAudioFile, encodeAudio } from './audio.js';
@@ -76,7 +76,7 @@ async function openSources(job, project, keys, report, { sound = true } = {}) {
     const files = job.sources?.[key];
     if (!files?.video) throw new Error(`Couldn't find the video for ${label}.`);
     report({ phase: 'reading', source: i, sources: keys.length });
-    const demuxed = demux(await readFile(files.video, label));
+    const demuxed = await openRecording(files.video, label);
     const video = await openVideoSource(demuxed, label);
     let cursor = null;
     if (files.cursor) {

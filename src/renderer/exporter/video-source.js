@@ -31,12 +31,13 @@ export async function openVideoSource(demuxed, label) {
   };
   const support = await VideoDecoder.isConfigSupported(config);
   if (!support.supported) throw new Error(`This computer can't decode the video in ${label} (${track.codec}).`);
-  return new VideoSource(demuxed.buffer, track, config, label);
+  return new VideoSource(demuxed.read ?? ((s) => sampleData(demuxed.buffer, s)), track, config, label);
 }
 
 export class VideoSource {
-  constructor(buffer, track, config, label) {
-    this.buffer = buffer;
+  // read(sample) -> its bytes (or a promise of them): demux.js.
+  constructor(read, track, config, label) {
+    this.read = read;
     this.samples = track.samples;
     this.config = config;
     this.label = label;
@@ -141,11 +142,14 @@ export class VideoSource {
         await this.waitForProgress();
       } else if (this.next < this.samples.length && this.next <= index + MAX_AHEAD) {
         const s = this.samples[this.next++];
+        const data = await this.read(s);
+        // A reset while the bytes were read closed the decoder they were for.
+        if (this.decoder.state !== 'configured') continue;
         this.decoder.decode(new EncodedVideoChunk({
           type: s.key ? 'key' : 'delta',
           timestamp: micro(s.time),
           duration: micro(s.duration),
-          data: sampleData(this.buffer, s)
+          data
         }));
         if (this.next > index) await this.waitForProgress();
       } else if (!this.flushed) {

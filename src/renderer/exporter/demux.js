@@ -2,9 +2,12 @@
 // parse it with mp4box.js, and describe its video and sound tracks in the
 // terms WebCodecs wants -- a decoder config and a list of samples.
 //
-// The whole file is held in memory and samples are views into it, so nothing
-// is copied per frame. Recordings are compressed screen video (tens of MB a
-// minute), which keeps that affordable.
+// openRecording(url) reads only the file's index (every top-level box but
+// the media data) and then the samples' bytes as they are needed, a few MB
+// at a time with ranged reads: a 20-minute 4K recording is gigabytes, far
+// more than a page should hold at once. demux(buffer) does the same for a
+// file already in memory (exports being checked, small audio files). Either
+// way `demuxed.read(sample)` gives a sample's bytes.
 
 import { createFile, DataStream, Endianness } from '../../vendor/mp4box/mp4box.all.mjs';
 
@@ -17,6 +20,83 @@ export async function readFile(url, label = 'a recording') {
   }
   if (!response.ok) throw new Error(`Couldn't open ${label}. Is the file still there?`);
   return response.arrayBuffer();
+}
+
+// Bytes [start, start + length) of the file at `url` (fewer at its end).
+// A range starting at or past the end fails outright (there is no way to ask
+// a file:// URL its size first): with `pastEnd` that reads as nothing.
+async function readRange(url, start, length, label, { pastEnd = false } = {}) {
+  let response;
+  try {
+    response = await fetch(url, { headers: { Range: `bytes=${start}-${start + length - 1}` } });
+  } catch {
+    if (pastEnd) return new ArrayBuffer(0);
+    throw new Error(`Couldn't open ${label}. Is the file still there?`);
+  }
+  if (!response.ok) throw new Error(`Couldn't open ${label}. Is the file still there?`);
+  const bytes = await response.arrayBuffer();
+  // Should the range ever be ignored, the part wanted is still what's used.
+  return bytes.byteLength > length ? bytes.slice(start, start + length) : bytes;
+}
+
+const MB = 1024 * 1024;
+// How much is read at a time around a sample: the next samples are usually
+// right after it. A few windows are kept for a decoder reset or two sources
+// reading the same file.
+const READ_WINDOW = 8 * MB;
+const KEEP_WINDOWS = 4;
+// Boxes other than media data are the index: small, even for long recordings.
+const MAX_INDEX_BOX = 512 * MB;
+const MEDIA_BOXES = new Set(['mdat', 'free', 'skip', 'wide']);
+
+const fourCC = (view, at) => String.fromCharCode(view.getUint8(at), view.getUint8(at + 1), view.getUint8(at + 2), view.getUint8(at + 3));
+
+// `readWindow` is how much to read at a time (smaller in the checks).
+export async function openRecording(url, label = 'a recording', { readWindow = READ_WINDOW } = {}) {
+  const index = [];
+  let at = 0;
+  let hasMoov = false;
+  for (let n = 0; n < 100000; n++) {
+    const head = new DataView(await readRange(url, at, 16, label, { pastEnd: at > 0 }));
+    if (head.byteLength < 8) break;
+    let size = head.getUint32(0);
+    const type = fourCC(head, 4);
+    if (size === 1 && head.byteLength >= 16) size = Number(head.getBigUint64(8));
+    else if (size === 0) size = Infinity; // runs to the end of the file
+    if (size < 8) break;
+    if (!MEDIA_BOXES.has(type)) {
+      if (size > MAX_INDEX_BOX) break;
+      index.push(new Uint8Array(await readRange(url, at, size, label)));
+      if (type === 'moov') hasMoov = true;
+    }
+    if (!Number.isFinite(size)) break;
+    at += size;
+  }
+  // A file laid out some other way (fragments, a damaged index) is read
+  // whole, as before.
+  if (!hasMoov) return demux(await readFile(url, label));
+
+  // The index boxes alone parse as a file: sample offsets come from the
+  // index, so they still point into the real file.
+  const joined = new Uint8Array(index.reduce((n, b) => n + b.byteLength, 0));
+  let pos = 0;
+  for (const b of index) { joined.set(b, pos); pos += b.byteLength; }
+  const parsed = parse(joined.buffer);
+
+  const windows = [];
+  async function read(sample) {
+    const end = sample.offset + sample.size;
+    let w = windows.find((x) => x.start <= sample.offset && x.start + x.bytes.byteLength >= end);
+    if (!w) {
+      const bytes = new Uint8Array(await readRange(url, sample.offset, Math.max(readWindow, sample.size), label, { pastEnd: true }));
+      if (bytes.byteLength < sample.size) throw new Error(`The video file of ${label} ends early. It may be damaged.`);
+      w = { start: sample.offset, bytes };
+      windows.push(w);
+      if (windows.length > KEEP_WINDOWS) windows.shift();
+    }
+    return w.bytes.subarray(sample.offset - w.start, end - w.start);
+  }
+  return { ...parsed, read };
 }
 
 // The config record (avcC, hvcC) as WebCodecs' `description`: the box
@@ -83,6 +163,10 @@ function describeTrack(file, info, t) {
 }
 
 export function demux(buffer) {
+  return { ...parse(buffer), buffer, read: (sample) => sampleData(buffer, sample) };
+}
+
+function parse(buffer) {
   const file = createFile();
   let info = null;
   let error = null;
@@ -99,7 +183,6 @@ export function demux(buffer) {
   const tracks = info.tracks.map((t) => describeTrack(file, info, t)).filter(Boolean);
   // The first track of each kind, as the recorder writes one of each.
   return {
-    buffer,
     video: tracks.find((t) => t.kind === 'video') ?? null,
     audio: tracks.find((t) => t.kind === 'audio') ?? null
   };

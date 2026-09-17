@@ -240,7 +240,9 @@ flushes a pending save first; closing the editor and quitting flush too.
 ## 6. Export (`src/renderer/exporter/`)
 
 A hidden BrowserWindow, opened per export, reports progress through main to the
-editor. Pipeline: read source files (`fetch(file://)`), demux (vendored
+editor. Pipeline: read source files (`fetch(file://)`; a recording through
+`demux.js openRecording`: its index, then samples a few MB at a time with
+ranged reads, never the whole file), demux (vendored
 mp4box.js for .mov/.mp4; the webcam .webm is decoded through a `<video>`
 element or a WebM demuxer), `VideoDecoder`, `drawFrame` on an OffscreenCanvas,
 `VideoEncoder`, mux (vendored mp4-muxer / webm-muxer), stream chunks to main,

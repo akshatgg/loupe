@@ -23,7 +23,7 @@
 import { buildTimeline } from '../../core/timeline.js';
 import { renderProjectAudio, createVoiceCache } from '../../core/audio/project-audio.js';
 import { isWav, parseWav } from '../../core/audio/wav.js';
-import { readFile, demux } from '../exporter/demux.js';
+import { readFile, demux, openRecording } from '../exporter/demux.js';
 import { decodeAudioTrack } from '../exporter/audio.js';
 import { computePeaks } from './audio-math.js';
 
@@ -45,7 +45,7 @@ function loadRecording(key, urls, hasMic) {
     // taking the rest of the preview's sound with it.
     if (urls.video && hasMic) {
       try {
-        const demuxed = demux(await readFile(urls.video, 'the recording'));
+        const demuxed = await openRecording(urls.video, 'the recording');
         out.mic = await decodeAudioTrack(demuxed, 'the recording');
       } catch (err) {
         post({ type: 'error', message: err.message });

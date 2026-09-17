@@ -12,7 +12,7 @@
 //   a white square travels along the middle line (never under the samples)
 
 import { Muxer, ArrayBufferTarget } from '../../src/vendor/mp4-muxer/mp4-muxer.mjs';
-import { demux, readFile } from '../../src/renderer/exporter/demux.js';
+import { demux, readFile, openRecording } from '../../src/renderer/exporter/demux.js';
 import { decodeAudioTrack, encoderDelay } from '../../src/renderer/exporter/audio.js';
 
 export const PALETTES = {
@@ -320,5 +320,38 @@ async function inspect(url, request = {}) {
   return result;
 }
 
-window.lab = { makeRecording, inspect, encoderDelay, PALETTES, GREY_LOW, GREY_SPAN };
+// How openRecording reads a file: the index first, then samples a window at
+// a time; every sample's bytes must match reading the whole file.
+async function readPieces(url, readWindow) {
+  const responses = [];
+  const realFetch = window.fetch;
+  window.fetch = async (...args) => {
+    const res = await realFetch(...args);
+    const copy = res.clone();
+    responses.push((await copy.arrayBuffer()).byteLength);
+    return res;
+  };
+  let opened;
+  let indexBytes;
+  try {
+    opened = await openRecording(url, 'the fixture', { readWindow });
+    indexBytes = responses.reduce((n, b) => n + b, 0);
+    const whole = demux(await readFile(url));
+    responses.pop();
+    let same = true;
+    for (const kind of ['video', 'audio']) {
+      for (const s of whole[kind]?.samples ?? []) {
+        const a = await opened.read(s);
+        const b = whole.read(s);
+        if (a.byteLength !== b.byteLength || a.some((v, i) => v !== b[i])) { same = false; break; }
+      }
+    }
+    return { fileBytes: whole.buffer.byteLength, indexBytes, largest: Math.max(...responses), reads: responses.length, same,
+      samples: opened.video.samples.length, audio: Boolean(opened.audio) };
+  } finally {
+    window.fetch = realFetch;
+  }
+}
+
+window.lab = { makeRecording, inspect, readPieces, encoderDelay, PALETTES, GREY_LOW, GREY_SPAN };
 window.labReady = true;

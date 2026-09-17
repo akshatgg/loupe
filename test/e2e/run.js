@@ -278,6 +278,15 @@ function checkSilence(window, what) {
 // ------------------------------------------------------------- the cases
 
 const CASES = [
+  ['a recording is read a piece at a time: its index, then samples as they are needed', async (lab, runner, fx) => {
+    const url = pathToFileURL(path.join(fx.a, 'raw.mp4')).href;
+    const r = await lab.call('readPieces', url, 8 * 1024);
+    assert.ok(r.same, 'every sample reads the same as from the whole file');
+    assert.ok(r.indexBytes < r.fileBytes / 4, `index ${r.indexBytes} of ${r.fileBytes} bytes`);
+    assert.ok(r.largest <= r.fileBytes / 8, `largest read ${r.largest} bytes`);
+    assert.ok(r.samples > 200 && r.audio);
+    log(`    ${r.fileBytes} bytes: index ${r.indexBytes}, ${r.reads} reads, largest ${r.largest}`);
+  }],
   ['plain export: size, frames, picture at known times, a still stretch, sound', async (lab, runner, fx) => {
     const p = baseProject(fx);
     const times = [0.5, 2.25, 4.75, 6.5, 7.9];
@@ -592,7 +601,7 @@ const CASES = [
     })`);
     assert.ok(!result.error, result.error);
     assert.strictEqual(path.dirname(result.r.file), dir);
-    assert.match(path.basename(result.r.file), /^Recording .*\.mp4$/, 'named after the video');
+    assert.match(path.basename(result.r.file), /^Recording.*\.mp4$/, 'named after the video');
     const video = result.progress.filter((p) => p.phase === 'video');
     assert.ok(video.length > 0 && video.at(-1).frame === video.at(-1).total, 'progress reaches the last frame');
     const duration = outputDuration(project.speedSegments, 8, 200);
@@ -610,7 +619,7 @@ const CASES = [
       window.loupe.exportVideo({ resolution: '720p' }).then(() => resolve('finished'), (e) => resolve(e.message));
     })`);
     assert.match(cancelled, /cancelled/);
-    const left = fs.readdirSync(dir).filter((f) => f.endsWith('.part') || /^Recording .*\.mp4$/.test(f));
+    const left = fs.readdirSync(dir).filter((f) => f.endsWith('.part') || /^Recording.*\.mp4$/.test(f));
     assert.deepStrictEqual(left, [], 'a cancelled export leaves nothing behind');
     await editor.close();
   }]

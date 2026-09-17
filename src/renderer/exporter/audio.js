@@ -55,11 +55,12 @@ export async function decodeAudioTrack(demuxed, label) {
     error: (e) => { error = e; }
   });
   decoder.configure(config);
+  const read = demuxed.read ?? ((s) => sampleData(demuxed.buffer, s));
   for (let i = 0; i < track.samples.length; i++) {
     if (error) break;
     const s = track.samples[i];
     decoder.decode(new EncodedAudioChunk({
-      type: 'key', timestamp: micro(s.time), duration: micro(s.duration), data: sampleData(demuxed.buffer, s)
+      type: 'key', timestamp: micro(s.time), duration: micro(s.duration), data: await read(s)
     }));
     if (i % FEED_BATCH === FEED_BATCH - 1) {
       while (decoder.decodeQueueSize > FEED_BATCH && !error) await waitForDequeue(decoder);
