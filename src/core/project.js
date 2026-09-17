@@ -209,7 +209,7 @@ export function zoomsFromKeyframes(keyframes, duration) {
   const close = (end) => {
     if (open.level > RECORDED_ZOOM_THRESHOLD) {
       zooms.push({
-        id: nextId('z', zooms), source: 'main', start: open.start, end, level: open.level,
+        id: `z${zooms.length + 1}`, source: 'main', start: open.start, end, level: open.level,
         follow: true, x: open.x, y: open.y, recorded: true, keyframes: open.keyframes
       });
     }

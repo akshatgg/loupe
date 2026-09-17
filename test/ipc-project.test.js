@@ -184,3 +184,45 @@ test('a rename from the Library survives a save the editor sent before it heard'
   assert.strictEqual(readJson(dir).title, 'Renamed in the editor');
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('a damaged video is told apart from a missing one; a huge project file is refused plainly', () => {
+  const dir = v1Dir('damaged', { video: false });
+  const store = createProjectStore();
+  fs.writeFileSync(path.join(dir, 'raw.mov'), '');
+  assert.deepStrictEqual([store.load(dir).sources.main.missing, store.load(dir).sources.main.damaged], [false, true], 'empty');
+  fs.writeFileSync(path.join(dir, 'raw.mov'), Buffer.from('random bytes, not a movie at all'));
+  assert.strictEqual(store.load(dir).sources.main.damaged, true, 'garbage');
+  const movie = Buffer.alloc(32);
+  movie.writeUInt32BE(32, 0);
+  movie.write('ftypqt  ', 4, 'latin1');
+  fs.writeFileSync(path.join(dir, 'raw.mov'), movie);
+  assert.strictEqual(store.load(dir).sources.main.damaged, false, 'a movie header');
+
+  const big = path.join(dir, 'project.json');
+  const fd = fs.openSync(big, 'w');
+  fs.writeSync(fd, 'x', 65 * 1024 * 1024);
+  fs.closeSync(fd);
+  assert.throws(() => store.load(dir), /too big to open/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('only recordings the project still uses are written: an undone or doubled Add recording leaves nothing behind', async () => {
+  const P = await import('../src/core/project.js');
+  const dir = v1Dir('used-sources');
+  const store = createProjectStore({ delayMs: 10000 });
+  const { project } = store.load(dir);
+  const other = { ...project.sources.main, dir: '/abs/other', width: 800, height: 600, duration: 4 };
+  store.addSource(dir, 'src2', other);
+  store.addSource(dir, 'src3', other); // pressed twice
+  const added = P.appendRecording(project, 'src2', other);
+  store.save(dir, added);
+  store.flush();
+  assert.deepStrictEqual(Object.keys(readJson(dir).sources), ['main', 'src2']);
+  store.save(dir, project); // undo
+  store.flush();
+  assert.deepStrictEqual(Object.keys(readJson(dir).sources), ['main']);
+  store.save(dir, added); // redo still works: main still knows src2
+  store.flush();
+  assert.deepStrictEqual(Object.keys(readJson(dir).sources), ['main', 'src2']);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

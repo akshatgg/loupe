@@ -10,6 +10,9 @@ const { createClockSync } = require('./clock-sync');
 const { createPauseTracker, toSourcePauses, clipsFromPauses } = require('./pauses');
 const { buildMainSource, writeKeys, validKeyLabel, toProjectV2 } = require('./recording-v2');
 
+// How long a stopping capture helper may take to finish its file.
+const CAPTURE_STOP_MS = 30000;
+
 const identity = (v) => v;
 
 // `platform` picks the helper binaries and capture file (platform.js).
@@ -368,7 +371,10 @@ function createRecorder({
     captureChild = null;
 
     if (toStopInput) await stopHelper(toStopInput);
-    if (toStopCapture) await stopHelper(toStopCapture);
+    // Capture finishes its file after "stop" (the encoder drains, the MP4's
+    // index is written at the end): killed early, the whole video is lost,
+    // so it gets far longer than stopHelper's default before that happens.
+    if (toStopCapture) await stopHelper(toStopCapture, CAPTURE_STOP_MS);
     recording = false;
 
     // Capture failed before its first frame (a locked screen, a display
@@ -444,4 +450,4 @@ function createRecorder({
   return { start, stop, state, pause, resume, toSourceTime };
 }
 
-module.exports = { createRecorder };
+module.exports = { createRecorder, CAPTURE_STOP_MS };

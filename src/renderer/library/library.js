@@ -120,7 +120,8 @@ function card(rec, now) {
   ph.className = 'ph';
   // Static markup only; the recording's own text is always set with textContent.
   ph.innerHTML = ICON_FILM;
-  if (!rec.hasVideo) ph.append('No video');
+  if (rec.damaged) ph.append('Can’t be opened');
+  else if (!rec.hasVideo) ph.append('No video');
   thumb.append(ph);
   const img = document.createElement('img');
   img.alt = '';
@@ -128,7 +129,7 @@ function card(rec, now) {
   img.draggable = false;
   thumb.append(img);
   if (rec.thumbnail) setImage(img, rec.thumbnail);
-  else wantThumbnail(rec);
+  else if (!rec.damaged) wantThumbnail(rec);
 
   const length = formatDuration(rec.duration);
   if (length) {

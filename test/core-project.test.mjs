@@ -392,3 +392,13 @@ test('a cut never leaves a clip too short to grab', () => {
     for (const c of q.clips) assert.ok(c.end - c.start >= P.MIN_CLIP_SECONDS - 1e-9);
   }
 });
+
+test('migrating a v1 project with a huge number of zoom keyframes stays quick', () => {
+  const zoomKeyframes = [];
+  for (let i = 0; i < 400000; i++) zoomKeyframes.push({ t: i * 0.001, zoom: i % 2 ? 1 : 2, cx: 1, cy: 1 });
+  const started = Date.now();
+  const p = P.migrate({ ...V1_CLICKS, capture: { ...V1_CLICKS.capture, duration: 401 }, zoomKeyframes });
+  assert.strictEqual(p.zooms.length, 200000);
+  assert.strictEqual(new Set(p.zooms.map((z) => z.id)).size, 200000, 'ids stay unique');
+  assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
+});

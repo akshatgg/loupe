@@ -58,6 +58,9 @@ function writeJson(file, value) {
 }
 
 const finite = (n) => (Number.isFinite(n) && n >= 0 ? n : null);
+// Longer than any recording (a week): a length like 1e308 is a damaged file.
+const MAX_DURATION = 7 * 24 * 3600;
+const length = (n) => (finite(n) !== null && n <= MAX_DURATION ? n : null);
 
 // Length in seconds. v2: the clips in order (before speed changes -- the
 // timeline module owns that maths, and the library only needs a rough
@@ -66,11 +69,11 @@ function projectDuration(project) {
   if (project.version === 2) {
     if (Array.isArray(project.clips) && project.clips.length) {
       const sum = project.clips.reduce((s, c) => s + Math.max(0, (c?.end ?? 0) - (c?.start ?? 0)), 0);
-      if (Number.isFinite(sum)) return sum;
+      if (length(sum) !== null) return sum;
     }
-    return finite(project.sources?.main?.duration);
+    return length(project.sources?.main?.duration);
   }
-  return finite(project.capture?.duration);
+  return length(project.capture?.duration);
 }
 
 // The main recording's video file, or null.
@@ -175,6 +178,16 @@ function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
     };
   }
 
+  function damagedEntry(id, dir) {
+    let stat = null;
+    try { stat = fs.statSync(dir); } catch { /* gone meanwhile */ }
+    const createdAt = /^\d{12,14}$/.test(id) ? Number(id) : (stat?.birthtimeMs || stat?.mtimeMs || 0);
+    return {
+      id, title: defaultTitle(createdAt, typeof locale === 'function' ? locale() : locale), customTitle: false,
+      createdAt, duration: null, width: null, height: null, hasVideo: false, thumbnail: null, damaged: true
+    };
+  }
+
   function list() {
     const base = rootReal();
     const out = [];
@@ -185,8 +198,11 @@ function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
       try {
         out.push(entry(d.name, dir));
       } catch (err) {
-        // One unreadable project mustn't hide all the others.
-        console.warn(`Loupe: skipped recording ${d.name}:`, err.message);
+        // One unreadable project mustn't hide all the others -- nor itself:
+        // it is still listed, so it can be seen, revealed or moved to the
+        // Trash (opening it says what is wrong).
+        console.warn(`Loupe: recording ${d.name} can't be read:`, err.message);
+        out.push(damagedEntry(d.name, dir));
       }
     }
     return out.sort((a, b) => b.createdAt - a.createdAt);

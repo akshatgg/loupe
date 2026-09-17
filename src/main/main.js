@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const { execFile } = require('node:child_process');
 const { performance } = require('node:perf_hooks');
 const { createPermissions } = require('./permissions');
-const { createRecorder } = require('./recorder');
+const { createRecorder, CAPTURE_STOP_MS } = require('./recorder');
 const { spawnHelper, stopHelper } = require('./helpers');
 const { validateRegion, clampRegionToBounds } = require('./region');
 const { transition } = require('./bar-state');
@@ -800,22 +800,43 @@ ipcMain.handle('bar:start', async () => {
 
 ipcMain.handle('record:stop', stopRecording);
 
+// The picker, bar, area outline, camera bubble and editor share one preload,
+// so any of them could call any channel. Those that act on the open
+// recording (save, export, add files to it, share or copy its exports)
+// answer the editor window only -- and only while it is open, so nothing
+// lands in the last recording's folder after its editor closed.
+function fromEditor(event) {
+  return Boolean(editorWindow && !editorWindow.isDestroyed() && event?.sender === editorWindow.webContents);
+}
+const openEditorDir = () => (editorWindow && !editorWindow.isDestroyed() ? editorDir : null);
+const editorIpc = {
+  handle(channel, fn) {
+    ipcMain.handle(channel, (event, ...args) => {
+      if (!fromEditor(event)) throw new Error('Only the editor can do that.');
+      return fn(event, ...args);
+    });
+  },
+  on(channel, fn) {
+    ipcMain.on(channel, (event, ...args) => { if (fromEditor(event)) fn(event, ...args); });
+  }
+};
+
 // Export follow-ups: share links, copy/drag/reveal the exported file. Only
 // files Loupe exported qualify: this run's exports and the open recording's
 // earlier ones (exported-file.js).
 const exportedFiles = createExportedFiles({
   recent: () => (editorDir ? recentExports(editorDir).map((e) => e.file) : [])
 });
-registerShareIpc(ipcMain, { checkFile: exportedFiles.check });
-registerFileActionsIpc(ipcMain, undefined, { checkFile: exportedFiles.check });
+registerShareIpc(editorIpc, { checkFile: exportedFiles.check });
+registerFileActionsIpc(editorIpc, undefined, { checkFile: exportedFiles.check });
 
 // Audio files the editor adds to the open project (voiceover takes, music).
-registerVoiceoverIpc({ ipcMain, getProjectDir: () => editorDir });
-registerMusicIpc({ ipcMain, dialog, BrowserWindow, getProjectDir: () => editorDir });
+registerVoiceoverIpc({ ipcMain: editorIpc, getProjectDir: () => openEditorDir() });
+registerMusicIpc({ ipcMain: editorIpc, dialog, BrowserWindow, getProjectDir: () => openEditorDir() });
 // Captions: speech model downloads and saving .srt/.vtt (see ipc/captions.js).
-registerCaptionsIpc({ ipcMain, app, dialog, BrowserWindow, getDefaultDir: () => editorDir });
+registerCaptionsIpc({ ipcMain: editorIpc, app, dialog, BrowserWindow, getDefaultDir: () => openEditorDir() });
 // Background pictures: bundled wallpapers and pictures copied into the project.
-registerBackgroundIpc({ ipcMain, dialog, BrowserWindow, getProjectDir: () => editorDir });
+registerBackgroundIpc({ ipcMain: editorIpc, dialog, BrowserWindow, getProjectDir: () => openEditorDir() });
 
 // Whether the Control+Shift+S stop-recording shortcut is actually held by
 // us. globalShortcut.register() returns false (not a rejection/throw) when
@@ -874,14 +895,14 @@ const projects = createProjectStore({
 function sendToEditor(channel, data) {
   if (editorWindow && !editorWindow.isDestroyed()) editorWindow.webContents.send(channel, data);
 }
-registerProjectIpc({ ipcMain, store: projects, projectDir: () => editorDir });
+registerProjectIpc({ ipcMain: editorIpc, store: projects, projectDir: () => openEditorDir() });
 registerExportIpc({
-  ipcMain, runner: exporter, projectDir: () => editorDir, shell,
+  ipcMain: editorIpc, runner: exporter, projectDir: () => openEditorDir(), shell,
   beforeStart: () => projects.flush(),
   onExported: (file) => exportedFiles.remember(file)
 });
 // Add recording: another recording from the Library, played after this one.
-registerAppendRecordingIpc({ ipcMain, library: appShell.library, store: projects, projectDir: () => editorDir });
+registerAppendRecordingIpc({ ipcMain: editorIpc, library: appShell.library, store: projects, projectDir: () => openEditorDir() });
 
 function flushProject() {
   try {
@@ -952,8 +973,9 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 // achievable at all here, and the `quitting` flag lets the second
 // before-quit (from our own app.quit() call below) through instead of
 // looping forever. The outer timeout is a deliberate belt-and-suspenders:
-// stopHelper() already SIGKILLs a stuck helper after 3s each (see
-// helpers.js), so normal shutdown finishes well under 8s, but if that
+// stopHelper() already SIGKILLs a stuck helper (inputtap after 3s, capture
+// after recorder.js's CAPTURE_STOP_MS, time to finish a long 4K file), so
+// normal shutdown finishes within that, but if that
 // invariant is ever violated this still guarantees the app quits rather
 // than hanging on Cmd+Q forever.
 let quitting = false;
@@ -974,7 +996,7 @@ app.on('before-quit', (event) => {
   if (exporter.busy()) tasks.push(exporter.cancel());
   Promise.race([
     Promise.all(tasks),
-    new Promise((resolve) => setTimeout(resolve, 8000))
+    new Promise((resolve) => setTimeout(resolve, CAPTURE_STOP_MS + 5000))
   ]).finally(() => app.quit());
 });
 

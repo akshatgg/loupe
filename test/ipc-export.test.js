@@ -308,3 +308,12 @@ test('recent exports: newest first, one entry per file, only files that exist, n
   assert.deepStrictEqual(recentExports(dir), []);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('a full disk or a folder that can’t be written is said in plain words', () => {
+  const { diskError } = require('../src/main/ipc/export');
+  const err = (code) => Object.assign(new Error(`${code}: raw words, write`), { code });
+  assert.match(diskError(err('ENOSPC'), 'write the video').message, /^The disk is full/);
+  assert.doesNotMatch(diskError(err('ENOSPC'), 'write the video').message, /ENOSPC/);
+  assert.match(diskError(err('EACCES'), 'write the video').message, /isn’t allowed/);
+  assert.match(diskError(err('EIO'), 'write the video').message, /^Couldn't write the video \(EIO/);
+});

@@ -147,7 +147,7 @@ test('a stale editor closing later does not clobber the live editor', async () =
 
   // And the live editor's own IPC handlers still operate on its own
   // directory, not the stale one's.
-  const loaded = await ipcHandlers['project:load']();
+  const loaded = await ipcHandlers['project:load'](editorEvent(main));
   assert.ok(loaded.sources.main.cursor.includes(path.basename(dirB)), loaded.sources.main.cursor);
 
   fs.rmSync(dirA, { recursive: true, force: true });
@@ -160,8 +160,8 @@ test('project:save refuses a malformed zoom and leaves project.json untouched', 
   main.__test__.openEditorWindow(dir);
   const before = fs.readFileSync(path.join(dir, 'project.json'), 'utf8');
 
-  const { project } = await ipcHandlers['project:load']();
-  await assert.rejects(async () => ipcHandlers['project:save']({}, {
+  const { project } = await ipcHandlers['project:load'](editorEvent(main));
+  await assert.rejects(async () => ipcHandlers['project:save'](editorEvent(main), {
     ...project, zooms: [{ id: 'z1', source: 'main', start: -Infinity, end: Infinity, level: 2, follow: true, x: 0, y: 0, recorded: false }]
   }));
   main.__test__.projects.flush();
@@ -177,7 +177,7 @@ test('a rejected export leaves no partial output file behind', async () => {
 
   // This project has no raw.mov, so the export is refused before anything
   // is written.
-  await assert.rejects(() => ipcHandlers['export:start']({ sender: {} }, { resolution: '1080p', codec: 'h264' }),
+  await assert.rejects(() => ipcHandlers['export:start'](editorEvent(main), { resolution: '1080p', codec: 'h264' }),
     /video file is missing/);
 
   const files = fs.readdirSync(dir);
@@ -299,6 +299,9 @@ test('Escape is released as soon as the overlay is hidden again', () => {
 
 // ---- editing through project:load / project:save ---------------------------
 
+// An IPC event as the open editor window sends it.
+const editorEvent = (main) => ({ sender: main.__test__.editorState().editorWindow.webContents });
+
 async function core() {
   return import('../src/core/project.js');
 }
@@ -311,7 +314,7 @@ test('the editor loads a v1 project as v2 with its cursor track and video as fil
   fs.writeFileSync(path.join(dir, 'raw.mov'), '');
   main.__test__.openEditorWindow(dir);
 
-  const loaded = await ipcHandlers['project:load']();
+  const loaded = await ipcHandlers['project:load'](editorEvent(main));
   assert.strictEqual(loaded.project.version, 2);
   assert.strictEqual(loaded.migrated, true);
   assert.match(loaded.sources.main.cursor, /^file:.*cursor\.bin$/);
@@ -326,9 +329,9 @@ test('an edit saved by the editor reaches project.json once flushed, and closing
   const dir = makeProjectDir('save-close');
   const win = main.__test__.openEditorWindow(dir);
 
-  const { project } = await ipcHandlers['project:load']();
+  const { project } = await ipcHandlers['project:load'](editorEvent(main));
   const edited = P.setStyle(P.paintSpeed(project, { start: 2, end: 6, rate: 2 }), { cursor: { show: false } });
-  await ipcHandlers['project:save']({}, edited);
+  await ipcHandlers['project:save'](editorEvent(main), edited);
   win.close();
   await new Promise((resolve) => setImmediate(resolve));
 
@@ -345,15 +348,31 @@ test('export builds its job from the latest edit, even one still waiting to be s
   const P = await core();
   const dir = makeProjectDir('speed-export');
   main.__test__.openEditorWindow(dir);
-  const { project } = await ipcHandlers['project:load']();
-  await ipcHandlers['project:save']({}, P.paintSpeed(project, { start: 2, end: 6, rate: 2 }));
+  const { project } = await ipcHandlers['project:load'](editorEvent(main));
+  await ipcHandlers['project:save'](editorEvent(main), P.paintSpeed(project, { start: 2, end: 6, rate: 2 }));
   // No raw.mov: the job is refused after the flush, which is what is checked.
-  await assert.rejects(() => ipcHandlers['export:start']({ sender: {} }, {}), /video file is missing/);
+  await assert.rejects(() => ipcHandlers['export:start'](editorEvent(main), {}), /video file is missing/);
   const { buildJob } = require('../src/main/ipc/export');
   fs.writeFileSync(path.join(dir, 'raw.mov'), '');
   const { job, out } = buildJob(dir, { resolution: '1080p' });
   assert.strictEqual(job.project.version, 2);
   assert.deepStrictEqual(job.project.speed.map((s) => [s.start, s.end, s.rate]), [[2, 6, 2]]);
   assert.strictEqual(path.dirname(out), dir);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('only the open editor may save, export or load the project', async () => {
+  const { main, ipcHandlers } = freshMain();
+  const dir = makeProjectDir('editor-only');
+  const win = main.__test__.openEditorWindow(dir);
+  const other = { sender: { id: 'the picker' } };
+  assert.throws(() => ipcHandlers['project:load'](other), /Only the editor/);
+  assert.throws(() => ipcHandlers['export:start'](other, {}), /Only the editor/);
+  assert.throws(() => ipcHandlers['voiceover:save'](other, {}), /Only the editor/);
+  const { project } = await ipcHandlers['project:load'](editorEvent(main));
+  assert.strictEqual(project.version, 2);
+  win.close();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.throws(() => ipcHandlers['project:save']({ sender: win.webContents }, project), /Only the editor/, 'nothing reaches a closed editor\'s folder');
   fs.rmSync(dir, { recursive: true, force: true });
 });

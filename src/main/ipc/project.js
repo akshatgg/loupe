@@ -57,15 +57,24 @@ function createdAtFor(dir) {
   }
 }
 
+// Far bigger than any real project (saves are refused above 16 MB): a file
+// this size was damaged or made by hand, and reading it would stall the app.
+const MAX_LOAD_BYTES = 64 * 1024 * 1024;
+
 function readProject(dir) {
   const file = path.join(dir, 'project.json');
   let raw;
   try {
+    if (fs.statSync(file).size > MAX_LOAD_BYTES) {
+      throw Object.assign(new Error('too big'), { code: 'EFBIG' });
+    }
     raw = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch (err) {
     throw new Error(err.code === 'ENOENT'
       ? "This recording's project file is missing."
-      : "This recording's project file couldn't be read.");
+      : err.code === 'EFBIG'
+        ? "This recording's project file is too big to open. It may be damaged."
+        : "This recording's project file couldn't be read.");
   }
   const project = loadCore().loadProjectData(raw, { createdAt: createdAtFor(dir) });
   return { project, migrated: raw.version !== project.version };
@@ -85,10 +94,46 @@ function sourceFiles(dir, project) {
       systemAudio: meta.systemAudio ? fileUrl(recordingFile(base, meta.systemAudio)) : null,
       webcam: meta.webcam?.file ? fileUrl(recordingFile(base, meta.webcam.file)) : null,
       keys: meta.keys ? fileUrl(recordingFile(base, meta.keys)) : null,
-      missing: !video || !fs.existsSync(video)
+      missing: !video || !fs.existsSync(video),
+      damaged: Boolean(video) && fs.existsSync(video) && !looksLikeVideo(video)
     };
   }
   return out;
+}
+
+// MP4 and QuickTime files are a series of boxes; the first one's type sits at
+// bytes 4-8. An empty, truncated-to-nothing or unrelated file fails this, so
+// the editor can say the video is damaged instead of showing a silent black
+// preview.
+const FIRST_BOXES = new Set(['ftyp', 'moov', 'mdat', 'wide', 'free', 'skip', 'pnot', 'uuid']);
+function looksLikeVideo(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const head = Buffer.alloc(12);
+    if (fs.readSync(fd, head, 0, 12, 0) < 12) return false;
+    return FIRST_BOXES.has(head.toString('latin1', 4, 8));
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+// The project as written: only the recordings something still uses. An
+// added recording whose clips were undone (or one added twice by a double
+// press) stays known to main, so redo still works, but isn't kept in the file.
+function withUsedSources(project) {
+  const used = new Set(['main']);
+  const note = (items) => { for (const it of items ?? []) if (typeof it?.source === 'string') used.add(it.source); };
+  note(project.clips);
+  note(project.speed);
+  note(project.zooms);
+  note(project.annotations);
+  note(project.captions?.segments);
+  note(project.audio?.voiceover);
+  const sources = Object.fromEntries(Object.entries(project.sources).filter(([key]) => used.has(key)));
+  return { ...project, sources };
 }
 
 const folderUrl = (dir) => pathToFileURL(path.join(dir, path.sep)).href;
@@ -188,7 +233,7 @@ function createProjectStore({ delayMs = SAVE_DELAY_MS, onError = () => {} } = {}
     const { dir, project } = pending;
     pending = null;
     try {
-      writeAtomic(dir, project);
+      writeAtomic(dir, withUsedSources(project));
     } catch (err) {
       pending ??= { dir, project };
       onError(err, dir);

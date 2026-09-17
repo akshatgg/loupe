@@ -178,6 +178,18 @@ function freeExportPath(dir, nameFor) {
   }
 }
 
+// A file error in plain words: a full disk or a folder Loupe may not write
+// to is said as such, anything else keeps the system's words in brackets.
+function diskError(e, doing) {
+  switch (e?.code) {
+    case 'ENOSPC': return new Error('The disk is full, so the video couldn’t be saved. Free up some space and try again.');
+    case 'EACCES': case 'EPERM': case 'EROFS':
+      return new Error('Loupe isn’t allowed to write to this recording’s folder, so the video couldn’t be saved.');
+    case 'ENOENT': return new Error("This recording's folder is gone, so the video couldn’t be saved.");
+    default: return new Error(`Couldn't ${doing} (${e?.message ?? 'unknown error'}).`);
+  }
+}
+
 function cancelledError() {
   const err = new Error('Export cancelled.');
   err.cancelled = true;
@@ -218,7 +230,7 @@ function createExportRunner({ BrowserWindow, preload, page, show = false }) {
         // A size-limited export may have run twice, the second pass shorter:
         // the file ends where the page says the last pass ended.
         if (!err && Number.isSafeInteger(summary?.bytes) && summary.bytes > 0 && state.handle) {
-          await state.handle.truncate(summary.bytes).catch((e) => { err = new Error(`Couldn't save the video (${e.message}).`); });
+          await state.handle.truncate(summary.bytes).catch((e) => { err = diskError(e, 'save the video'); });
         }
         await state.handle?.close().catch(() => {});
         if (state.win && !state.win.isDestroyed()) state.win.destroy();
@@ -226,7 +238,7 @@ function createExportRunner({ BrowserWindow, preload, page, show = false }) {
           try {
             await fs.promises.rename(part, out);
           } catch (e) {
-            err = new Error(`Couldn't save the video (${e.message}).`);
+            err = diskError(e, 'save the video');
           }
         }
         if (err) await fs.promises.unlink(part).catch(() => {});
@@ -261,7 +273,7 @@ function createExportRunner({ BrowserWindow, preload, page, show = false }) {
           }
           if (state.settled) throw cancelledError();
           const write = state.writes.then(() => handle.write(bytes, 0, bytes.byteLength, position));
-          state.writes = write.catch((e) => { finish(new Error(`Couldn't write the video (${e.message}).`)); });
+          state.writes = write.catch((e) => { finish(diskError(e, 'write the video')); });
           return write.then(() => undefined);
         });
         ipc.on('exporter:progress', (_e, p) => {
@@ -277,7 +289,7 @@ function createExportRunner({ BrowserWindow, preload, page, show = false }) {
         win.webContents.on('render-process-gone', () => finish(new Error('The export stopped unexpectedly.')));
         win.on('closed', () => finish(cancelledError()));
         Promise.resolve(win.loadFile(page)).catch((e) => finish(new Error(`Couldn't start the export (${e.message}).`)));
-      }).catch((e) => finish(new Error(`Couldn't create the video file (${e.message}).`)));
+      }).catch((e) => finish(diskError(e, 'create the video file')));
     });
     return state.done;
   }
@@ -401,6 +413,6 @@ function registerExportIpc({ ipcMain, runner, projectDir, beforeStart = () => {}
 
 module.exports = {
   validateExportOptions, buildJob, createExportRunner, registerExportIpc,
-  recentExports, rememberExport,
+  recentExports, rememberExport, diskError,
   FORMATS, RESOLUTIONS, CODECS, QUALITIES
 };

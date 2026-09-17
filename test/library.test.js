@@ -59,8 +59,12 @@ test('lists every project folder, newest first, with title, date, length and siz
   } finally {
     console.warn = warn;
   }
-  assert.deepStrictEqual(list.map((r) => r.id), ['my-demo', '1788981448379', '1788954728479']);
-  assert.strictEqual(warnings.length, 1, 'the unreadable project is skipped, with a note in the log');
+  assert.deepStrictEqual(list.map((r) => r.id), ['my-demo', '1788981448379', '1788954728479', '1788000000000']);
+  assert.strictEqual(warnings.length, 1, 'the unreadable project has a note in the log');
+  const damaged = list.at(-1);
+  assert.strictEqual(damaged.damaged, true, 'and is still listed, so it can be trashed');
+  assert.strictEqual(damaged.duration, null);
+  assert.strictEqual(list.slice(0, 3).some((r) => r.damaged), false);
 
   const [modern, custom, dated] = list;
   assert.strictEqual(custom.title, 'Checkout flow');
@@ -313,4 +317,15 @@ test('renaming or duplicating the recording open in the editor goes through the 
   v1(root, 'other');
   await handlers['library:rename']({}, 'other', 'Something else');
   assert.deepStrictEqual(calls, []);
+});
+
+test('an impossible length in a damaged project is not shown', () => {
+  const { base, root } = setup();
+  v1(root, '1788954728479');
+  const file = path.join(root, '1788954728479', 'project.json');
+  const p = JSON.parse(fs.readFileSync(file, 'utf8'));
+  p.capture.duration = 1e308;
+  fs.writeFileSync(file, JSON.stringify(p));
+  assert.strictEqual(createLibrary({ root: () => root }).list()[0].duration, null);
+  fs.rmSync(base, { recursive: true, force: true });
 });

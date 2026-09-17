@@ -598,3 +598,18 @@ test('a capture that fails after it started keeps what was recorded', async () =
   assert.ok(fs.existsSync(path.join(dir, 'project.json')));
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('capture gets time to finish its file when stopped; inputtap the usual few seconds', async () => {
+  const { CAPTURE_STOP_MS } = require('../src/main/recorder');
+  const grace = {};
+  const spawnHelper = (bin, args, opts) => ({ name: bin.endsWith('capture') ? 'capture' : 'inputtap', opts, kill() {} });
+  const stopHelper = async (child, timeoutMs) => { grace[child.name] = timeoutMs; return 0; };
+  const rec = createRecorder({ binDir: '/fake', spawnHelper, stopHelper });
+  await rec.start({ source: 'display:1', mic: false, dir: require('node:os').tmpdir() + '/loupe-grace', zoomEnabled: true });
+  require('node:fs').mkdirSync(require('node:os').tmpdir() + '/loupe-grace', { recursive: true });
+  await rec.stop();
+  assert.ok(CAPTURE_STOP_MS >= 30000);
+  assert.strictEqual(grace.capture, CAPTURE_STOP_MS);
+  assert.strictEqual(grace.inputtap, undefined, 'inputtap keeps the default');
+  require('node:fs').rmSync(require('node:os').tmpdir() + '/loupe-grace', { recursive: true, force: true });
+});

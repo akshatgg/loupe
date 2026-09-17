@@ -91,7 +91,11 @@ export function demux(buffer) {
   buffer.fileStart = 0;
   file.appendBuffer(buffer);
   file.flush();
-  if (!info) throw new Error(`This video file can't be read${error ? ` (${error})` : ''}.`);
+  // mp4box's own words ("ISOFile") mean nothing to anyone: they go to the log.
+  if (!info) {
+    if (error) console.error('Loupe: demux failed:', error);
+    throw new Error("The recording's video file is damaged and can't be read.");
+  }
   const tracks = info.tracks.map((t) => describeTrack(file, info, t)).filter(Boolean);
   // The first track of each kind, as the recorder writes one of each.
   return {

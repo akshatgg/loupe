@@ -113,10 +113,14 @@ async function start() {
 
   const missing = Object.entries(loaded.sources).filter(([key, s]) => s.missing &&
     store.project.clips.some((c) => c.source === key));
-  if (missing.length) {
+  const damaged = Object.entries(loaded.sources).filter(([key, s]) => s.damaged &&
+    store.project.clips.some((c) => c.source === key));
+  if (missing.length || damaged.length) {
     $('stageNotice').hidden = false;
     $('stageNotice').replaceChildren(icon('alert', { size: 18 }),
-      h('span', {}, 'The video file for this recording is missing, so the preview is blank. It may have been moved or deleted.'));
+      h('span', {}, missing.length
+        ? 'The video file for this recording is missing, so the preview is blank. It may have been moved or deleted.'
+        : 'The video file for this recording is damaged and can’t be played, so the preview is blank.'));
   }
 
   // ---- panels
