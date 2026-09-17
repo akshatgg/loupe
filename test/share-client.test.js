@@ -107,11 +107,12 @@ test('a small file goes up in one PUT with the SDK headers and lands intact', as
 });
 
 test('a large file goes up in parts, in order, and progress covers every byte', async () => {
-  // A slow reader, so progress has time to be reported between parts.
+  // Every progress update is kept (no throttle), so the check doesn't depend
+  // on how fast the machine uploads over loopback.
   await withServer({ chunkDelayMs: 3 }, async (server) => {
     const file = makeFile('big.webm', 5 * 1024 * 1024 + 123);
     const progress = [];
-    const client = clientFor(server, { partSize: 1024 * 1024, multipartOver: 2 * 1024 * 1024 });
+    const client = clientFor(server, { partSize: 1024 * 1024, multipartOver: 2 * 1024 * 1024, progressIntervalMs: 0 });
     const result = await client.upload(file, {}, { onProgress: (p) => progress.push(p) });
 
     const stored = server.blob.files.get(`shares/${result.id}/loupe-recording.webm`);

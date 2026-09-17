@@ -160,6 +160,8 @@ function createShareClient(opts = {}) {
   const multipartOver = opts.multipartOver ?? MULTIPART_OVER;
   const retryDelayMs = opts.retryDelayMs ?? 500;
   const stallTimeoutMs = opts.stallTimeoutMs ?? STALL_TIMEOUT_MS;
+  // Progress is sent at most this often, so a fast link doesn't flood the UI.
+  const progressIntervalMs = opts.progressIntervalMs ?? 100;
 
   // Runs `fn`, turning whatever went wrong into a ShareError the UI can show.
   async function guard(signal, fn) {
@@ -230,7 +232,7 @@ function createShareClient(opts = {}) {
       return await guard(signal, async () => {
         const multipart = file.size > multipartOver;
         const token = await handshake(file, details, multipart, controller.signal);
-        const progress = createProgress(file.size, onProgress);
+        const progress = createProgress(file.size, onProgress, progressIntervalMs);
         progress.emit(true);
         const put = createBlobRequester(token, file, controller.signal);
         const result = multipart
@@ -414,7 +416,7 @@ function checkResult(result, pathname) {
 
 // Sums bytes sent across parts (a retried part starts again from zero) and
 // reports at most ten times a second.
-function createProgress(total, onProgress, now = Date.now) {
+function createProgress(total, onProgress, intervalMs = 100, now = Date.now) {
   const sent = new Map();
   let last = 0;
   const loaded = () => {
@@ -425,7 +427,7 @@ function createProgress(total, onProgress, now = Date.now) {
   const emit = (force) => {
     if (!onProgress) return;
     const t = now();
-    if (!force && t - last < 100) return;
+    if (!force && t - last < intervalMs) return;
     last = t;
     const l = loaded();
     // 100% is only reported once Blob has confirmed the file.
