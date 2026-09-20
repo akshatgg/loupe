@@ -1,6 +1,6 @@
 {
   "name": "loupe",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Screen recorder with scroll-to-zoom for demo videos",
   "main": "src/main/main.js",
   "type": "commonjs",
@@ -30,7 +30,10 @@
     "cask:update": "node packaging/update-cask.js"
   },
   "homepage": "https://loupeapp.vercel.app",
-  "repository": { "type": "git", "url": "https://github.com/akshatgg/loupe.git" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/akshatgg/loupe.git"
+  },
   "devDependencies": {
     "@electron/notarize": "^2.5.0",
     "electron": "^44.2.0",
