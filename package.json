@@ -1,6 +1,6 @@
 {
   "name": "loupe",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Screen recorder with scroll-to-zoom for demo videos",
   "main": "src/main/main.js",
   "type": "commonjs",
