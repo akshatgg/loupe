@@ -131,13 +131,17 @@ test('music:import rejects bad paths, types, folders and empty files', async () 
   assert.throws(() => validateMusicPath(42));
 });
 
-test('music:choose opens a filtered dialog, imports the pick, and returns null on cancel', async () => {
+test('music:choose opens a filtered dialog, imports every pick, and returns null on cancel', async () => {
   const project = tmpDir('choose');
-  const song = path.join(tmpDir('choose-src'), 'theme.m4a');
+  const src = tmpDir('choose-src');
+  const song = path.join(src, 'theme.m4a');
+  const beep = path.join(src, 'beep.wav');
   fs.writeFileSync(song, 'm4a');
-  const picked = harness({ projectDir: project, openResult: { canceled: false, filePaths: [song] } });
+  fs.writeFileSync(beep, 'wav');
+  const picked = harness({ projectDir: project, openResult: { canceled: false, filePaths: [song, beep] } });
   const res = await picked.invoke('music:choose');
-  assert.deepStrictEqual(res, { file: 'music/theme.m4a', name: 'theme.m4a' });
+  assert.deepStrictEqual(res, [{ file: 'music/theme.m4a', name: 'theme.m4a' }, { file: 'music/beep.wav', name: 'beep.wav' }]);
+  assert.ok(picked.dialogCalls[0].properties.includes('multiSelections'));
   const exts = picked.dialogCalls[0].filters[0].extensions;
   assert.ok(exts.includes('mp3') && exts.includes('m4a') && !exts.includes('exe'));
   const cancelled = harness({ projectDir: project, openResult: { canceled: true, filePaths: [] } });
@@ -211,7 +215,7 @@ test('audioFileUrls hands out only existing music and voiceover files inside the
   fs.writeFileSync(path.join(dir, 'secret.webm'), 'x');
   const urls = audioFileUrls(dir, {
     audio: {
-      music: { file: 'music/Song #1.mp3' },
+      clips: [{ file: 'music/Song #1.mp3' }, { file: 'music/Song #1.mp3' }, { file: 'music/Gone.mp3' }],
       voiceover: [
         { id: 'a', file: 'voiceover/Voiceover.webm' },
         { id: 'b', file: '../secret.webm' },
@@ -220,11 +224,14 @@ test('audioFileUrls hands out only existing music and voiceover files inside the
       ]
     }
   });
-  assert.strictEqual(urls.music, pathToFileURL(path.join(dir, 'music', 'Song #1.mp3')).href);
+  assert.deepStrictEqual(urls.music, {
+    'music/Song #1.mp3': pathToFileURL(path.join(dir, 'music', 'Song #1.mp3')).href,
+    'music/Gone.mp3': null
+  });
   assert.match(urls.voiceover.a, /^file:\/\/.*\/voiceover\/Voiceover\.webm$/);
   assert.deepStrictEqual([urls.voiceover.b, urls.voiceover.c, urls.voiceover.d], [null, null, null]);
-  assert.deepStrictEqual(audioFileUrls(dir, { audio: { music: { file: 'voiceover/Voiceover.webm' }, voiceover: [] } }),
-    { music: null, voiceover: {} });
-  assert.deepStrictEqual(audioFileUrls(dir, {}), { music: null, voiceover: {} });
+  assert.deepStrictEqual(audioFileUrls(dir, { audio: { clips: [{ file: 'voiceover/Voiceover.webm' }], voiceover: [] } }),
+    { music: { 'voiceover/Voiceover.webm': null }, voiceover: {} });
+  assert.deepStrictEqual(audioFileUrls(dir, {}), { music: {}, voiceover: {} });
   fs.rmSync(dir, { recursive: true, force: true });
 });

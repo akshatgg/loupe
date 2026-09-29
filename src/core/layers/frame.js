@@ -1,3 +1,5 @@
+import { gradeFrame } from './lut-gl.js';
+
 // Layers 2 and 3: the recording itself. The content area gets its drop
 // shadow here; compose.js then clips to the rounded content area and this
 // layer draws the source frame cropped to the camera's view.
@@ -52,6 +54,25 @@ export function draw(ctx, state) {
   // Camera math is in points; the video is in pixels (2x on a Retina screen).
   const kx = px.w / meta.width;
   const ky = px.h / meta.height;
-  ctx.drawImage(state.frame, rect.x * kx, rect.y * ky, rect.width * kx, rect.height * ky,
+  // The clip's colour (compose.js applyLook): a filter while drawing, and a
+  // tint over it for the warm and cool looks.
+  const look = state.look;
+  // Its LUT (loaded into assets.luts by the player and the exporter): the
+  // frame graded first, then drawn as the frame would be.
+  const lut = look?.lut ? state.assets?.luts?.[look.lut] : null;
+  const image = (lut && gradeFrame(state.frame, lut, look.lutMix ?? 1)) || state.frame;
+  if (look && look.filter !== 'none') {
+    ctx.save();
+    ctx.filter = look.filter;
+  }
+  ctx.drawImage(image, rect.x * kx, rect.y * ky, rect.width * kx, rect.height * ky,
     content.x, content.y, content.w, content.h);
+  if (look && look.filter !== 'none') ctx.restore();
+  if (look?.tint) {
+    ctx.save();
+    ctx.globalCompositeOperation = look.tint.blend;
+    ctx.fillStyle = look.tint.color;
+    ctx.fillRect(content.x, content.y, content.w, content.h);
+    ctx.restore();
+  }
 }

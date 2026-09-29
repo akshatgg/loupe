@@ -416,6 +416,86 @@ $('retry').addEventListener('click', refresh);
 $('failedSettings').addEventListener('click', () => window.loupe.app.openSettings('general'));
 for (const b of [$('newRecording'), $('emptyNew')]) b.addEventListener('click', () => api.newRecording());
 
+// ---- importing a video ------------------------------------------------------
+
+const VIDEO_FILE = /\.(mp4|mov|m4v)$/i;
+let importing = false;
+
+// `start()` is api.chooseVideo() or api.importVideo(file); main checks the
+// file, copies it into the recordings folder and opens it in the editor.
+async function importVideo(start) {
+  if (importing) {
+    toast('A video is already being imported.');
+    return;
+  }
+  importing = true;
+  for (const b of [$('importVideo'), $('emptyImport')]) b.disabled = true;
+  let shown = false;
+  const stopProgress = api.onImportProgress((fraction) => {
+    // An instant copy never shows a figure; a long one does.
+    if (fraction < 1) {
+      shown = true;
+      toast(`Importing video… ${Math.round(fraction * 100)}%`, { stay: true });
+    }
+  });
+  try {
+    const result = await start();
+    if (!result) return;
+    const { recording, opened, blocked } = result;
+    selectedId = recording.id;
+    await refresh();
+    const sound = recording.soundLeftOut ? ' Its sound is in a format Loupe can’t play, so it was left out.' : '';
+    if (!opened) toast(`Imported “${recording.title}”. ${blocked}${sound}`, { error: Boolean(sound) });
+    else if (sound) toast(`Imported.${sound}`, { error: true });
+    else if (shown) toast('Imported');
+  } catch (err) {
+    toast(plain(err), { error: true });
+  } finally {
+    stopProgress();
+    importing = false;
+    for (const b of [$('importVideo'), $('emptyImport')]) b.disabled = false;
+  }
+}
+
+for (const b of [$('importVideo'), $('emptyImport')]) {
+  b.addEventListener('click', () => importVideo(() => api.chooseVideo()));
+}
+
+// Dropping a file anywhere on the window imports it. Only file drags show
+// the drop zone; dragleave fires for every child left, so it is counted.
+const draggingFiles = (e) => [...(e.dataTransfer?.types ?? [])].includes('Files');
+let dragDepth = 0;
+document.addEventListener('dragenter', (e) => {
+  if (!draggingFiles(e)) return;
+  e.preventDefault();
+  dragDepth++;
+  $('dropZone').hidden = false;
+});
+document.addEventListener('dragover', (e) => {
+  if (!draggingFiles(e)) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'copy';
+});
+document.addEventListener('dragleave', (e) => {
+  if (!draggingFiles(e)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) $('dropZone').hidden = true;
+});
+document.addEventListener('drop', (e) => {
+  if (!draggingFiles(e)) return;
+  e.preventDefault();
+  dragDepth = 0;
+  $('dropZone').hidden = true;
+  const files = [...e.dataTransfer.files];
+  const file = files.find((f) => VIDEO_FILE.test(f.name));
+  if (!file) {
+    toast('Loupe can open MP4 and MOV videos.', { error: true });
+    return;
+  }
+  if (files.length > 1) toast('One video at a time: importing the first one.');
+  importVideo(() => api.importVideo(file));
+});
+
 api.onChanged(refresh);
 window.addEventListener('focus', refresh);
 refresh();

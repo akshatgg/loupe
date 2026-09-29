@@ -21,6 +21,7 @@
         <option value="name">Name</option>
         <option value="longest">Longest first</option>
       </select>
+      <button class="btn" id="importVideo" type="button" title="Open an MP4 or MOV video to edit">Import video</button>
       <button class="btn primary" id="newRecording" type="button">
         <span class="recdot" aria-hidden="true"></span>New recording
       </button>
@@ -33,10 +34,13 @@
     <section id="empty" class="empty" hidden>
       <img src="../shared/icon.png" alt="" width="88" height="88">
       <h2>No recordings yet</h2>
-      <p>Record your screen and it will show up here, ready to edit and share.</p>
-      <button class="btn primary" id="emptyNew" type="button">
-        <span class="recdot" aria-hidden="true"></span>New recording
-      </button>
+      <p>Record your screen, or import a video you already have. It will show up here, ready to edit and share.</p>
+      <div class="actions">
+        <button class="btn" id="emptyImport" type="button">Import video</button>
+        <button class="btn primary" id="emptyNew" type="button">
+          <span class="recdot" aria-hidden="true"></span>New recording
+        </button>
+      </div>
     </section>
 
     <section id="noMatch" class="empty small" hidden>
@@ -61,6 +65,10 @@
     <button type="button" role="menuitem" data-action="reveal" id="revealItem">Show in Finder</button>
     <hr>
     <button type="button" role="menuitem" data-action="trash" class="danger" id="trashItem">Move to Trash</button>
+  </div>
+
+  <div id="dropZone" class="drop-zone" hidden>
+    <p>Drop the video to import it</p>
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>

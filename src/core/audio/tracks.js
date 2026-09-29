@@ -19,7 +19,8 @@ import { mixTracks, MIX_RATE } from './mix.js';
 const KINDS = ['mic', 'system'];
 
 export function recordingTracks(project, tl, decoded = {}) {
-  const plan = tl.audioPlan();
+  // A clip whose sound was detached is silent here; its audio clip plays it.
+  const plan = tl.audioPlan().filter((s) => !s.detached);
   const tracks = [];
   for (const kind of KINDS) {
     const settings = project.audio?.[kind] ?? {};

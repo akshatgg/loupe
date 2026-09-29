@@ -13,6 +13,8 @@ export function commandFor(e, platform) {
   // habits on a Mac, the Windows key on Windows).
   const otherMod = mac ? e.ctrlKey : e.metaKey;
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  // ⌥X clears the In and Out marks. (On a Mac ⌥X types "≈": the key is read.)
+  if (e.altKey && !mod && !otherMod && !e.shiftKey && (e.code === 'KeyX' || key === 'x')) return 'clearMarks';
   if (otherMod || e.altKey) return null;
 
   if (mod) {
@@ -32,6 +34,14 @@ export function commandFor(e, platform) {
     case 'Home': return 'toStart';
     case 'End': return 'toEnd';
     case 's': return e.shiftKey ? null : 'split';
+    case 'x': return e.shiftKey ? null : 'cut';
+    case 'i': return e.shiftKey ? null : 'markIn';
+    case 'o': return e.shiftKey ? null : 'markOut';
+    case 'j': return e.shiftKey ? null : 'shuttleBack';
+    case 'k': return e.shiftKey ? null : 'shuttleStop';
+    case 'l': return e.shiftKey ? null : 'shuttleForward';
+    case 'm': return e.shiftKey ? 'nextMarker' : 'addMarker';
+    case 'f': return e.shiftKey ? 'freezeFrame' : null;
     case 'z': return e.shiftKey ? null : 'addZoom';
     case 'Delete':
     case 'Backspace': return 'delete';
@@ -52,10 +62,17 @@ export function cheatSheet(platform) {
       { keys: ['Space'], what: 'Play or pause' },
       { keys: ['←', '→'], what: 'Step one frame' },
       { keys: [plus(mac ? '⇧' : 'Shift', '←'), plus(mac ? '⇧' : 'Shift', '→')], what: 'Jump one second' },
-      { keys: ['Home', 'End'], what: 'Go to the start or end' }
+      { keys: ['Home', 'End'], what: 'Go to the start or end' },
+      { keys: ['J', 'K', 'L'], what: 'Play backward, stop, play forward (press J or L again to go faster)' }
     ] },
     { group: 'Editing', items: [
       { keys: ['S'], what: 'Split the clip at the playhead' },
+      { keys: ['X'], what: 'Cut by typing times' },
+      { keys: ['I', 'O'], what: 'Mark the In and Out of a part, then Delete removes it' },
+      { keys: [mac ? '⌥X' : 'Alt+X'], what: 'Clear the In and Out marks' },
+      { keys: ['M'], what: 'Add a marker at the playhead' },
+      { keys: [plus(mac ? '⇧' : 'Shift', 'F')], what: 'Freeze the frame at the playhead for 2 seconds' },
+      { keys: [plus(mac ? '⇧' : 'Shift', 'M')], what: 'Go to the next marker' },
       { keys: ['Z'], what: 'Add a zoom at the playhead' },
       { keys: [mac ? '⌫' : 'Delete'], what: 'Delete what’s selected' },
       { keys: [plus(mod, 'Z')], what: 'Undo' },

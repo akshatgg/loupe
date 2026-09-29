@@ -52,6 +52,10 @@
 .rec-empty { text-align: center; padding: 24px 12px 8px; color: var(--ink-3); }
 .rec-empty p { margin: 12px auto 0; max-width: 300px; line-height: 1.5; }
 .rec-note { min-height: 18px; margin: 10px 0 0; color: var(--ink-2); }
+.rec-file {
+  display: flex; align-items: center; gap: 10px; margin-top: 12px; padding-top: 12px;
+  border-top: 1px solid var(--line-2);
+}
 
 /* ---- first-run card */
 .first-run {

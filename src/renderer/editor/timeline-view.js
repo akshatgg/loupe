@@ -16,9 +16,12 @@
 import * as P from '../../core/project.js';
 import { h, icon } from './ui.js';
 import { createAudioLane } from './timeline-audio.js';
+import { createMusicLanes } from './timeline-music.js';
+import { buildTimeline } from '../../core/timeline.js';
+import { createOverlayLanes } from './timeline-overlays.js';
 import {
   clipLayout, zoomPieces, speedPieces, sourceInClip, clipIndexAt, newZoomRange, movedZoom,
-  resizedZoom, snap, snapPoints, insertionIndex, tickStep, formatTime, clamp, stripTiles, thumbStep
+  resizedZoom, snap, snapPoints, insertionIndex, tickStep, formatTime, clamp, stripTiles, thumbStep, outputAtSource, outputInClip
 } from './timeline-math.js';
 import { createVisualTracks } from './timeline-visuals.js';
 import { createCaptionsTrack } from './captions-track.js';
@@ -31,6 +34,12 @@ export const SPEEDS = [0.25, 0.5, 1, 1.5, 2, 3, 4, 8];
 
 // `thumbnails` (thumbnails.js, optional): pictures along the clips.
 export function createTimeline({ root, store, player, editor, thumbnails = null }) {
+  // Where drags snap: clip edges, zooms and the playhead (timeline-math.js),
+  // and the beats of songs showing beat marks (timeline-music.js; only
+  // called once a drag begins, after it exists).
+  const snapsWithBeats = (p, layout, opts) => [
+    ...snapPoints(p, layout, opts), ...(musicLanes?.beatTimes() ?? []), ...(p.markers ?? []).map((m) => m.t)
+  ];
   const ruler = h('canvas', { class: 'tl-ruler' });
   const clipsTrack = h('div', { class: 'tl-track tl-clips', 'aria-label': 'Clips' });
   const zoomTrack = h('div', { class: 'tl-track tl-zooms', 'aria-label': 'Zooms' });
@@ -39,7 +48,7 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     store, player, editor,
     helpers: {
       x: (t) => x(t), pps: () => pps, timeAt: (cx, o) => timeAt(cx, o), beginDrag: (e, hs) => beginDrag(e, hs),
-      snapPoints: () => snapPoints(store.project, clipLayout(store.project, store.tl), { playhead: player.time }),
+      snapPoints: () => snapsWithBeats(store.project, clipLayout(store.project, store.tl), { playhead: player.time }),
       snap: (v, points) => snap(v, points, SNAP_PX / pps), snapped: (v, points) => snapped(v, points),
       showGuide: (v) => showGuide(v), rootEl: root
     }
@@ -49,22 +58,52 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     x: (t) => x(t), timeAt: (cx, o) => timeAt(cx, o), get pps() { return pps; },
     beginDrag: (e, handlers) => beginDrag(e, handlers), snapped: (t, pts) => snapped(t, pts),
     snap: (t, pts) => snap(t, pts, SNAP_PX / pps),
-    snapPoints: () => snapPoints(store.project, clipLayout(store.project, store.tl), { playhead: player.time })
+    snapPoints: () => snapsWithBeats(store.project, clipLayout(store.project, store.tl), { playhead: player.time })
   } });
   const playhead = h('div', { class: 'tl-playhead' }, h('div', { class: 'tl-knob' }));
+  // In/Out marks (I, O): the part between them shaded over every track.
+  let marks = { in: null, out: null };
+  const marksShade = h('div', { class: 'tl-marks', hidden: true, 'aria-hidden': 'true' });
+  const inFlag = h('div', { class: 'tl-mark in', hidden: true, title: 'In (I)' });
+  const outFlag = h('div', { class: 'tl-mark out', hidden: true, title: 'Out (O)' });
+  // Markers (M): flags on the ruler.
+  const markersLayer = h('div', { class: 'tl-markers' });
   const guide = h('div', { class: 'tl-guide', hidden: true });
   const insert = h('div', { class: 'tl-insert', hidden: true });
-  // The sound strip under the clips (timeline-audio.js) draws itself.
+  // The sound strip under the clips (timeline-audio.js) draws itself, from
+  // the same timeline the clips show (the frozen one during a trim).
   const audioLane = createAudioLane({
     store, player, editor,
-    view: { x: (t) => x(t), get pps() { return pps; }, get scroller() { return scroller; } }
+    view: { x: (t) => x(t), get pps() { return pps; }, get scroller() { return scroller; }, shown: () => view() }
   });
-  const content = h('div', { class: 'tl-content' }, ruler, clipsTrack, audioLane.track, zoomTrack, speedTrack, visuals.track, captions.track, visuals.joins, guide, insert, playhead);
+  // Songs and sound files, one row each where they overlap (timeline-music.js).
+  const musicLanes = createMusicLanes({
+    store, player, editor,
+    view: {
+      x: (t) => x(t), get pps() { return pps; }, timeAt: (cx, o) => timeAt(cx, o), shown: () => view(),
+      beginDrag: (e, handlers) => beginDrag(e, handlers),
+      snapPoints: () => snapsWithBeats(store.project, clipLayout(store.project, store.tl), { playhead: player.time }),
+      snap: (t, pts) => snap(t, pts, SNAP_PX / pps), snapped: (t, pts) => snapped(t, pts), showGuide: (t) => showGuide(t)
+    }
+  });
+  // Pictures and videos over the video, on rows above the clips (timeline-overlays.js).
+  const overlayLanes = createOverlayLanes({
+    store, editor,
+    view: {
+      x: (t) => x(t), get pps() { return pps; }, shown: () => view(),
+      beginDrag: (e, handlers) => beginDrag(e, handlers),
+      snapPoints: () => snapsWithBeats(store.project, clipLayout(store.project, store.tl), { playhead: player.time }),
+      snap: (t, pts) => snap(t, pts, SNAP_PX / pps), snapped: (t, pts) => snapped(t, pts), showGuide: (t) => showGuide(t)
+    }
+  });
+  const content = h('div', { class: 'tl-content' }, ruler, overlayLanes.track, clipsTrack, audioLane.track, musicLanes.track, zoomTrack, speedTrack, visuals.track, captions.track, visuals.joins, guide, insert, marksShade, inFlag, outFlag, markersLayer, playhead);
   const scroller = h('div', { class: 'tl-scroll' }, content);
   const labels = h('div', { class: 'tl-labels' },
     h('div', { class: 'tl-label lbl-ruler' }),
+    overlayLanes.label,
     h('div', { class: 'tl-label lbl-clips' }, icon('clips', { size: 15 }), 'Clips'),
     audioLane.label,
+    musicLanes.label,
     h('div', { class: 'tl-label lbl-zooms' }, icon('zoom', { size: 15 }), 'Zoom'),
     h('div', { class: 'tl-label lbl-speed' }, icon('speed', { size: 15 }), 'Speed'),
     visuals.label,
@@ -76,8 +115,20 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
   let fitted = true;
   let drag = null;
   let speedPick = null; // { source, start, end, clipIndex, outStart, outEnd } awaiting a speed
+  // While a clip's edge is dragged the timeline stays laid out as it was when
+  // the drag began, the part being cut shown dimmed under its pictures
+  // (renderTrim), instead of closing up under the pointer at every move:
+  // { project, tl, clipIndex, edge, at } -- `at` is where the edge is now, in
+  // that timeline's time. The edit itself is live (preview, undo, save).
+  let frozen = null;
+  // Dragging an edge outward (bringing back footage trimmed earlier) is shown
+  // live instead: the clip grows -- the rest of the timeline moving along,
+  // as an editor's ripple trim does -- and the part coming back is drawn
+  // with its pictures, highlighted (`frozen.restoring`).
+  const view = () => (frozen && !frozen.restoring ? frozen : { project: store.project, tl: store.tl });
+  const playheadTime = () => (frozen ? frozen.at : player.time);
 
-  const duration = () => store.tl.duration;
+  const duration = () => view().tl.duration;
   const x = (t) => PAD + t * pps;
   const fitPps = () => Math.max(1, (scroller.clientWidth - 2 * PAD) / Math.max(0.5, duration()));
   const timeAt = (clientX, { clampToVideo = true } = {}) => {
@@ -113,8 +164,10 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     const many = layout.length > 1;
     clipsTrack.replaceChildren(...layout.map((l, i) => {
       const len = l.outEnd - l.outStart;
+      const held = l.clip.hold > 0;
       const el = h('div', {
-        class: `clip${sel?.kind === 'clip' && sel.id === l.clip.id ? ' selected' : ''}${p.clips.length > 1 && l.clip.source !== 'main' ? ' other-source' : ''}`,
+        class: `clip${sel?.kind === 'clip' && sel.id === l.clip.id ? ' selected' : ''}${p.clips.length > 1 && l.clip.source !== 'main' ? ' other-source' : ''}` +
+          `${held ? ' freeze' : ''}${l.clip.reverse ? ' reversed' : ''}`,
         dataset: { index: String(i), id: l.clip.id },
         style: { left: `${x(l.outStart)}px`, width: `${Math.max(2, len * pps)}px` },
         title: 'Drag the edges to trim, or drag the clip to move it'
@@ -122,7 +175,9 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
       thumbnails ? h('div', { class: 'clip-strip', 'aria-hidden': 'true' }) : null,
       h('div', { class: 'handle start', dataset: { edge: 'start' } }),
       h('div', { class: 'clip-label' },
-        many ? h('span', { class: 'clip-name' }, `Clip ${i + 1}`) : null,
+        held ? h('span', { class: 'clip-name' }, 'Freeze frame')
+          : l.clip.reverse ? h('span', { class: 'clip-name' }, '◀◀ Backwards')
+            : many ? h('span', { class: 'clip-name' }, `Clip ${i + 1}`) : null,
         h('span', { class: 'clip-dur' }, formatTime(len, { fraction: true }))),
       h('div', { class: 'handle end', dataset: { edge: 'end' } }));
       return el;
@@ -163,19 +218,60 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     if (speedPick) placeGhost(speedTrack.querySelector('.speed-ghost'), speedPick.outStart, speedPick.outEnd);
   }
 
+  // The trim in progress over the frozen timeline: the part being cut dimmed
+  // (or the part being brought back outlined), a bright line at the new
+  // edge, and the clip's new length on its label.
+  function renderTrim(layout) {
+    if (!frozen) return;
+    if (frozen.restoring) {
+      // Live layout: the footage coming back runs from the clip's new edge
+      // to where its old edge now is.
+      const L = layout[frozen.clipIndex];
+      const [a, b] = frozen.edge === 'start' ? [L.outStart, frozen.oldEdge] : [frozen.oldEdge, L.outEnd];
+      if (b - a > 1e-6) {
+        clipsTrack.append(h('div', {
+          class: 'trim-shade add restored', 'aria-hidden': 'true', title: 'Coming back',
+          style: { left: `${x(a)}px`, width: `${(b - a) * pps}px` }
+        }));
+      }
+      clipsTrack.append(h('div', { class: 'trim-edge', 'aria-hidden': 'true', style: { left: `${x(frozen.at)}px` } }));
+      return;
+    }
+    const L = layout[frozen.clipIndex];
+    const was = frozen.edge === 'start' ? L.outStart : L.outEnd;
+    const a = Math.min(was, frozen.at);
+    const b = Math.max(was, frozen.at);
+    const cutting = frozen.edge === 'start' ? frozen.at > was : frozen.at < was;
+    if (b - a > 1e-6) {
+      clipsTrack.append(h('div', {
+        class: `trim-shade ${cutting ? 'cut' : 'add'}`, 'aria-hidden': 'true',
+        style: { left: `${x(a)}px`, width: `${(b - a) * pps}px` }
+      }));
+    }
+    clipsTrack.append(h('div', { class: 'trim-edge', 'aria-hidden': 'true', style: { left: `${x(frozen.at)}px` } }));
+    const live = store.tl.clipBounds()[frozen.clipIndex];
+    const label = clipsTrack.querySelector(`.clip[data-index="${frozen.clipIndex}"] .clip-dur`);
+    if (live && label) label.textContent = formatTime(live.outEnd - live.outStart, { fraction: true });
+  }
+
   function render() {
-    const p = store.project;
-    const layout = clipLayout(p, store.tl);
+    const { project: p, tl } = view();
+    const layout = clipLayout(p, tl);
     // Fitted, the scale follows the video's length -- but not mid-drag, where
     // the pointer would then mean a different moment on every move.
     if (fitted && !drag) pps = Math.min(MAX_PPS, fitPps());
     content.style.width = `${Math.max(scroller.clientWidth, x(duration()) + PAD)}px`;
     renderClips(p, layout);
+    renderTrim(layout);
     renderZooms(p, layout);
     renderSpeed(p, layout);
+    musicLanes.render();
+    overlayLanes.render();
+    renderMarks();
+    renderMarkers(p);
     visuals.render(p, layout, clipsTrack);
     captions.render(p, layout);
-    movePlayhead(player.time);
+    movePlayhead(playheadTime());
     drawRuler();
     drawStrips();
   }
@@ -184,8 +280,8 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
   // a screen either side, so scrolling finds them ready).
   function drawStrips() {
     if (!thumbnails) return;
-    const p = store.project;
-    const layout = clipLayout(p, store.tl);
+    const { project: p, tl } = view();
+    const layout = clipLayout(p, tl);
     const w = scroller.clientWidth;
     const viewStart = scroller.scrollLeft - w;
     const viewEnd = scroller.scrollLeft + 2 * w;
@@ -245,6 +341,30 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     audioLane.draw();
   }
 
+  function renderMarks() {
+    const on = (t) => t !== null && t !== undefined;
+    inFlag.hidden = !on(marks.in);
+    outFlag.hidden = !on(marks.out);
+    if (on(marks.in)) inFlag.style.left = `${x(marks.in)}px`;
+    if (on(marks.out)) outFlag.style.left = `${x(marks.out)}px`;
+    const both = on(marks.in) && on(marks.out);
+    marksShade.hidden = !both;
+    if (both) {
+      marksShade.style.left = `${x(marks.in)}px`;
+      marksShade.style.width = `${Math.max(1, (marks.out - marks.in) * pps)}px`;
+    }
+  }
+
+  function renderMarkers(p) {
+    const sel = store.selection;
+    // The name beside the flag, not in it: the flag's shape would clip it.
+    markersLayer.replaceChildren(...(p.markers ?? []).flatMap((m) => [h('div', {
+      class: `marker-flag ${m.color}${sel?.kind === 'marker' && sel.id === m.id ? ' selected' : ''}`,
+      dataset: { id: m.id }, style: { left: `${x(m.t)}px` },
+      title: `${m.label || 'Marker'} · ${formatTime(m.t, { fraction: true })}\nClick to go there, drag to move, double-click to name it`
+    }), m.label ? h('span', { class: 'marker-label', style: { left: `${x(m.t) + 8}px` } }, m.label) : null].filter(Boolean)));
+  }
+
   function movePlayhead(t) {
     playhead.style.transform = `translateX(${x(t)}px)`;
   }
@@ -274,10 +394,16 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     e.preventDefault();
     closeMenu();
     const startX = e.clientX;
+    const startY = e.clientY;
     drag = {
       moved: false,
+      // The last event with the button down: where a drag whose release
+      // went missing ends.
+      last: e,
       move(ev) {
-        if (!this.moved && Math.abs(ev.clientX - startX) < DRAG_PX) return;
+        this.last = ev;
+        // Any direction: an audio clip dragged straight down to another row moves.
+        if (!this.moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < DRAG_PX) return;
         this.moved = true;
         handlers.move?.(ev);
       },
@@ -300,6 +426,30 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     beginDrag(e, { start: seek, move: seek, click: seek, end: () => { if (wasPlaying) player.play(); } });
   }
 
+  // A marker: click to go there, drag to move it, double-click to name it.
+  let lastMarkerPress = null;
+  function markerDrag(e, id) {
+    const p0 = store.project;
+    const m0 = p0.markers.find((m) => m.id === id);
+    editor.select({ kind: 'marker', id });
+    const now = performance.now();
+    if (lastMarkerPress?.id === id && now - lastMarkerPress.at < 450) {
+      lastMarkerPress = null;
+      e.preventDefault();
+      editor.editMarker?.(id);
+      return;
+    }
+    lastMarkerPress = { id, at: now };
+    const points = snapsWithBeats(p0, clipLayout(p0, store.tl), { playhead: player.time }).filter((t) => Math.abs(t - m0.t) > 1e-6);
+    beginDrag(e, {
+      move(ev) {
+        const t = snapped(timeAt(ev.clientX), points);
+        store.apply(() => P.updateMarker(p0, id, { t }), { gesture: `marker:${id}` });
+      },
+      click: () => player.seek(m0.t)
+    });
+  }
+
   function clipDrag(e, el) {
     const i = Number(el.dataset.index);
     const p0 = store.project;
@@ -308,23 +458,77 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     const clip = L.clip;
     const edge = e.target.dataset?.edge;
     editor.select({ kind: 'clip', id: clip.id });
-    if (edge) {
-      const rest = snapPoints(p0, layout0, { playhead: player.time }).filter((t) => Math.abs(t - (edge === 'start' ? L.outStart : L.outEnd)) > 1e-6);
+    // A freeze frame's edges set how long it holds.
+    if (edge && clip.hold > 0) {
       beginDrag(e, {
         move(ev) {
-          const o = snapped(timeAt(ev.clientX, { clampToVideo: false }), rest);
-          let t;
+          const o = timeAt(ev.clientX, { clampToVideo: false });
+          const len = edge === 'end' ? o - L.outStart : L.outEnd - o;
+          store.apply(() => P.setHold(p0, clip.id, clamp(len, 0.1, 3600)), { gesture: `hold:${clip.id}` });
+        },
+        click: (ev) => player.seek(timeAt(ev.clientX))
+      });
+      return;
+    }
+    // A reversed clip plays from its end: its left edge trims the recording's
+    // end and its right edge the start, applied live.
+    if (edge && clip.reverse) {
+      beginDrag(e, {
+        move(ev) {
+          const o = timeAt(ev.clientX, { clampToVideo: false });
           if (edge === 'start') {
-            t = o >= L.outStart ? sourceInClip(p0, layout0, i, o) : clip.start - (L.outStart - o);
-            const next = store.apply(() => P.trimStart(p0, clip.id, t), { gesture: `trim:${clip.id}:start` });
-            if (next) player.seek(L.outStart);
+            const t = o >= L.outStart ? sourceInClip(p0, layout0, i, o) : clip.end + (L.outStart - o);
+            store.apply(() => P.trimEnd(p0, clip.id, t), { gesture: `trim:${clip.id}:start` });
           } else {
-            t = o <= L.outEnd ? sourceInClip(p0, layout0, i, o) : clip.end + (o - L.outEnd);
-            const next = store.apply(() => P.trimEnd(p0, clip.id, t), { gesture: `trim:${clip.id}:end` });
-            if (next) player.seek(clipLayout(next, store.tl)[i].outEnd - 1e-3);
+            const t = o <= L.outEnd ? sourceInClip(p0, layout0, i, o) : clip.start - (o - L.outEnd);
+            store.apply(() => P.trimStart(p0, clip.id, t), { gesture: `trim:${clip.id}:end` });
           }
         },
         click: (ev) => player.seek(timeAt(ev.clientX))
+      });
+      return;
+    }
+    if (edge) {
+      const rest = snapsWithBeats(p0, layout0, { playhead: player.time }).filter((t) => Math.abs(t - (edge === 'start' ? L.outStart : L.outEnd)) > 1e-6);
+      const tl0 = store.tl;
+      const unfreeze = () => { frozen = null; };
+      beginDrag(e, {
+        start() {
+          frozen = { project: p0, tl: tl0, clipIndex: i, edge, at: edge === 'start' ? L.outStart : L.outEnd };
+        },
+        move(ev) {
+          const o = snapped(timeAt(ev.clientX, { clampToVideo: false }), rest);
+          const t = edge === 'start'
+            ? (o >= L.outStart ? sourceInClip(p0, layout0, i, o) : clip.start - (L.outStart - o))
+            : (o <= L.outEnd ? sourceInClip(p0, layout0, i, o) : clip.end + (o - L.outEnd));
+          let next;
+          try {
+            next = edge === 'start' ? P.trimStart(p0, clip.id, t) : P.trimEnd(p0, clip.id, t);
+          } catch {
+            return; // too short to trim: the edge stays where it was
+          }
+          const c = next.clips[i];
+          // Out past where it was: footage coming back, shown live.
+          frozen.restoring = edge === 'start' ? c.start < clip.start - 1e-9 : c.end > clip.end + 1e-9;
+          if (frozen.restoring) {
+            const nextLayout = clipLayout(next, buildTimeline(next));
+            const n = nextLayout[i];
+            frozen.at = edge === 'start' ? n.outStart : n.outEnd;
+            // Where the old edge sits now, the far side of what came back.
+            frozen.oldEdge = outputInClip(next, nextLayout, i, edge === 'start' ? clip.start : clip.end);
+          } else {
+            // Where the edge really went (the core clamps to the recording
+            // and to the shortest clip), on the timeline as it was.
+            frozen.at = outputAtSource(p0, layout0, i, edge === 'start' ? c.start : c.end);
+          }
+          store.apply(() => next, { gesture: `trim:${clip.id}:${edge}` });
+          // The preview shows the frame at the edge being dragged.
+          const now = store.tl.clipBounds()[i];
+          player.seek(edge === 'start' ? now.outStart : now.outEnd - 1e-3);
+          movePlayhead(frozen.at);
+        },
+        end: unfreeze,
+        click: (ev) => { unfreeze(); player.seek(timeAt(ev.clientX)); }
       });
       return;
     }
@@ -355,7 +559,7 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
   function zoomCreate(e) {
     const p0 = store.project;
     const layout0 = clipLayout(p0, store.tl);
-    const points = snapPoints(p0, layout0, { playhead: player.time });
+    const points = snapsWithBeats(p0, layout0, { playhead: player.time });
     const a = snapped(timeAt(e.clientX), points);
     let b = a;
     const ghost = zoomTrack.querySelector('.zoom-ghost');
@@ -385,7 +589,7 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     const ci = Number(el.dataset.clip);
     const piece = zoomPieces(p0, layout0).find((pc) => pc.zoom.id === z0.id && pc.clipIndex === ci);
     const edge = e.target.dataset?.edge;
-    const points = snapPoints(p0, layout0, { playhead: player.time, exceptZoom: z0.id });
+    const points = snapsWithBeats(p0, layout0, { playhead: player.time, exceptZoom: z0.id });
     const o0 = timeAt(e.clientX, { clampToVideo: false });
     editor.select({ kind: 'zoom', id: z0.id });
     const L = layout0[ci];
@@ -496,6 +700,10 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     if (e.button !== 0) return;
     if (visuals.pointerdown(e)) return;
     visuals.closeMenu();
+    if (musicLanes.pointerdown(e)) return;
+    if (overlayLanes.pointerdown(e)) return;
+    const flag = e.target.closest('.marker-flag');
+    if (flag) { markerDrag(e, flag.dataset.id); return; }
     const clip = e.target.closest('.clip');
     const zoom = e.target.closest('.zoom');
     const speed = e.target.closest('.speed');
@@ -507,15 +715,29 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     else if (e.target.closest('.caption')) captions.pointerdown(e);
     else scrub(e);
   });
-  content.addEventListener('pointermove', (e) => drag?.move(e));
   const finish = (e) => {
     const d = drag;
     drag = null;
     d?.end(e);
+    frozen = null;
     if (d) render();
   };
+  // Only a held button drags. A release this page never heard about (let go
+  // outside the window, or while something else had the mouse) would
+  // otherwise leave the drag running, and the playhead or a clip edge would
+  // follow the mouse as it merely passes over the timeline: the drag ends
+  // where the button was last down instead.
+  content.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    if ((e.buttons & 1) === 0) finish(drag.last);
+    else drag.move(e);
+  });
   content.addEventListener('pointerup', finish);
   content.addEventListener('pointercancel', finish);
+  // (Losing pointer capture doesn't end a drag: Chromium drops it when
+  // another window takes the focus, with the button still held. The moves
+  // still arrive here; a release that went missing shows as a move with no
+  // button, above.)
   content.addEventListener('dblclick', (e) => {
     if (visuals.dblclick(e)) return;
     const zoom = e.target.closest('.zoom');
@@ -541,6 +763,8 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
 
   store.subscribe(() => render());
   player.onTime((t, playing) => {
+    // Mid-trim the playhead sits on the dragged edge, on the frozen timeline.
+    if (frozen) return;
     movePlayhead(t);
     const px = x(t) - scroller.scrollLeft;
     if (playing) {
@@ -563,6 +787,18 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     visuals,
     redrawPictures: drawStripsSoon,
     get pxPerSecond() { return pps; },
+    // In/Out marks: { in, out } in output seconds (null when not set).
+    get marks() { return { ...marks }; },
+    setMark(which, t) {
+      marks = { ...marks, [which]: t };
+      // An Out before the In (or the other way) starts again from this one.
+      if (marks.in !== null && marks.out !== null && marks.out <= marks.in) marks = { in: which === 'in' ? t : null, out: which === 'out' ? t : null };
+      renderMarks();
+    },
+    clearMarks() {
+      marks = { in: null, out: null };
+      renderMarks();
+    },
     // For tests: the pixel x (in client coordinates) of output time t.
     clientX: (t) => content.getBoundingClientRect().left + x(t),
     render

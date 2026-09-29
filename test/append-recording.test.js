@@ -94,3 +94,36 @@ test('refuses the open recording, unknown ids, a missing video, and no editor', 
   assert.deepStrictEqual(Object.keys(store.sources(here)), ['main'], 'nothing was added');
   fs.rmSync(base, { recursive: true, force: true });
 });
+
+test('a video file chosen in the editor joins the Library and plays after this recording', async () => {
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'loupe-append-')));
+  const root = path.join(base, 'Loupe');
+  const handlers = {};
+  const library = createLibrary({ root: () => root, locale: 'en-GB' });
+  const store = createProjectStore({ delayMs: 5 });
+  let open = null;
+  let chosen = path.join(__dirname, 'fixtures', 'videos', 'opus-sound.mp4');
+  registerAppendRecordingIpc({
+    ipcMain: { handle: (name, fn) => { handlers[name] = fn; } }, library: () => library, store,
+    projectDir: () => open,
+    dialog: { showOpenDialog: async () => (chosen ? { canceled: false, filePaths: [chosen] } : { canceled: true }) },
+    BrowserWindow: { fromWebContents: () => null }
+  });
+  await assert.rejects(async () => handlers['project:importVideo']({}), /no recording open/);
+  const here = recording(root, '1789000000000');
+  open = here;
+  store.load(here);
+
+  const added = await handlers['project:importVideo']({});
+  assert.strictEqual(added.key, 'src2');
+  assert.strictEqual(added.meta.kind, 'file');
+  assert.strictEqual(added.meta.mic, false);
+  assert.strictEqual(added.soundLeftOut, true);
+  assert.strictEqual(path.basename(fileURLToPath(added.files.video)), 'video.mp4');
+  assert.deepStrictEqual(added.zooms, []);
+  assert.strictEqual(library.list().length, 2, 'the video is in the Library too');
+
+  chosen = null;
+  assert.strictEqual(await handlers['project:importVideo']({}), null);
+  fs.rmSync(base, { recursive: true, force: true });
+});

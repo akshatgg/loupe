@@ -116,3 +116,58 @@ test('a zoom reaching over a cut shows only the time that still plays', () => {
   const pieces = M.rangePieces(p, layoutOf(p), 'main', 3, 12);
   near(M.shownLength(pieces), 4, 1e-6); // 3-5 and 10-12
 });
+
+test('a trim edge dragged past the clip still has a place on the timeline as it was', () => {
+  let p = P.cutRange(project(), 5, 10); // clips 0-5, 10-20
+  const L = layoutOf(p);
+  // Inside the clip, as outputInClip.
+  near(M.outputAtSource(p, L, 1, 12), 7);
+  // Past its start (the part trimmed away earlier) and end: not clamped.
+  near(M.outputAtSource(p, L, 1, 8), 3);
+  near(M.outputAtSource(p, L, 0, 7), 7);
+  // With a speed change it follows the same (eased) mapping as inside a clip.
+  p = P.paintSpeed(project(), { start: 0, end: 20, rate: 2 });
+  near(M.outputAtSource(p, layoutOf(p), 0, 10), M.outputInClip(p, layoutOf(p), 0, 10));
+});
+
+test('typed times: seconds, m:ss, h:mm:ss, with fractions', () => {
+  assert.strictEqual(M.parseTime('90'), 90);
+  assert.strictEqual(M.parseTime('1:30'), 90);
+  assert.strictEqual(M.parseTime(' 0:01 '), 1);
+  assert.strictEqual(M.parseTime('1:30.5'), 90.5);
+  assert.strictEqual(M.parseTime('0:01:30'), 90);
+  assert.strictEqual(M.parseTime('1:02:03.25'), 3723.25);
+  assert.strictEqual(M.parseTime('2.5'), 2.5);
+  assert.strictEqual(M.parseTime('1,5'), 1.5);
+  for (const bad of ['', 'abc', '1:', ':30', '1:60', '1:2:3:4', '-3', '1:30s', '1::30']) {
+    assert.strictEqual(M.parseTime(bad), null, bad);
+  }
+});
+
+test('cut by times: what to remove, latest first so earlier times stay put', () => {
+  // Keep only 0:01-1:30 of a 3-minute video.
+  assert.deepStrictEqual(M.cutRanges(180, 1, 90, 'keep'), { ranges: [[90, 180], [0, 1]] });
+  // Keep from the very start / to the very end: one cut.
+  assert.deepStrictEqual(M.cutRanges(180, 0, 90, 'keep'), { ranges: [[90, 180]] });
+  assert.deepStrictEqual(M.cutRanges(180, 30, 180, 'keep'), { ranges: [[0, 30]] });
+  // Remove the middle.
+  assert.deepStrictEqual(M.cutRanges(180, 90, 120, 'remove'), { ranges: [[90, 120]] });
+  // Refusals, in words.
+  assert.match(M.cutRanges(180, 90, 90, 'remove').error, /after/);
+  assert.match(M.cutRanges(180, 100, 90, 'remove').error, /after/);
+  assert.match(M.cutRanges(180, 90, 200, 'remove').error, /3:00 long/);
+  assert.match(M.cutRanges(180, 0, 180, 'remove').error, /whole video/);
+  assert.match(M.cutRanges(180, 0, 180, 'keep').error, /already/);
+  assert.match(M.cutRanges(180, null, 10, 'keep').error, /From/);
+  assert.match(M.cutRanges(180, 1, null, 'keep').error, /To/);
+});
+
+test('a selected audio clip stays selected through other edits, and goes when it is deleted', () => {
+  const p = P.addAudioClip(project(), { file: 'music/a.mp3', start: 0, fileDuration: 5 });
+  const store = createStore(p);
+  store.select({ kind: 'audio', id: 'a1' });
+  store.apply((q) => P.setTitle(q, 'Demo'));
+  assert.deepEqual(store.selection, { kind: 'audio', id: 'a1' });
+  store.apply((q) => P.removeAudioClip(q, 'a1'));
+  assert.equal(store.selection, null);
+});

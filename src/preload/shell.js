@@ -1,5 +1,5 @@
 'use strict';
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 // Preload for the Library and Settings windows (src/main/app-shell.js). A
 // separate file from preload.js so these windows get only what they use. The
@@ -35,6 +35,11 @@ contextBridge.exposeInMainWorld('loupe', {
     revealFolder: () => ipcRenderer.invoke('library:revealRoot'),
     trash: (id) => ipcRenderer.invoke('library:trash', id),
     newRecording: () => ipcRenderer.invoke('library:newRecording'),
+    // Import a video file (a dropped File, or one chosen in main's Open
+    // dialog) and open it in the editor: { recording, opened, blocked }.
+    importVideo: (file) => ipcRenderer.invoke('library:importVideo', webUtils.getPathForFile(file)),
+    chooseVideo: () => ipcRenderer.invoke('library:chooseVideo'),
+    onImportProgress: on('library:importProgress'),
     onChanged: on('library:changed')
   },
 

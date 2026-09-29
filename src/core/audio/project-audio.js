@@ -7,7 +7,7 @@
 //   inputs = {
 //     mic:       { [sourceKey]: { channels, sampleRate } },  // inside each recording's video
 //     system:    { [sourceKey]: { channels, sampleRate } },  // system.m4a / system.wav
-//     music:     { channels, sampleRate } | null,            // project.audio.music.file
+//     music:     { [file]: { channels, sampleRate } },       // project.audio.clips[].file
 //     voiceover: { [takeId]: { channels, sampleRate } }      // project.audio.voiceover[].file
 //   }
 //   options = {
@@ -31,14 +31,16 @@
 //   2. Microphone and system audio laid along the timeline (tracks.js: cuts,
 //      reordering, speed with pitch kept).
 //   3. Voiceover takes placed where their recording moment plays (voiceover.js).
-//   4. Music fitted to the video, lowered while anyone talks (music.js, duck.js).
+//   4. Each audio clip at its place, lowered while anyone talks (music.js, duck.js).
 //   5. mixTracks().
 
 import { denoiseWithInfo } from './denoise.js';
 import { level } from './level.js';
 import { recordingTracks } from './tracks.js';
 import { placeVoiceovers } from './voiceover.js';
-import { musicTrack } from './music.js';
+import { audioClipTrack } from './music.js';
+import { clipHeard, anySolo } from './clips.js';
+import { duckingCurve } from './duck.js';
 import { mixTracks, MIX_RATE } from './mix.js';
 
 export function createVoiceCache() {
@@ -116,12 +118,43 @@ export async function renderProjectAudio(project, tl, inputs = {}, {
   }
   onProgress?.(1);
 
-  const recorded = recordingTracks(project, tl, { mic, system: inputs.system ?? {} });
-  const spoken = placeVoiceovers(takes, tl, voiceover);
+  // A soloed audio row plays alone: the video's sound and voiceovers too
+  // are left out while one is on.
+  const solo = anySolo(audio);
+  const recorded = solo ? [] : recordingTracks(project, tl, { mic, system: inputs.system ?? {} });
+  const spoken = solo ? [] : placeVoiceovers(takes, tl, voiceover);
   const tracks = [...recorded, ...spoken];
-  if (audio.music && inputs.music) {
-    const voices = recorded.filter((t) => t.kind === 'mic').concat(spoken);
-    tracks.push(musicTrack(audio.music, inputs.music, tl.duration, { voiceTracks: voices }));
+
+  // A recording's own sound, for its detached clips: the (cleaned up,
+  // levelled) microphone and the computer sound at their volumes, as one.
+  const sourceSound = new Map();
+  const soundOf = (key) => {
+    if (!sourceSound.has(key)) {
+      const parts = [];
+      if (!audio.mic.muted && mic[key]) parts.push({ ...mic[key], volume: audio.mic.volume });
+      if (!audio.system.muted && inputs.system?.[key]) parts.push({ ...inputs.system[key], volume: audio.system.volume });
+      const length = project.sources[key]?.duration ?? 0;
+      sourceSound.set(key, parts.length && length > 0 ? mixTracks(parts, { sampleRate, duration: length }) : null);
+    }
+    return sourceSound.get(key);
+  };
+  const decodedFor = (c) => (c.source ? soundOf(c.source) : inputs.music?.[c.file]);
+
+  // Songs, sound files and detached video sound: each clip that is heard and
+  // decoded (`inputs.music` is { [file]: pcm }; several clips can share one).
+  const heardClips = (audio.clips ?? []).filter((c) => clipHeard(audio, c) &&
+    (c.volume > 0 || c.points?.length) && decodedFor(c));
+  if (heardClips.length) {
+    // Detached sound with a microphone in it is someone talking too.
+    const detachedVoices = heardClips.filter((c) => c.source && project.sources[c.source]?.mic)
+      .map((c) => audioClipTrack({ ...c, duck: false }, decodedFor(c), tl.duration));
+    const voices = recorded.filter((t) => t.kind === 'mic').concat(spoken, detachedVoices.filter(Boolean));
+    const ducking = heardClips.some((c) => c.duck) ? duckingCurve(voices, tl.duration) : null;
+    for (const clip of heardClips) {
+      // Detached sound never ducks under itself.
+      const curve = clip.source ? (clip.duck ? duckingCurve(recorded.filter((t) => t.kind === 'mic').concat(spoken), tl.duration) : null) : ducking;
+      tracks.push(audioClipTrack(clip, decodedFor(clip), tl.duration, { ducking: curve }));
+    }
   }
   const heard = tracks.filter((t) => t && !t.muted && t.volume !== 0);
   if (!heard.length || !(tl.duration > 0)) return { mix: null, pending, cleanUp };

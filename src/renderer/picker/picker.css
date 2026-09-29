@@ -3,7 +3,7 @@ body { font: 13px -apple-system, system-ui; margin: 0; height: 100vh;
        display: flex; flex-direction: column;
        background: #2a2b2e; color: #e8eaed; }
 
-header { padding: 20px 24px 4px; }
+header { padding: 20px 24px 4px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 h1 { font-size: 19px; font-weight: 400; margin: 0; }
 .sub { margin: 6px 0 0; color: #9aa0a6; font-size: 12px; }
 kbd { font: inherit; background: rgba(255,255,255,.12); border-radius: 4px;
@@ -94,6 +94,7 @@ footer { display: flex; align-items: center; gap: 14px; padding: 16px 24px 20px;
          padding: 8px 16px; border-radius: 18px; cursor: pointer;
          background: none; color: #e8eaed; flex: none; }
 .ghost:hover { background: rgba(255,255,255,.08); }
+.ghost:disabled { opacity: .5; cursor: default; background: none; }
 #record { appearance: none; border: 0; font: inherit; font-weight: 500;
           padding: 9px 22px; border-radius: 18px; cursor: pointer;
           background: #8ab4f8; color: #202124; }

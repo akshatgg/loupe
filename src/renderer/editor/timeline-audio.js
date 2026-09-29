@@ -1,7 +1,7 @@
 // The timeline's sound strip, under the clips: each clip's recorded sound
 // (microphone and computer sound) as a waveform where it plays, voiceover
-// takes as blue blocks at their moments, and a purple line along the bottom
-// while there is music. Drag a take to move it; click one to jump to it.
+// takes as blue blocks at their moments. Drag a take to move it; click one to
+// jump to it. Songs and sound files have their own rows (timeline-music.js).
 //
 //   createAudioLane({ store, player, editor, view }) -> { label, track, draw() }
 //
@@ -45,8 +45,7 @@ export function createAudioLane({ store, player, editor, view }) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, HEIGHT);
     const left = scroller.scrollLeft;
-    const p = store.project;
-    const tl = store.tl;
+    const { project: p, tl } = view.shown?.() ?? { project: store.project, tl: store.tl };
     const layout = clipLayout(p, tl);
     const sx = (t) => view.x(t) - left;
     const mid = HEIGHT / 2 - 2;
@@ -54,6 +53,8 @@ export function createAudioLane({ store, player, editor, view }) {
 
     // Recorded sound per clip.
     for (const [i, l] of layout.entries()) {
+      // Detached: its sound is drawn on its own audio clip instead.
+      if (l.clip.detached) continue;
       const a = Math.max(0, Math.floor(sx(l.outStart)));
       const b = Math.min(w, Math.ceil(sx(l.outEnd)));
       if (b <= a) continue;
@@ -72,35 +73,6 @@ export function createAudioLane({ store, player, editor, view }) {
         const bar = Math.max(1, v * (HEIGHT - 12));
         ctx.fillRect(px, mid - bar / 2, 1, bar);
         prev = next;
-      }
-    }
-
-    // Music along the whole video.
-    if (p.audio.music) {
-      ctx.fillStyle = 'rgba(197, 138, 249, 0.75)';
-      const a = Math.max(0, sx(0));
-      const b = Math.min(w, sx(tl.duration));
-      if (b > a) {
-        roundRect(ctx, a + 1, HEIGHT - 6, b - a - 2, 4, 2);
-        ctx.fill();
-        // Its name where the line starts in view, so the line reads as music.
-        const name = String(p.audio.music.file ?? '').split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
-        if (name && b - a > 60) {
-          ctx.font = '600 10.5px system-ui, sans-serif';
-          ctx.textBaseline = 'top';
-          const text = `♪ ${name}`;
-          const width = Math.min(ctx.measureText(text).width, b - a - 12);
-          ctx.fillStyle = 'rgba(28, 28, 32, 0.85)';
-          roundRect(ctx, a + 4, 3, width + 10, 15, 4);
-          ctx.fill();
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(a + 4, 3, width + 10, 15);
-          ctx.clip();
-          ctx.fillStyle = 'rgba(215, 174, 251, 0.95)';
-          ctx.fillText(text, a + 9, 5.5);
-          ctx.restore();
-        }
       }
     }
 

@@ -21,7 +21,17 @@ export const TRANSITIONS = [
   { type: null, label: 'None' },
   { type: 'fade', label: 'Fade' },
   { type: 'crossfade', label: 'Crossfade' },
-  { type: 'dip', label: 'Dip to black' }
+  { type: 'dip', label: 'Dip to black' },
+  { type: 'dip-white', label: 'Dip to white' },
+  { type: 'blur', label: 'Blur' },
+  { type: 'wipe-left', label: 'Wipe left' },
+  { type: 'wipe-right', label: 'Wipe right' },
+  { type: 'wipe-up', label: 'Wipe up' },
+  { type: 'wipe-down', label: 'Wipe down' },
+  { type: 'slide-left', label: 'Slide left' },
+  { type: 'slide-right', label: 'Slide right' },
+  { type: 'circle', label: 'Circle' },
+  { type: 'zoom', label: 'Zoom' }
 ];
 export const TRANSITION_LENGTHS = [0.25, 0.5, 1, 2];
 const LANE_PX = 28;
@@ -87,6 +97,13 @@ export function createVisualTracks({ store, player, editor, helpers: t }) {
   function render(p, layout, clipsTrack) {
     renderAnnotations(p, layout);
     renderJoins(p, layout, clipsTrack);
+    // An open transition menu follows the project (an undo, another edit):
+    // it shows what is set now, or closes when its join is gone.
+    if (picking !== null && !menu.hidden) {
+      const i = layout.findIndex((l) => l.clip.id === picking);
+      if (i < 0 || i >= layout.length - 1) closeMenu();
+      else openMenu(picking, joins.querySelector(`[data-after="${picking}"]`));
+    }
   }
 
   // ---- the transition menu

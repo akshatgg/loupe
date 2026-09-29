@@ -24,7 +24,7 @@ test('Windows uses Ctrl, and Ctrl+Y redoes', () => {
 
 test('plain keys', () => {
   const cases = [[' ', 'playPause'], ['ArrowLeft', 'backFrame'], ['ArrowRight', 'forwardFrame'], ['Home', 'toStart'],
-    ['End', 'toEnd'], ['s', 'split'], ['S', 'split'], ['z', 'addZoom'], ['Delete', 'delete'], ['Backspace', 'delete'],
+    ['End', 'toEnd'], ['s', 'split'], ['S', 'split'], ['x', 'cut'], ['z', 'addZoom'], ['Delete', 'delete'], ['Backspace', 'delete'],
     ['?', 'cheatSheet'], ['Escape', 'escape'], ['q', null]];
   for (const [k, want] of cases) assert.equal(commandFor(key(k), 'darwin'), want, k);
   assert.equal(commandFor(key('ArrowLeft', { shiftKey: true }), 'darwin'), 'back1s');
@@ -36,4 +36,18 @@ test('the cheat sheet names keys the platform way', () => {
   const flat = (p) => cheatSheet(p).flatMap((g) => g.items.flatMap((i) => i.keys)).join(' ');
   assert.match(flat('darwin'), /⌘Z/);
   assert.match(flat('win32'), /Ctrl\+Y/);
+});
+
+test('pro editing keys: I/O marks, J/K/L shuttle, M markers, ⌥X clears the marks', () => {
+  const cases = [['i', 'markIn'], ['o', 'markOut'], ['j', 'shuttleBack'], ['k', 'shuttleStop'], ['l', 'shuttleForward'], ['m', 'addMarker']];
+  for (const [k, want] of cases) {
+    assert.equal(commandFor(key(k), 'darwin'), want, k);
+    assert.equal(commandFor(key(k), 'win32'), want, k);
+  }
+  assert.equal(commandFor(key('M', { shiftKey: true }), 'darwin'), 'nextMarker');
+  assert.equal(commandFor(key('F', { shiftKey: true }), 'darwin'), 'freezeFrame');
+  assert.equal(commandFor(key('f'), 'darwin'), null);
+  // ⌥X on a Mac types "≈"; the physical key decides.
+  assert.equal(commandFor({ ...key('≈', { altKey: true }), code: 'KeyX' }, 'darwin'), 'clearMarks');
+  assert.equal(commandFor({ ...key('x', { altKey: true }), code: 'KeyX' }, 'win32'), 'clearMarks');
 });

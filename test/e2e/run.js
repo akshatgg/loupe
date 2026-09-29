@@ -493,9 +493,9 @@ const CASES = [
     p = P.setAudio(p, {
       mic: { cleanUp: false, level: true, volume: 1 },
       system: { volume: 1 },
-      music: { file: 'music/Song.wav', volume: 0.3, duck: true },
       voiceover: [{ id: 'vo1', file: 'voiceover/Take.wav', source: 'main', t: VO.t, volume: 1 }]
     });
+    p = P.addAudioClip(p, { file: 'music/Song.wav', volume: 0.3, duck: true, fileDuration: 20 });
     p = P.cutRange(p, 1, 2);
     const tl = buildTimeline(p);
     const voAt = tl.toOutput('main', VO.t);

@@ -10,12 +10,13 @@
 //   openVisuals(job, project, keys, { openRecording }) ->
 //     { assets: { keys }, extraFrames(outT, tl) -> frames to merge, close() }
 
-import { readFile } from './demux.js';
+import { readFile, openRecording as openMediaFile } from './demux.js';
+import { overlaysAt, overlayFrameKey, overlayMediaTime } from '../../core/layers/overlays.js';
 import { demuxWebm } from './webm-demux.js';
 import { openVideoSource } from './video-source.js';
 import { normalizeKeys } from '../../core/layers/keystrokes.js';
 import { webcamFrameKey, webcamTime } from '../../core/layers/webcam.js';
-import { transitionAt, TRANSITION_FRAME } from '../../core/layers/transitions.js';
+import { transitionAt, needsOtherPicture, TRANSITION_FRAME } from '../../core/layers/transitions.js';
 
 export async function openVisuals(job, project, keys, { openRecording }) {
   const keyLists = {};
@@ -46,6 +47,23 @@ export async function openVisuals(job, project, keys, { openRecording }) {
     }
   }
 
+  // Overlays: a VideoSource per video (upright, as imports are), a decoded
+  // bitmap per picture. One the person added that can't be read fails the
+  // export in words.
+  const overlayMedia = {};
+  for (const o of project.overlays ?? []) {
+    if (overlayMedia[o.id]) continue;
+    const url = job.media?.[o.file];
+    const what = `the overlay “${o.name || o.file}”`;
+    if (!url) throw new Error(`Couldn't find ${what}. Delete it from the timeline or add it again.`);
+    if (o.kind === 'video') {
+      overlayMedia[o.id] = { video: await openVideoSource(await openMediaFile(url, what), what, { rotation: o.mediaRotation ?? 0 }) };
+    } else {
+      const blob = new Blob([await readFile(url, what)]);
+      overlayMedia[o.id] = { image: await createImageBitmap(blob) };
+    }
+  }
+
   // The other side of a crossfade is a still: decoded once, kept until the
   // transition moves on.
   let held = null; // { id: 'source@t', frame }
@@ -69,8 +87,13 @@ export async function openVisuals(job, project, keys, { openRecording }) {
       }
     }
     const tr = transitionAt(project, tl, outT);
-    if (tr?.type === 'crossfade') frames[TRANSITION_FRAME] = await heldFrame(tr.other.source, tr.other.t);
+    if (tr && needsOtherPicture(tr.type)) frames[TRANSITION_FRAME] = await heldFrame(tr.other.source, tr.other.t);
     else if (held) { held.frame.close(); held = null; }
+    for (const o of overlaysAt(project, outT)) {
+      const m = overlayMedia[o.id];
+      if (m?.image) frames[overlayFrameKey(o.id)] = m.image;
+      else if (m?.video) frames[overlayFrameKey(o.id)] = await m.video.frameAt(overlayMediaTime(o, outT));
+    }
     return frames;
   }
 
@@ -79,6 +102,7 @@ export async function openVisuals(job, project, keys, { openRecording }) {
     extraFrames,
     close() {
       held?.frame.close();
+      for (const m of Object.values(overlayMedia)) { m.video?.close(); m.image?.close?.(); }
       for (const w of Object.values(webcams)) w.source.close();
       for (const h of Object.values(holders)) h.close();
     }

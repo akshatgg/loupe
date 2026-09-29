@@ -329,3 +329,93 @@ test('an impossible length in a damaged project is not shown', () => {
   assert.strictEqual(createLibrary({ root: () => root }).list()[0].duration, null);
   fs.rmSync(base, { recursive: true, force: true });
 });
+
+const VIDEOS = path.join(__dirname, 'fixtures', 'videos');
+
+test('importing a video makes a new project folder holding a copy of it', async () => {
+  const { root } = setup();
+  const progress = [];
+  const r = await createLibrary({ root: () => root, now: () => 1789000000000 })
+    .importVideo(path.join(VIDEOS, 'h264-aac.mp4'), { onProgress: (f) => progress.push(f) });
+  assert.strictEqual(r.id, '1789000000000');
+  assert.strictEqual(r.title, 'h264-aac');
+  assert.strictEqual(r.hasVideo, true);
+  assert.ok(Math.abs(r.duration - 2) < 0.05);
+  const dir = path.join(root, r.id);
+  assert.deepStrictEqual(fs.readFileSync(path.join(dir, 'video.mp4')), fs.readFileSync(path.join(VIDEOS, 'h264-aac.mp4')));
+  const project = JSON.parse(fs.readFileSync(path.join(dir, 'project.json'), 'utf8'));
+  assert.strictEqual(project.sources.main.kind, 'file');
+  assert.strictEqual(project.sources.main.video, 'video.mp4');
+  assert.strictEqual(project.createdAt, 1789000000000);
+  assert.strictEqual(progress.at(-1), 1);
+  // Nothing half-made is left behind.
+  assert.deepStrictEqual(fs.readdirSync(root), [r.id]);
+});
+
+test('two imports in the same moment get their own folders', async () => {
+  const { root } = setup();
+  const lib = createLibrary({ root: () => root, now: () => 1789000000000 });
+  const [a, b] = await Promise.all([
+    lib.importVideo(path.join(VIDEOS, 'h264-aac.mp4')),
+    lib.importVideo(path.join(VIDEOS, 'silent.mov'))
+  ]);
+  assert.notStrictEqual(a.id, b.id);
+  assert.strictEqual(lib.list().length, 2);
+});
+
+test('a video the exporter can not play is refused before anything is copied', async () => {
+  const { root } = setup();
+  const lib = createLibrary({ root: () => root });
+  await assert.rejects(lib.importVideo(path.join(VIDEOS, 'prores.mov')), /ProRes/);
+  await assert.rejects(lib.importVideo(path.join(VIDEOS, 'not-video.mp4')), /isn.t a video/);
+  await assert.rejects(lib.importVideo(path.join(VIDEOS, 'h264-aac.mp3')), /MP4 and MOV/);
+  await assert.rejects(lib.importVideo(42), /MP4 and MOV/);
+  assert.deepStrictEqual(fs.readdirSync(root), []);
+});
+
+test('a copy that fails part way leaves nothing behind', async () => {
+  const { root } = setup();
+  const lib = createLibrary({
+    root: () => root,
+    copyFile: async () => { throw Object.assign(new Error('disk full'), { code: 'ENOSPC' }); }
+  });
+  await assert.rejects(lib.importVideo(path.join(VIDEOS, 'h264-aac.mp4')), /enough free space/);
+  assert.deepStrictEqual(fs.readdirSync(root), []);
+});
+
+test('IPC: an imported video opens in the editor, or waits in the Library while one is busy', async () => {
+  const { root } = setup();
+  const handlers = {};
+  const opened = [];
+  const sent = [];
+  let blocked = null;
+  let chosen = path.join(VIDEOS, 'silent.mov');
+  const electron = {
+    shell: {},
+    dialog: { showOpenDialog: async (_w, o) => { sent.push(['dialog', o.filters[0].extensions]); return chosen ? { canceled: false, filePaths: [chosen] } : { canceled: true, filePaths: [] }; } },
+    BrowserWindow: { fromWebContents: () => null }
+  };
+  const library = createLibrary({ root: () => root });
+  registerLibraryIpc({
+    ipcMain: { handle: (c, fn) => { handlers[c] = fn; } }, electron, library,
+    openEditor: (d) => opened.push(d), showPicker: () => {}, openBlocked: () => blocked
+  });
+  const e = { sender: { isDestroyed: () => false, send: (c, v) => sent.push([c, v]) } };
+
+  const first = await handlers['library:importVideo'](e, path.join(VIDEOS, 'h264-aac.mp4'));
+  assert.strictEqual(first.opened, true);
+  assert.deepStrictEqual(opened, [library.resolve(first.recording.id)]);
+  assert.deepStrictEqual(sent.at(-1), ['library:importProgress', 1]);
+
+  blocked = 'A recording is in progress.';
+  const second = await handlers['library:chooseVideo'](e);
+  assert.strictEqual(second.opened, false);
+  assert.strictEqual(second.blocked, blocked);
+  assert.strictEqual(opened.length, 1);
+  assert.deepStrictEqual(sent.find((s) => s[0] === 'dialog')[1], ['mp4', 'mov', 'm4v']);
+
+  chosen = null;
+  assert.strictEqual(await handlers['library:chooseVideo'](e), null);
+  await assert.rejects(async () => handlers['library:importVideo'](e, 'relative/clip.mp4'), /couldn.t be opened/);
+  assert.strictEqual(library.list().length, 2);
+});

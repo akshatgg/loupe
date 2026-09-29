@@ -11,7 +11,7 @@
 //   project,                       // v2 project (validated again here)
 //   sources: { [key]: { video, cursor, systemAudio, webcam, keys } },  // file:// URLs or null
 //   background,                    // file:// URL of a background image, or null
-//   audioFiles: { music, voiceover: { [takeId]: url } },  // file:// URLs or null
+//   audioFiles: { music: { [file]: url }, voiceover: { [takeId]: url } },  // file:// URLs or null
 //   format, resolution, codec, quality, fps, sizeLimit, gifWidth, gifFps, dither
 // }
 //
@@ -33,6 +33,7 @@ import { Muxer as Mp4Muxer, StreamTarget as Mp4Target } from '../../vendor/mp4-m
 import { Muxer as WebmMuxer, StreamTarget as WebmTarget } from '../../vendor/webm-muxer/webm-muxer.mjs';
 import { readFile, demux, openRecording } from './demux.js';
 import { openVideoSource } from './video-source.js';
+import { parseCube } from '../../core/lut.js';
 import { openVisuals } from './visuals.js';
 import { decodeAudioTrack, decodeAudioFile, encodeAudio } from './audio.js';
 import { chooseVideoConfig, AUDIO_RATE, AUDIO_CHANNELS, KEYFRAME_SECONDS } from './encode.js';
@@ -77,7 +78,7 @@ async function openSources(job, project, keys, report, { sound = true } = {}) {
     if (!files?.video) throw new Error(`Couldn't find the video for ${label}.`);
     report({ phase: 'reading', source: i, sources: keys.length });
     const demuxed = await openRecording(files.video, label);
-    const video = await openVideoSource(demuxed, label);
+    const video = await openVideoSource(demuxed, label, { rotation: project.sources[key].rotation ?? 0 });
     let cursor = null;
     if (files.cursor) {
       // A recording without a cursor track still exports, just without the
@@ -101,15 +102,34 @@ async function openSources(job, project, keys, report, { sound = true } = {}) {
   return { opened, decoded };
 }
 
-// The music and voiceover takes the project uses. A take whose file is gone
-// is left out rather than failing the export; music the person chose is
-// expected, so a file that can't be read is an error they should see.
+// The clips' LUTs (clip.color.lut), read and parsed once. One the person
+// chose that can't be read fails the export in words, as music does.
+async function loadLuts(job, project) {
+  const luts = {};
+  for (const clip of project.clips) {
+    const rel = clip.color?.lut;
+    if (!rel || rel in luts) continue;
+    const url = job.luts?.[rel];
+    if (!url) throw new Error(`Couldn't find the LUT “${rel.replace(/^luts\//, '')}”. Load it again in the Clip panel, or remove it.`);
+    luts[rel] = parseCube(new globalThis.TextDecoder().decode(await readFile(url, 'a LUT')));
+  }
+  return luts;
+}
+
+// The songs, sound files and voiceover takes the project uses. A take whose
+// file is gone is left out rather than failing the export; audio the person
+// put on the timeline is expected, so a file that can't be read is an error
+// they should see. A muted clip's file isn't needed.
 async function openAddedSound(job, project) {
   const files = job.audioFiles ?? {};
-  let music = null;
-  if (project.audio.music) {
-    if (!files.music) throw new Error("Couldn't find the music file. Remove the music or add it again.");
-    music = await decodeAudioFile(await readFile(files.music, 'the music'), 'the music');
+  const music = {};
+  for (const clip of project.audio.clips) {
+    // Detached video sound comes from the recording, already read.
+    if (clip.source || clip.muted || clip.file in music) continue;
+    const url = files.music?.[clip.file];
+    const what = `the audio “${clip.name || clip.file}”`;
+    if (!url) throw new Error(`Couldn't find ${what}. Delete it from the timeline or add it again.`);
+    music[clip.file] = await decodeAudioFile(await readFile(url, what), what);
   }
   const voiceover = {};
   for (const take of project.audio.voiceover) {
@@ -283,10 +303,11 @@ export async function exportProject(job, { write, progress = () => {}, signal } 
   let visuals = null;
   try {
     visuals = await openVisuals(job, project, keys, {
-      openRecording: (k) => openVideoSource(opened[k].demuxed, labelOf(k, keys.length))
+      openRecording: (k) => openVideoSource(opened[k].demuxed, labelOf(k, keys.length), { rotation: project.sources[k].rotation ?? 0 })
     });
     const assets = {
       ...visuals.assets,
+      luts: await loadLuts(job, project),
       cursors: Object.fromEntries(keys.map((k) => [k, opened[k].cursor])),
       background: project.style.background.type === 'image' && job.background
         ? await loadImage(job.background).catch(() => null) : null

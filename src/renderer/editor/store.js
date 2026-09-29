@@ -30,6 +30,9 @@ export function createStore(project, { save = () => {}, onError = () => {} } = {
           s.start === selection.start && s.end === selection.end)
           : selection.kind === 'annotation' ? p.annotations.some((a) => a.id === selection.id)
           : selection.kind === 'caption' ? p.captions.segments.some((c) => c.id === selection.id)
+          : selection.kind === 'audio' ? p.audio.clips.some((c) => c.id === selection.id)
+          : selection.kind === 'marker' ? p.markers.some((m) => m.id === selection.id)
+          : selection.kind === 'overlay' ? (p.overlays ?? []).some((o) => o.id === selection.id)
             : false;
     if (!alive) selection = null;
   }

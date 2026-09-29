@@ -19,7 +19,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { resolveBackgroundFile } = require('./background');
-const { audioFileUrls } = require('./project-files');
+const { audioFileUrls, lutFileUrls, mediaFileUrls } = require('./project-files');
 const { writeSubtitlesBeside } = require('./captions');
 
 const FORMATS = ['mp4', 'webm', 'gif'];
@@ -161,6 +161,8 @@ function buildJob(dir, rawOptions, { out } = {}) {
     project, sources, background,
     // Music and voiceover takes, checked to be inside this project's folder.
     audioFiles: audioFileUrls(dir, project),
+    luts: lutFileUrls(dir, project),
+    media: mediaFileUrls(dir, project),
     format: ex.format, resolution: ex.resolution, codec: ex.codec, quality: ex.quality, fps: ex.fps,
     sizeLimit: ex.sizeLimit, gifWidth: ex.gifWidth, gifFps: ex.gifFps, dither: ex.dither
   };

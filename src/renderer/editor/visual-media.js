@@ -7,6 +7,8 @@
 //    the held frame (transitions.js) a moment before the transition starts
 //  - keys.json for the keystroke badges
 //  - the background picture, from a bundled wallpaper or a copied picture
+//  - overlays: a muted <video> per video overlay, kept at its moment, and an
+//    <img> per picture, from the project's media folder
 //
 //   createVisualMedia({ sources, loupe, onChange }) ->
 //     { assets, sync({ project, tl, outT, at, rate, playing, jumped }) -> frames,
@@ -17,7 +19,8 @@
 
 import { normalizeKeys } from '../../core/layers/keystrokes.js';
 import { webcamFrameKey, webcamTime } from '../../core/layers/webcam.js';
-import { transitionAt, TRANSITION_FRAME } from '../../core/layers/transitions.js';
+import { transitionAt, needsOtherPicture, TRANSITION_FRAME } from '../../core/layers/transitions.js';
+import { overlaysAt, overlayFrameKey, overlayMediaTime } from '../../core/layers/overlays.js';
 
 const SEEK_DRIFT = 0.25;
 // Start seeking a crossfade's held picture this long before it shows.
@@ -35,7 +38,7 @@ function mediaElement(url, onChange) {
 
 const ready = (v, t, tolerance) => v.readyState >= 2 && !v.seeking && Math.abs(v.currentTime - t) <= tolerance;
 
-export function createVisualMedia({ sources, loupe, onChange = () => {} }) {
+export function createVisualMedia({ sources, loupe, folder = null, onChange = () => {} }) {
   const webcams = {};
   const holds = {};
   const keys = {};
@@ -112,7 +115,7 @@ export function createVisualMedia({ sources, loupe, onChange = () => {} }) {
   function syncHold(project, tl, outT, frames) {
     const now = transitionAt(project, tl, outT);
     const tr = now ?? transitionAt(project, tl, Math.min(tl.duration, outT + LOOKAHEAD));
-    if (tr?.type !== 'crossfade') return;
+    if (!tr || !needsOtherPicture(tr.type)) return;
     const pictures = {
       next: transitionAt(project, tl, tr.join - tr.half / 2)?.other,
       prev: transitionAt(project, tl, tr.join)?.other
@@ -127,6 +130,49 @@ export function createVisualMedia({ sources, loupe, onChange = () => {} }) {
     }
   }
 
+  // Overlays, one element per file, made when first shown.
+  const overlayEls = {};
+  const mediaUrl = (file) => (folder ? new URL(file.split('/').map(encodeURIComponent).join('/'), folder).href : null);
+  function overlayElement(o) {
+    const have = overlayEls[o.file];
+    if (have) return have;
+    const url = mediaUrl(o.file);
+    if (!url) return null;
+    let el;
+    if (o.kind === 'video') el = mediaElement(url, onChange);
+    else {
+      el = document.createElement('img');
+      el.onload = onChange;
+      el.src = url;
+    }
+    overlayEls[o.file] = el;
+    return el;
+  }
+  function syncOverlays(project, outT, playing, frames) {
+    const showing = overlaysAt(project, outT);
+    const shownFiles = new Set(showing.map((o) => o.file));
+    for (const [file, el] of Object.entries(overlayEls)) if (el.tagName === 'VIDEO' && !shownFiles.has(file) && !el.paused) el.pause();
+    for (const o of showing) {
+      const el = overlayElement(o);
+      if (!el) continue;
+      if (o.kind === 'image') {
+        if (el.complete && el.naturalWidth) frames[overlayFrameKey(o.id)] = el;
+        continue;
+      }
+      if (el.readyState < 1) continue;
+      const t = overlayMediaTime(o, outT);
+      const drift = el.currentTime - t;
+      if (playing) {
+        if (Math.abs(drift) > SEEK_DRIFT) el.currentTime = t;
+        if (el.paused) el.play().catch(() => {});
+      } else {
+        if (!el.paused) el.pause();
+        if (Math.abs(drift) > 0.02 && !el.seeking) el.currentTime = t;
+      }
+      if (ready(el, t, playing ? SEEK_DRIFT + 0.1 : 0.05)) frames[overlayFrameKey(o.id)] = el;
+    }
+  }
+
   return {
     assets,
     sync({ project, tl, outT, at, rate, playing }) {
@@ -134,13 +180,15 @@ export function createVisualMedia({ sources, loupe, onChange = () => {} }) {
       syncBackground(project);
       syncWebcam(project, at, rate, playing, frames);
       syncHold(project, tl, outT, frames);
+      syncOverlays(project, outT, playing, frames);
       return frames;
     },
     // A recording added after the editor opened (Add recording).
     addSource,
     get webcams() { return webcams; },
     destroy() {
-      for (const v of [...Object.values(webcams), ...Object.values(holds).map((h) => h.el)]) {
+      for (const v of [...Object.values(webcams), ...Object.values(holds).map((h) => h.el),
+        ...Object.values(overlayEls).filter((el) => el.tagName === 'VIDEO')]) {
         v.pause();
         v.removeAttribute('src');
         v.load();

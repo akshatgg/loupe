@@ -33,17 +33,32 @@ export function clipLayout(project, tl) {
 }
 
 // Output time at which source moment t (clamped to the clip) plays in clip i.
+// (A freeze frame's is its start; a reversed clip plays its moments from
+// its end, so they are mirrored.)
 export function outputInClip(project, layout, i, t) {
+  const { clip, outStart, outEnd } = layout[i];
+  if (clip.hold > 0) return outStart;
+  const map = mapFor(project, clip.source);
+  const local = mapToOutput(map, clamp(t, clip.start, clip.end)) - mapToOutput(map, clip.start);
+  return clip.reverse ? outEnd - local : outStart + local;
+}
+
+// The same without the clamp: where source moment t would sit if clip i ran
+// on past its ends. A trim edge dragged over the part being cut, or back
+// over a part cut earlier, is drawn here.
+export function outputAtSource(project, layout, i, t) {
   const { clip, outStart } = layout[i];
   const map = mapFor(project, clip.source);
-  return outStart + mapToOutput(map, clamp(t, clip.start, clip.end)) - mapToOutput(map, clip.start);
+  return outStart + mapToOutput(map, t) - mapToOutput(map, clip.start);
 }
 
 // Source moment of clip i playing at output time outT (clamped to the clip).
 export function sourceInClip(project, layout, i, outT) {
   const { clip, outStart, outEnd } = layout[i];
+  if (clip.hold > 0) return clip.start;
   const map = mapFor(project, clip.source);
-  const o = mapToOutput(map, clip.start) + clamp(outT - outStart, 0, outEnd - outStart);
+  const local = clamp(outT - outStart, 0, outEnd - outStart);
+  const o = mapToOutput(map, clip.start) + (clip.reverse ? outEnd - outStart - local : local);
   return clamp(mapToSource(map, o), clip.start, clip.end);
 }
 
@@ -62,10 +77,10 @@ export function rangePieces(project, layout, source, start, end) {
     const a = Math.max(start, l.clip.start);
     const b = Math.min(end, l.clip.end);
     if (b - a <= EPS) return;
-    pieces.push({
-      clipIndex: i, srcStart: a, srcEnd: b,
-      outStart: outputInClip(project, layout, i, a), outEnd: outputInClip(project, layout, i, b)
-    });
+    // A reversed clip shows the range's end first.
+    const oa = outputInClip(project, layout, i, a);
+    const ob = outputInClip(project, layout, i, b);
+    pieces.push({ clipIndex: i, srcStart: a, srcEnd: b, outStart: Math.min(oa, ob), outEnd: Math.max(oa, ob) });
   });
   return pieces;
 }
@@ -205,6 +220,52 @@ export function formatTime(seconds, { fraction = false } = {}) {
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${sec}` : `${m}:${sec}`;
 }
 
+// A time typed by a person: "90", "1:30", "1:30.5", "0:01:30" (a comma
+// works as the decimal point too). Seconds, or null when it isn't a time.
+export function parseTime(text) {
+  const parts = String(text ?? '').trim().replace(',', '.').split(':');
+  if (parts.length > 3) return null;
+  let total = 0;
+  for (let i = 0; i < parts.length; i++) {
+    const last = i === parts.length - 1;
+    if (!(last ? /^\d+(\.\d+)?$/ : /^\d+$/).test(parts[i])) return null;
+    const n = Number(parts[i]);
+    // Minutes and seconds after the first part stop at 59.
+    if (i > 0 && n >= 60) return null;
+    total = total * 60 + n;
+  }
+  return total;
+}
+
+// Near enough to the end of the video to mean the end (a typed time is
+// rounded -- formatTime to a tenth -- and the video's length rarely is).
+const END_SLACK = 0.1;
+
+// The output ranges to cut away (latest first, so each cut leaves the
+// earlier times where they were) for "Remove this part" (`mode` 'remove')
+// or "Keep only this part" ('keep') of from..to. { ranges } or { error }.
+export function cutRanges(duration, from, to, mode) {
+  if (from === null || !Number.isFinite(from)) return { error: 'Type the From time as 1:30 or 90.' };
+  if (to === null || !Number.isFinite(to)) return { error: 'Type the To time as 1:30 or 90.' };
+  if (to > duration + END_SLACK) {
+    const fraction = duration % 1 > END_SLACK && duration % 1 < 1 - END_SLACK;
+    return { error: `The video is only ${formatTime(duration, { fraction })} long.` };
+  }
+  const b = Math.min(to, duration);
+  if (b - from < 1e-3) return { error: 'The To time needs to be after the From time.' };
+  const atStart = from < 1e-3;
+  const atEnd = b > duration - END_SLACK;
+  if (mode === 'remove') {
+    if (atStart && atEnd) return { error: 'That’s the whole video. A video needs something left in it.' };
+    return { ranges: [[from, atEnd ? duration : b]] };
+  }
+  if (atStart && atEnd) return { error: 'That’s already the whole video.' };
+  const ranges = [];
+  if (!atEnd) ranges.push([b, duration]);
+  if (!atStart) ranges.push([0, from]);
+  return { ranges };
+}
+
 // Playback speed (source seconds per output second) at output time outT.
 export function rateAt(project, layout, outT) {
   if (!layout.length) return 1;
@@ -239,8 +300,10 @@ export function stripTiles({ outStart, outEnd, pps, tileWidth, viewStart, viewEn
 }
 
 // How finely pictures are kept apart, in source seconds, for tiles that each
-// cover about `seconds`: a "nice" step, so nearby zoom levels share pictures.
+// cover about `seconds`: a "nice" step, so nearby zoom levels share pictures,
+// and at most half a tile, so a picture is never more than a quarter of a
+// tile from its tile's moment (camera video changes too fast for more).
 const THUMB_STEPS = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
 export function thumbStep(seconds) {
-  return THUMB_STEPS.find((s) => s >= seconds * 0.75) ?? THUMB_STEPS.at(-1);
+  return THUMB_STEPS.find((s) => s >= seconds * 0.25) ?? THUMB_STEPS.at(-1);
 }

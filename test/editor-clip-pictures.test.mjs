@@ -30,10 +30,16 @@ test('a clip is tiled with pictures from its left edge, only where the view is',
 
 test('picture spacing is a nice step, so nearby timeline zooms share pictures', () => {
   assert.equal(thumbStep(0.05), 0.1);
-  assert.equal(thumbStep(1.6), 2);
-  assert.equal(thumbStep(1.4), 2);
-  assert.equal(thumbStep(7), 10);
+  assert.equal(thumbStep(1.6), 0.5);
+  assert.equal(thumbStep(1.4), 0.5);
   assert.equal(thumbStep(10000), 300);
+  // A tile's picture is within an eighth of a tile of the tile's own moment:
+  // a 7-second tile on a camera video shows what is there, not what was
+  // there 5 seconds earlier.
+  for (const seconds of [0.4, 1, 3, 7, 12, 40, 100]) {
+    assert.ok(thumbStep(seconds) / 2 <= seconds / 4 + 1e-9 || thumbStep(seconds) === 0.1, `${seconds}: ${thumbStep(seconds)}`);
+  }
+  assert.equal(thumbStep(7), 2);
 });
 
 function memoryStorage() {

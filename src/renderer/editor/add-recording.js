@@ -1,6 +1,7 @@
-// "Add recording": pick another recording from the Library and it plays after
-// this one, as a new clip at the end of the timeline (one undo step). Main
-// checks the choice and adds the recording's files to the project
+// "Add recording": pick another recording from the Library -- or a video file
+// from anywhere, which main imports into the Library first -- and it plays
+// after this one, as a new clip at the end of the timeline (one undo step).
+// Main checks the choice and adds the recording's files to the project
 // (src/main/ipc/append-recording.js); the edit itself is the core's
 // appendRecording, plus the zooms that recording already had.
 
@@ -12,11 +13,16 @@ export function createAddRecording({ store, player, loupe, core, toast, onAdded 
   const dialog = h('dialog', { class: 'add-recording', 'aria-labelledby': 'addRecTitle' });
   const list = h('div', { class: 'rec-list', role: 'list' });
   const note = h('p', { class: 'hint rec-note' });
+  const fileButton = h('button', {
+    type: 'button', class: 'btn', onclick: () => addFile()
+  }, 'Choose a video file…');
   dialog.append(
     h('button', { type: 'button', class: 'icon-btn close', 'aria-label': 'Close', onclick: () => dialog.close() }, icon('close')),
     h('h2', { id: 'addRecTitle' }, 'Add a recording'),
     h('p', { class: 'hint rec-sub' }, 'It plays after the end of this video. You can move or trim it like any clip.'),
-    list, note);
+    list,
+    h('div', { class: 'rec-file' }, fileButton, h('span', { class: 'hint' }, 'An MP4 or MOV video from your computer')),
+    note);
   dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.close(); });
   document.body.append(dialog);
   let busy = false;
@@ -38,12 +44,19 @@ export function createAddRecording({ store, player, loupe, core, toast, onAdded 
     h('span', { class: 'rec-add' }, icon('plus', { size: 16 }), 'Add'));
   }
 
-  async function add(rec) {
+  const add = (rec) => addWith(() => loupe.appendRecording(rec.id), 'Adding…');
+  const addFile = () => addWith(() => loupe.importVideo(), 'Importing the video…');
+
+  // `fetch()` resolves with main's { key, meta, files, zooms, title }, or
+  // null when nothing was chosen.
+  async function addWith(fetch, working) {
     if (busy) return;
     busy = true;
-    note.textContent = 'Adding…';
+    fileButton.disabled = true;
+    note.textContent = working;
     try {
-      const added = await loupe.appendRecording(rec.id);
+      const added = await fetch();
+      if (!added) return;
       const next = store.apply((p) => {
         let q = core.appendRecording(p, added.key, added.meta);
         for (const z of added.zooms) {
@@ -63,12 +76,14 @@ export function createAddRecording({ store, player, loupe, core, toast, onAdded 
       const bounds = store.tl.clipBounds()[first];
       if (bounds) player.seek(bounds.outStart);
       onAdded(added);
-      toast(`Added “${rec.title}” at the end`);
+      const sound = added.soundLeftOut ? '. Its sound is in a format Loupe can’t play, so it was left out' : '';
+      toast(`Added “${added.title}” at the end${sound}`);
     } catch (err) {
       note.textContent = plainError(err);
     } finally {
       busy = false;
-      if (note.textContent === 'Adding…') note.textContent = '';
+      fileButton.disabled = false;
+      if (note.textContent === working) note.textContent = '';
     }
   }
 
@@ -86,7 +101,7 @@ export function createAddRecording({ store, player, loupe, core, toast, onAdded 
     if (!recordings.length) {
       list.replaceChildren(h('div', { class: 'rec-empty' },
         h('div', { class: 'empty-icon' }, icon('clips', { size: 26 })),
-        h('p', {}, 'There are no other recordings yet. Make another recording, then add it here.')));
+        h('p', {}, 'There are no other recordings yet. Make another recording, or choose a video file below.')));
       return;
     }
     list.replaceChildren(...recordings.map(row));

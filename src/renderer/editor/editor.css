@@ -103,14 +103,21 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 }
 .panel-wrap { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 14px 18px 24px; }
 .panel-title { font-size: 15px; font-weight: 650; margin: 2px 0 10px; }
+/* Seven panels: the rail scrolls rather than hiding a tab off its end, and
+   in a short window the tabs drop their names (the tooltip still says). */
 #tabs {
   width: 68px; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; padding: 10px 6px;
-  border-left: 1px solid var(--line); background: var(--bg);
+  border-left: 1px solid var(--line); background: var(--bg); min-height: 0; overflow-y: auto; scrollbar-width: none;
 }
+#tabs::-webkit-scrollbar { display: none; }
 .tab {
-  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 9px 2px 7px;
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 2px 6px; flex-shrink: 0;
   border: 0; border-radius: 9px; background: transparent; color: var(--ink-3); cursor: pointer;
   font-size: 10.5px;
+}
+@media (max-height: 860px) {
+  .tab { padding: 9px 2px; }
+  .tab span { display: none; }
 }
 .tab:hover { background: var(--raised); color: var(--ink); }
 .tab[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
@@ -295,6 +302,20 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px 
 .clip .handle.end::after { right: 4px; }
 .clip:hover .handle::after, .clip.selected .handle::after { opacity: 1; }
 .clip.selected .handle::after { background: var(--accent); }
+/* A clip edge being dragged (timeline-view.js renderTrim): the part being
+   cut stays in place, darkened, until the button is let go. */
+.trim-shade { position: absolute; top: 0; bottom: 0; z-index: 3; pointer-events: none; border-radius: 9px; }
+.trim-shade.cut { background: rgba(10, 10, 12, .72); }
+.trim-shade.add { border: 1px dashed var(--accent); background: rgba(138, 180, 248, .12); }
+/* Footage coming back (dragging an edge out): its pictures show, marked. */
+.trim-shade.add.restored {
+  border: 2px solid var(--accent); border-radius: 9px; background: rgba(138, 180, 248, .16);
+  box-shadow: 0 0 0 1px rgba(0,0,0,.35) inset;
+}
+.trim-edge {
+  position: absolute; top: -3px; bottom: -3px; width: 4px; margin-left: -2px; z-index: 4; pointer-events: none;
+  border-radius: 2px; background: var(--accent); box-shadow: 0 0 0 1px rgba(0,0,0,.4);
+}
 
 .zoom {
   position: absolute; top: 5px; bottom: 5px; border-radius: 7px; cursor: grab; overflow: hidden;
@@ -433,6 +454,20 @@ dialog .close { position: absolute; top: 12px; right: 12px; }
 .share-link:focus { outline: none; border-color: var(--accent); }
 .btn.small { height: 26px; padding: 0 10px; font-size: 12px; }
 
+/* ---- Cut by time (cut-dialog.js) */
+.cut-dialog { width: 400px; max-width: calc(100vw - 48px); }
+.cut-sub { margin: -8px 0 14px; }
+.cut-fields { display: flex; gap: 12px; }
+.cut-field { flex: 1; margin: 0; }
+.time-input {
+  width: 100%; height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line-2);
+  background: var(--well); color: var(--ink); font: inherit; font-size: 15px; font-variant-numeric: tabular-nums;
+}
+.time-input:focus { outline: none; border-color: var(--accent); }
+.cut-length { margin: 10px 0 0; }
+.cut-note { min-height: 18px; margin: 6px 0 0; color: var(--red); }
+.cut-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
 .cheat-sheet { width: 560px; }
 .cheat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 28px; }
 .cheat-grid h3 { margin: 10px 0 6px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
@@ -469,8 +504,14 @@ kbd {
 .track-head.muted-track .track-name { color: var(--ink-3); }
 .mute-btn[aria-pressed="true"] { color: var(--red); }
 .panel-section .toggle { margin-top: 14px; }
-.music-empty .btn { width: 100%; }
-.music-empty .hint { text-align: center; margin-top: 8px; }
+/* Where the music starts in the video, and where in the song it plays from. */
+.music-times {
+  display: grid; grid-template-columns: 1fr 84px auto; align-items: center; gap: 8px 8px; margin: 4px 0 14px;
+}
+.music-times .label { color: var(--ink-2); white-space: nowrap; }
+.music-times .hint { grid-column: 1 / -1; margin: 0; }
+.time-input.small { width: 84px; height: 28px; font-size: 13px; padding: 0 8px; }
+.music-times .btn.small { height: 28px; }
 .music-file {
   display: flex; align-items: center; gap: 8px; padding: 6px 4px 6px 10px; margin-bottom: 12px;
   border-radius: 8px; background: var(--well); color: #d7aefb;
@@ -532,3 +573,163 @@ kbd {
 
 .lbl-audio, .tl-audio { height: 40px; }
 .tl-audio-canvas { position: sticky; left: 0; display: block; }
+
+/* ---- audio rows on the timeline (timeline-music.js) */
+.tl-music-labels { margin-top: 4px; }
+.tl-music-labels + .tl-label { margin-top: 4px; }
+.tl-music-labels .tl-label { height: 34px; margin-top: 0; }
+.tl-music { cursor: default; }
+.aclip-row {
+  position: absolute; left: 0; right: 0; height: 34px;
+  background: linear-gradient(transparent 2px, rgba(255,255,255,.02) 2px, rgba(255,255,255,.02) 32px, transparent 32px);
+}
+.tl-music .tl-hint { top: 17px; }
+.aclip {
+  position: absolute; border-radius: 7px; overflow: hidden; cursor: grab;
+  background: rgba(142, 94, 196, .38); border: 1px solid rgba(197, 138, 249, .55); color: #f0e2fe;
+}
+.aclip:hover { border-color: rgba(215, 174, 251, .9); }
+.aclip.selected { border-color: #e9d2fd; box-shadow: 0 0 0 1px #e9d2fd inset; background: rgba(162, 108, 222, .5); }
+.aclip.muted { opacity: .45; }
+.aclip-wave { position: absolute; left: 0; top: 0; height: 100%; pointer-events: none; }
+.aclip-name {
+  position: absolute; left: 8px; top: 3px; right: 18px; display: flex; align-items: center; gap: 3px;
+  font-size: 10.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  pointer-events: none; text-shadow: 0 1px 2px rgba(0,0,0,.6);
+}
+.aclip .handle { width: 8px; }
+.aclip .handle::after {
+  content: ""; position: absolute; top: 50%; width: 3px; height: 14px; margin-top: -7px; border-radius: 2px;
+  background: rgba(240, 226, 254, .7); opacity: 0; transition: opacity .12s;
+}
+.aclip .handle.start::after { left: 3px; }
+.aclip .handle.end::after { right: 3px; }
+.aclip:hover .handle::after, .aclip.selected .handle::after { opacity: 1; }
+.fade-knob {
+  position: absolute; top: 1px; width: 9px; height: 9px; margin: 0 -1px; border-radius: 50%; z-index: 3;
+  background: #f0e2fe; box-shadow: 0 0 0 1px rgba(40, 20, 60, .7); cursor: ew-resize; opacity: 0; transition: opacity .12s;
+}
+.aclip:hover .fade-knob, .aclip.selected .fade-knob { opacity: 1; }
+
+/* ---- the Audio panel's selected clip and list (panels/audio.js) */
+.audio-inspector { border: 1px solid rgba(197, 138, 249, .45); border-radius: 10px; padding: 10px 12px 12px; margin-bottom: 14px; }
+.clip-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.clip-actions .btn { display: inline-flex; align-items: center; gap: 5px; }
+.music-hint { margin: 8px 0 10px; }
+.audio-list { display: flex; flex-direction: column; gap: 2px; }
+.audio-row {
+  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; column-gap: 8px; align-items: center;
+  padding: 7px 8px; border: 0; border-radius: 8px; background: transparent; cursor: pointer; text-align: left; color: var(--ink);
+}
+.audio-row .glyph, .audio-row svg { grid-row: 1 / 3; color: #d7aefb; }
+.audio-row:hover { background: var(--raised); }
+.audio-row.selected { background: rgba(197, 138, 249, .16); }
+.audio-row.muted { opacity: .55; }
+.audio-row-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.audio-row-time { color: var(--ink-3); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+#addMusic { width: 100%; }
+
+/* ---- level meter (editor.js), beside the time */
+.meter { display: flex; flex-direction: column; justify-content: center; gap: 3px; width: 92px; height: 20px; margin-left: 12px; }
+.meter-row {
+  position: relative; height: 5px; border-radius: 2px; overflow: hidden; background: rgba(255,255,255,.07);
+}
+.meter-fill {
+  position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+  background: linear-gradient(90deg, #5bb974 0 70%, #fdd663 70% 90%, #f28b82 90% 100%);
+  background-size: 92px 100%;
+}
+.meter-peak { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: #e8eaed; }
+.meter.clipping .meter-peak { background: #f28b82; }
+
+/* ---- audio row controls: Mute, Solo, Lock beside each row's name */
+.lbl-music { gap: 2px; padding-left: 8px; }
+.lane-name { width: 20px; font-weight: 600; color: var(--ink-2); }
+.lane-btn {
+  width: 16px; height: 16px; padding: 0; border: 1px solid var(--line-2); border-radius: 4px; display: inline-grid;
+  place-items: center; background: transparent; color: var(--ink-3); font: 600 9.5px/1 system-ui, sans-serif; cursor: pointer;
+}
+.lane-btn:hover { color: var(--ink); border-color: var(--ink-3); }
+.lane-btn.muted.on { background: #f28b82; border-color: #f28b82; color: #2b1110; }
+.lane-btn.solo.on { background: #fdd663; border-color: #fdd663; color: #2d2305; }
+.lane-btn.locked.on { background: var(--ink-2); border-color: var(--ink-2); color: #1b1c1f; }
+.aclip.locked { cursor: not-allowed; background-image: repeating-linear-gradient(135deg, rgba(0,0,0,.18) 0 4px, transparent 4px 8px); }
+.aclip.locked .handle, .aclip.locked .fade-knob { display: none; }
+.aclip.source { background-color: rgba(52, 140, 150, .4); border-color: rgba(128, 222, 234, .6); }
+.aclip.source.selected { background-color: rgba(52, 140, 150, .6); border-color: #b2ebf2; box-shadow: 0 0 0 1px #b2ebf2 inset; }
+.points-note { margin: -4px 0 6px; }
+.locked-note { margin: 0 0 10px; color: #fdd663; }
+.panel-section .disabled, .field.disabled { opacity: .4; pointer-events: none; }
+
+/* ---- In/Out marks (I, O) and markers (M) on the timeline */
+.tl-marks {
+  position: absolute; top: 0; bottom: 0; z-index: 4; pointer-events: none;
+  background: rgba(138, 180, 248, .12); border-left: 1px solid var(--accent); border-right: 1px solid var(--accent);
+}
+.tl-mark {
+  position: absolute; top: 0; width: 0; height: 26px; z-index: 6; pointer-events: none;
+}
+.tl-mark::before {
+  content: ""; position: absolute; top: 2px; width: 8px; height: 12px; background: var(--accent);
+}
+.tl-mark.in::before { left: 0; clip-path: polygon(0 0, 100% 0, 0 100%); }
+.tl-mark.out::before { right: 0; clip-path: polygon(0 0, 100% 0, 100% 100%); }
+.tl-markers { position: absolute; left: 0; top: 0; height: 26px; right: 0; z-index: 6; pointer-events: none; }
+.marker-flag {
+  position: absolute; top: 12px; width: 10px; height: 12px; margin-left: -5px; pointer-events: auto; cursor: pointer;
+  clip-path: polygon(0 0, 100% 0, 100% 70%, 50% 100%, 0 70%); background: #fdd663;
+}
+.marker-flag.red { background: #f28b82; } .marker-flag.green { background: #81c995; }
+.marker-flag.blue { background: #8ab4f8; } .marker-flag.purple { background: #d7aefb; }
+.marker-flag.selected { outline: 2px solid #fff; outline-offset: 1px; clip-path: none; border-radius: 2px; }
+.marker-label {
+  position: absolute; top: 11px; font-size: 10px; line-height: 12px; white-space: nowrap; color: var(--ink);
+  pointer-events: none; padding: 0 3px; border-radius: 3px; background: rgba(28, 28, 32, .85);
+}
+.marker-dialog { width: 340px; max-width: calc(100vw - 48px); }
+.marker-colors { display: flex; gap: 8px; }
+.marker-swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; }
+.marker-swatch[aria-checked="true"] { border-color: #fff; box-shadow: 0 0 0 2px rgba(0,0,0,.5) inset; }
+
+/* ---- freeze frames and reversed clips on the timeline */
+.clip.freeze { background-image: repeating-linear-gradient(135deg, rgba(138, 180, 248, .16) 0 6px, transparent 6px 12px); border-style: dashed; }
+.clip.freeze .clip-strip img { filter: saturate(.4) brightness(.8); }
+.clip.reversed .clip-name { color: #fdd663; }
+.clip-title { margin: 0 0 4px; font-size: 14px; }
+
+/* ---- the Clip panel's colour looks: a grid of choices */
+.filter-grid .segmented { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.filter-grid .seg-btn { justify-content: center; }
+
+/* ---- overlay rows (timeline-overlays.js), above the clips */
+.tl-overlay-labels .tl-label { height: 30px; margin-top: 0; }
+.tl-overlay-labels + .tl-label { margin-top: 2px; }
+.tl-overlays { margin: 0; }
+.oclip {
+  position: absolute; border-radius: 6px; overflow: hidden; cursor: grab;
+  background: rgba(252, 173, 112, .3); border: 1px solid rgba(252, 173, 112, .65); color: #fde2cc;
+}
+.oclip.video { background: rgba(129, 201, 149, .28); border-color: rgba(129, 201, 149, .65); color: #d6f2de; }
+.oclip.selected { box-shadow: 0 0 0 1px currentColor inset; border-color: currentColor; }
+.oclip-name {
+  position: absolute; left: 8px; top: 50%; transform: translateY(-50%); right: 12px; display: flex; align-items: center; gap: 4px;
+  font-size: 10.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: none;
+}
+.oclip .handle { width: 8px; }
+.kf-diamond {
+  position: absolute; bottom: 2px; width: 7px; height: 7px; margin-left: -3.5px; transform: rotate(45deg);
+  background: #fdd663; box-shadow: 0 0 0 1px rgba(0,0,0,.5); pointer-events: none;
+}
+
+/* ---- keyframe buttons beside a slider's name (panels/clip.js) */
+.field-row .kf-btn {
+  margin-left: 6px; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 5px; display: inline-grid; place-items: center;
+  background: transparent; color: var(--ink-3); cursor: pointer; opacity: .55;
+}
+.field-row .kf-btn:hover { opacity: 1; background: var(--hover); }
+.field-row .kf-btn.has { opacity: 1; color: #fdd663; }
+.field-row .kf-btn.on { opacity: 1; color: #1f1a05; background: #fdd663; }
+.field-row { align-items: center; }
+.field-row .value { margin-left: auto; }
+.key-nav { margin: 2px 0 10px; }
+.panel-section .clip-title + .hint { margin-bottom: 12px; }

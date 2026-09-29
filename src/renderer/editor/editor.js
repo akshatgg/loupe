@@ -14,12 +14,14 @@ import { createExportDialog, plainError } from './export-dialog.js';
 import { createCheatSheet } from './cheat-sheet.js';
 import { commandFor } from './shortcuts.js';
 import { PANELS, panelById } from './panels/index.js';
-import { installMusicDrop } from './panels/audio.js';
+import { installMusicDrop, addAudioFiles, splitSelectedAudio } from './panels/audio.js';
 import { h, icon } from './ui.js';
 import { clipLayout, newZoomRange, formatTime } from './timeline-math.js';
 import { newAnnotation } from './annotation-math.js';
 import { createAnnotationOverlay } from './annotation-overlay.js';
 import { createAddRecording } from './add-recording.js';
+import { createCutDialog } from './cut-dialog.js';
+import { createMarkerDialog } from './marker-dialog.js';
 import { createThumbnails } from './thumbnails.js';
 import { createFirstRunHint } from './first-run.js';
 
@@ -154,6 +156,11 @@ async function start() {
         }
       } else if (sel?.kind === 'caption') {
         showPanel('captions');
+      } else if (sel?.kind === 'audio') {
+        showPanel('audio');
+      } else if (sel?.kind === 'clip' || sel?.kind === 'overlay') {
+        // The selected clip's own settings, as an editor's inspector.
+        showPanel('clip');
       }
     },
     showPanel: (id, opts) => showPanel(id, opts),
@@ -175,6 +182,39 @@ async function start() {
       const added = next?.annotations.find((a) => !before.has(a.id));
       if (added) editor.select({ kind: 'annotation', id: added.id }, { seek: true });
       return added ?? null;
+    },
+    // A picture or video over the video at the playhead (the Overlay button),
+    // selected so its settings show.
+    async addOverlay() {
+      try {
+        const got = await loupe.chooseMedia();
+        if (!got) return null;
+        const next = store.apply((p) => P.addOverlay(p, {
+          kind: got.kind, file: got.file, name: got.name, start: Math.min(player.time, Math.max(0, store.tl.duration - 0.1)),
+          fileDuration: got.fileDuration, mediaRotation: got.rotation ?? 0
+        }));
+        const added = next?.overlays.at(-1);
+        if (added) {
+          editor.select({ kind: 'overlay', id: added.id });
+          toast(`Added “${added.name}” over the video`);
+        }
+        return added ?? null;
+      } catch (err) {
+        toast(String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''));
+        return null;
+      }
+    },
+    // A 2-second still of the frame at the playhead, selected.
+    freezeAtPlayhead(seconds = 2) {
+      player.pause();
+      const t = player.time;
+      const next = store.apply((p) => P.freezeFrame(p, t, seconds));
+      if (!next) return null;
+      const tl = store.tl;
+      const i = next.clips.findIndex((c, k) => c.hold > 0 && tl.clipBounds()[k].outEnd > t + 1e-6);
+      if (i >= 0) editor.select({ kind: 'clip', id: next.clips[i].id });
+      toast(`Freeze frame: ${seconds} seconds`);
+      return next;
     },
     addZoomAtPlayhead() {
       const range = newZoomRange(store.project, clipLayout(store.project, store.tl), player.time);
@@ -224,6 +264,9 @@ async function start() {
     store, player, loupe, core: P, toast,
     onAdded: (added) => thumbnails.addSource(added.key, added.files.video)
   });
+  const cutDialog = createCutDialog({ store, player, core: P, toast });
+  const markerDialog = createMarkerDialog({ store, core: P, editor });
+  editor.editMarker = (id) => markerDialog.show(id);
   const firstRun = createFirstRunHint({ parent: $('stage') });
   const overlay = createAnnotationOverlay({ canvas: $('preview'), stage: $('stage'), store, player, editor });
   // A click on the empty space around the preview lets go of what's selected,
@@ -253,6 +296,18 @@ async function start() {
   $('exportBtn').title = `Export (${mod}E)`;
 
   function deleteSelection() {
+    // A marked In..Out part goes first, closing the gap (an editor's extract).
+    const { in: a, out: b } = timeline.marks;
+    if (a !== null && b !== null) {
+      const next = store.apply((p) => P.cutRange(p, a, b));
+      if (next) {
+        timeline.clearMarks();
+        refresh('marks');
+        player.seek(a);
+        toast(`Removed ${formatTime(a, { fraction: true })}–${formatTime(b, { fraction: true })}`);
+      }
+      return;
+    }
     const sel = store.selection;
     if (!sel) {
       toast('Select a clip, zoom, speed change or annotation first.');
@@ -270,6 +325,12 @@ async function start() {
       store.apply((p) => P.removeAnnotation(p, sel.id));
     } else if (sel.kind === 'caption') {
       store.apply((p) => P.setCaptions(p, { segments: p.captions.segments.filter((c) => c.id !== sel.id) }));
+    } else if (sel.kind === 'audio') {
+      store.apply((p) => P.removeAudioClip(p, sel.id));
+    } else if (sel.kind === 'overlay') {
+      store.apply((p) => P.removeOverlay(p, sel.id));
+    } else if (sel.kind === 'marker') {
+      store.apply((p) => P.removeMarker(p, sel.id));
     } else if (sel.kind === 'speed') {
       store.apply((p) => P.paintSpeed(p, { source: sel.source, start: sel.start, end: sel.end, rate: 1 }));
     }
@@ -277,6 +338,8 @@ async function start() {
   }
 
   function split() {
+    // A selected song or sound is split, as the selected clip is in any editor.
+    if (splitSelectedAudio(editor)) return;
     const t = player.time;
     const next = store.apply((p) => P.splitAt(p, t));
     if (next) toast('Split into two clips');
@@ -294,6 +357,24 @@ async function start() {
     toStart: () => player.seek(0),
     toEnd: () => player.seek(store.tl.duration),
     split,
+    cut: () => { player.pause(); cutDialog.show(timeline.marks); },
+    markIn: () => { timeline.setMark('in', player.time); refresh('marks'); toast(`In at ${formatTime(player.time, { fraction: true })}`); },
+    markOut: () => { timeline.setMark('out', player.time); refresh('marks'); toast(`Out at ${formatTime(player.time, { fraction: true })}`); },
+    clearMarks: () => { timeline.clearMarks(); refresh('marks'); toast('In and Out cleared'); },
+    // J/K/L: L plays forward, pressed again 2x, 4x, 8x; J the same backward; K stops.
+    shuttleForward: () => player.shuttle(player.speed >= 1 ? Math.min(8, player.speed * 2) : 1),
+    shuttleBack: () => player.shuttle(player.speed <= -1 ? Math.max(-8, player.speed * 2) : -1),
+    shuttleStop: () => player.pause(),
+    addMarker: () => {
+      const next = store.apply((p) => P.addMarker(p, { t: player.time }));
+      if (next) toast('Marker added. Double-click it on the ruler to name it');
+    },
+    freezeFrame: () => editor.freezeAtPlayhead(),
+    nextMarker: () => {
+      const m = store.project.markers.find((q) => q.t > player.time + 1e-3);
+      if (m) player.seek(m.t);
+      else toast(store.project.markers.length ? 'No more markers after the playhead' : 'No markers yet: press M to add one');
+    },
     addZoom: () => editor.addZoomAtPlayhead(),
     delete: deleteSelection,
     timelineZoomIn: () => timeline.zoomIn(),
@@ -306,7 +387,9 @@ async function start() {
       else if (firstRun.open && !store.selection) firstRun.dismiss();
       else store.select(null);
     },
-    addRecording: () => addRecording.show()
+    addRecording: () => addRecording.show(),
+    addAudio: () => addAudioFiles(editor, () => loupe.chooseMusic()),
+    addOverlay: () => editor.addOverlay()
   };
 
   $('undo').onclick = actions.undo;
@@ -314,9 +397,12 @@ async function start() {
   $('exportBtn').onclick = actions.export;
   $('play').onclick = actions.playPause;
   $('splitBtn').onclick = actions.split;
+  $('cutBtn').onclick = actions.cut;
   $('zoomBtn').onclick = actions.addZoom;
   $('deleteBtn').onclick = actions.delete;
   $('addRecBtn').onclick = actions.addRecording;
+  $('addAudioBtn').onclick = actions.addAudio;
+  $('addOverlayBtn').onclick = actions.addOverlay;
   $('tlOut').onclick = actions.timelineZoomOut;
   $('tlIn').onclick = actions.timelineZoomIn;
   $('tlFit').onclick = actions.timelineFit;
@@ -372,15 +458,41 @@ async function start() {
   function refresh(what) {
     $('undo').disabled = !store.canUndo;
     $('redo').disabled = !store.canRedo;
-    $('deleteBtn').disabled = !store.selection;
+    const { in: markA, out: markB } = timeline.marks;
+    $('deleteBtn').disabled = !store.selection && !(markA !== null && markB !== null);
     if (document.activeElement !== title) title.value = store.project.title;
     document.title = store.project.title || 'Loupe';
     for (const [id, m] of mounted) if (id === currentPanel) m.api.update(what);
   }
   store.subscribe(refresh);
+
+  // ---- level meter: left and right, -60..0 dBFS, with a peak that holds a
+  // moment -- the meter beside any editor's timeline, while it plays.
+  const meterRows = [...$('meter').querySelectorAll('.meter-row')];
+  const meterState = { levels: null, held: [-120, -120], heldAt: [0, 0] };
+  const toPct = (db) => Math.max(0, Math.min(100, ((db + 60) / 60) * 100));
+  const drawMeter = (now) => {
+    const levels = player.audio?.levels?.() ?? null;
+    meterState.levels = levels;
+    meterRows.forEach((row, i) => {
+      const peak = levels ? levels[i].peak : -120;
+      if (peak >= meterState.held[i] || now - meterState.heldAt[i] > 1200) {
+        meterState.held[i] = peak;
+        meterState.heldAt[i] = now;
+      }
+      row.firstElementChild.style.width = `${toPct(peak)}%`;
+      row.lastElementChild.style.left = `${toPct(meterState.held[i])}%`;
+      row.lastElementChild.hidden = meterState.held[i] <= -60;
+    });
+    $('meter').classList.toggle('clipping', meterState.held.some((d) => d > -0.5));
+    requestAnimationFrame(drawMeter);
+  };
+  requestAnimationFrame(drawMeter);
   player.onTime(() => {
     // The zoom panel's "Add a zoom here" depends on where the playhead is.
     if (currentPanel === 'zoom' && !store.selection && !player.playing) mounted.get('zoom').api.update('time');
+    // Keyframed values and their ◆ state depend on where the playhead is.
+    if (currentPanel === 'clip' && store.selection && !player.playing) mounted.get('clip').api.update('time');
   });
   refresh('load');
   player.seek(0);
@@ -395,7 +507,8 @@ async function start() {
 
   // For the end-to-end tests (test/e2e/editor.js), which drive this page.
   window.__editor = {
-    store, player, timeline, exportDialog, cheat, editor, actions, saver, overlay, addRecording, thumbnails, firstRun
+    store, player, timeline, exportDialog, cheat, editor, actions, saver, overlay, addRecording, cutDialog, thumbnails, firstRun,
+    meter: meterState
   };
   document.body.dataset.ready = 'true';
   // After the page is up, so the tests (and people) see a settled editor.

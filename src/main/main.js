@@ -20,6 +20,8 @@ const { registerShareIpc } = require('./ipc/share');
 const { registerFileActionsIpc } = require('./ipc/fileActions');
 const { registerVoiceoverIpc } = require('./ipc/voiceover');
 const { registerMusicIpc } = require('./ipc/music');
+const { registerLutIpc } = require('./ipc/luts');
+const { registerMediaIpc } = require('./ipc/media');
 const { registerCaptionsIpc } = require('./ipc/captions');
 const { registerBackgroundIpc } = require('./ipc/background');
 const { registerAppendRecordingIpc } = require('./ipc/append-recording');
@@ -833,6 +835,8 @@ registerFileActionsIpc(editorIpc, undefined, { checkFile: exportedFiles.check })
 // Audio files the editor adds to the open project (voiceover takes, music).
 registerVoiceoverIpc({ ipcMain: editorIpc, getProjectDir: () => openEditorDir() });
 registerMusicIpc({ ipcMain: editorIpc, dialog, BrowserWindow, getProjectDir: () => openEditorDir() });
+registerLutIpc({ ipcMain: editorIpc, dialog, BrowserWindow, getProjectDir: () => openEditorDir() });
+registerMediaIpc({ ipcMain: editorIpc, dialog, BrowserWindow, getProjectDir: () => openEditorDir() });
 // Captions: speech model downloads and saving .srt/.vtt (see ipc/captions.js).
 registerCaptionsIpc({ ipcMain: editorIpc, app, dialog, BrowserWindow, getDefaultDir: () => openEditorDir() });
 // Background pictures: bundled wallpapers and pictures copied into the project.
@@ -902,7 +906,9 @@ registerExportIpc({
   onExported: (file) => exportedFiles.remember(file)
 });
 // Add recording: another recording from the Library, played after this one.
-registerAppendRecordingIpc({ ipcMain: editorIpc, library: appShell.library, store: projects, projectDir: () => openEditorDir() });
+registerAppendRecordingIpc({
+  ipcMain: editorIpc, library: appShell.library, store: projects, projectDir: () => openEditorDir(), dialog, BrowserWindow
+});
 
 function flushProject() {
   try {

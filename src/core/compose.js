@@ -25,6 +25,9 @@ import * as keystrokes from './layers/keystrokes.js';
 import * as webcam from './layers/webcam.js';
 import * as captions from './layers/captions.js';
 import * as transitions from './layers/transitions.js';
+import * as overlays from './layers/overlays.js';
+import { clipTransform, clipColor, cssFilter, tintOf, isPlain, transformMatrix } from './look.js';
+import { valueAt } from './keyframes.js';
 
 export const REFERENCE_HEIGHT = 1080;
 
@@ -36,6 +39,8 @@ export const LAYERS = [
   { layer: { name: 'shadow', draw: frame.drawShadow }, clip: false },
   { layer: frame, clip: true },
   { layer: cursor, clip: true },
+  // Pictures and videos on the rows above the main video.
+  { layer: overlays, clip: false },
   // Unclipped: title cards cover the whole output; the layer clips the rest.
   { layer: annotations, clip: false },
   { layer: keystrokes, clip: false },
@@ -132,8 +137,10 @@ export function cameraTrackFor(project, source, cursorTrack, aspect) {
   const zooms = project.zooms.filter((z) => z.source === source);
   const hit = byKey.get(key);
   if (hit && hit.zooms.length === zooms.length && hit.zooms.every((z, i) => z === zooms[i])) return hit.track;
+  // No cursor (an imported video): a zoom that follows it holds the middle.
+  const cursor = cursorTrack?.length ? cursorTrack : [{ t: 0, x: meta.width / 2, y: meta.height / 2 }];
   const track = solveCamera({
-    zooms, cursorTrack: cursorTrack ?? [], duration: meta.duration,
+    zooms, cursorTrack: cursor, duration: meta.duration,
     width: meta.width, height: meta.height, aspect
   });
   byKey.set(key, { zooms, track });
@@ -167,39 +174,132 @@ export function frameState({ project, tl, outT, frames = {}, size, assets = {} }
   };
 }
 
-// A second canvas per output context, for a crossfade's other picture.
+// Spare canvases per output context: one for a transition's other picture,
+// one for a copy of this one (a slide, zoom or blur moves or filters it).
 const blendCanvases = new WeakMap();
-function blendCanvasFor(ctx, { width, height }) {
+const copyCanvases = new WeakMap();
+function spareCanvas(cache, ctx, { width, height }) {
   if (typeof globalThis.OffscreenCanvas !== 'function') return null;
-  let c = blendCanvases.get(ctx);
+  let c = cache.get(ctx);
   if (!c || c.canvas.width !== width || c.canvas.height !== height) {
     const canvas = new globalThis.OffscreenCanvas(width, height);
     c = { canvas, ctx: canvas.getContext('2d', { alpha: false }) };
-    blendCanvases.set(ctx, c);
+    cache.set(ctx, c);
   }
   return c;
+}
+const blendCanvasFor = (ctx, size) => spareCanvas(blendCanvases, ctx, size);
+
+// This picture, copied aside and the canvas cleared to black, ready to be
+// drawn back moved, scaled or filtered.
+function liftPicture(ctx, size) {
+  const copy = spareCanvas(copyCanvases, ctx, size);
+  if (!copy || !ctx.canvas) return null;
+  copy.ctx.drawImage(ctx.canvas, 0, 0);
+  ctx.save();
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, size.width, size.height);
+  ctx.restore();
+  return copy.canvas;
+}
+
+function drawScaled(ctx, image, scale, { width, height }, alpha = 1) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(width / 2, height / 2);
+  ctx.scale(scale, scale);
+  ctx.drawImage(image, -width / 2, -height / 2);
+  ctx.restore();
 }
 
 export function drawFrame(ctx, options) {
   const state = drawLayers(ctx, options);
-  // A crossfade: the other side's held picture (transitions.js), drawn as a
-  // whole frame of its own and blended over this one.
-  const other = options.frames?.[transitions.TRANSITION_FRAME];
-  if (other && !options.nested) {
-    const tr = transitions.transitionAt(state.project, state.tl, state.outT);
-    const blend = tr?.type === 'crossfade' ? blendCanvasFor(ctx, state.size) : null;
-    if (blend) {
-      drawLayers(blend.ctx, {
-        ...options, outT: tr.other.outT, nested: true,
-        frames: { ...options.frames, [tr.other.source]: other }
-      });
+  if (options.nested) return state;
+  const tr = transitions.transitionAt(state.project, state.tl, state.outT);
+  if (!tr || !ctx.canvas) return state;
+  const { size } = state;
+  const plan = transitions.transitionPlan(tr, state.outT, size);
+  if (plan.mode === 'blur') {
+    const picture = liftPicture(ctx, size);
+    if (picture && plan.px > 0) {
       ctx.save();
-      ctx.globalAlpha = transitions.crossfadeMix(tr, state.outT);
-      ctx.drawImage(blend.canvas, 0, 0);
+      ctx.filter = `blur(${(plan.px * size.height) / 1080}px)`;
+      ctx.drawImage(picture, 0, 0);
       ctx.restore();
+    } else if (picture) ctx.drawImage(picture, 0, 0);
+    return state;
+  }
+  // Two pictures: the other side's held picture (transitions.js), drawn as a
+  // whole frame of its own and put with this one as the plan says.
+  const other = options.frames?.[transitions.TRANSITION_FRAME];
+  if (!other || !transitions.needsOtherPicture(tr.type)) return state;
+  const blend = blendCanvasFor(ctx, size);
+  if (!blend) return state;
+  drawLayers(blend.ctx, {
+    ...options, outT: tr.other.outT, nested: true,
+    frames: { ...options.frames, [tr.other.source]: other }
+  });
+  const otherPicture = blend.canvas;
+  if (plan.mode === 'alpha') {
+    ctx.save();
+    ctx.globalAlpha = plan.alpha;
+    ctx.drawImage(otherPicture, 0, 0);
+    ctx.restore();
+  } else if (plan.mode === 'clip' || plan.mode === 'circle') {
+    ctx.save();
+    ctx.beginPath();
+    if (plan.mode === 'clip') ctx.rect(plan.rect.x, plan.rect.y, plan.rect.w, plan.rect.h);
+    else {
+      if (!plan.inside) ctx.rect(0, 0, size.width, size.height);
+      ctx.moveTo(plan.cx + plan.r, plan.cy);
+      ctx.arc(plan.cx, plan.cy, Math.max(0, plan.r), 0, Math.PI * 2);
+    }
+    ctx.clip('evenodd');
+    ctx.drawImage(otherPicture, 0, 0);
+    ctx.restore();
+  } else if (plan.mode === 'slide') {
+    const picture = liftPicture(ctx, size);
+    if (picture) {
+      ctx.drawImage(picture, plan.current.dx, plan.current.dy);
+      ctx.drawImage(otherPicture, plan.other.dx, plan.other.dy);
+    }
+  } else if (plan.mode === 'zoom') {
+    // The old clip grows as the new one comes up over it.
+    if (state.outT < tr.join) {
+      const picture = liftPicture(ctx, size);
+      if (picture) drawScaled(ctx, picture, plan.outgoingScale, size);
+      ctx.save();
+      ctx.globalAlpha = plan.incomingAlpha;
+      ctx.drawImage(otherPicture, 0, 0);
+      ctx.restore();
+    } else {
+      drawScaled(ctx, otherPicture, plan.outgoingScale, size, 1 - plan.incomingAlpha);
     }
   }
   return state;
+}
+
+// The clip's look (look.js) on the recording's layers: moved, scaled,
+// rotated and cropped, and the colour for the frame layer to draw with.
+function applyLook(ctx, state) {
+  const clip = state.project.clips[state.clipIndex];
+  state.look = null;
+  const animated = clip?.keyframes && Object.values(clip.keyframes).some((k) => k?.length);
+  if (!clip || (isPlain(clip) && !animated)) return;
+  const t = clipTransform(clip);
+  // Keyframed position and size, at this moment of the recording.
+  for (const prop of ['x', 'y', 'scale', 'rotate']) t[prop] = valueAt(clip.keyframes?.[prop], state.t, t[prop]);
+  const color = clipColor(clip);
+  ctx.transform(...transformMatrix(t, state.content));
+  const { content: c } = state;
+  const crop = {
+    x: c.x + t.crop.left * c.w, y: c.y + t.crop.top * c.h,
+    w: c.w * (1 - t.crop.left - t.crop.right), h: c.h * (1 - t.crop.top - t.crop.bottom)
+  };
+  ctx.beginPath();
+  ctx.rect(crop.x, crop.y, crop.w, crop.h);
+  ctx.clip();
+  state.look = { filter: cssFilter(color), tint: tintOf(color), crop, lut: color.lut, lutMix: color.lutMix };
 }
 
 function drawLayers(ctx, options) {
@@ -211,6 +311,7 @@ function drawLayers(ctx, options) {
       frame.roundedRectPath(ctx, state.content, state.radius);
       ctx.clip();
       clipped = true;
+      applyLook(ctx, state);
     } else if (!clip && clipped) {
       ctx.restore();
       clipped = false;
