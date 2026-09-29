@@ -89,3 +89,10 @@ main { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 28px 40px; }
   .search input { width: 150px; }
 }
 .empty .actions { display: flex; gap: 8px; }
+
+/* A video dragged over the window: drop it anywhere to import it. */
+.drop-zone { position: fixed; inset: 10px; z-index: 20; display: flex; align-items: center;
+             justify-content: center; border: 2px dashed var(--accent); border-radius: 14px;
+             background: rgba(24,25,27,.86); pointer-events: none; }
+.drop-zone[hidden] { display: none; }
+.drop-zone p { font-size: 16px; }

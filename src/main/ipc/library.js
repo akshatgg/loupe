@@ -4,6 +4,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { pipeline } = require('node:stream/promises');
+const { probeVideo } = require('../video-probe');
+const { importedProject, videoFileName, VIDEO_EXTENSIONS } = require('../import-video');
 
 // The recordings library: every project folder in the recordings folder, and
 // what the Library window can do to one (open, rename, duplicate, reveal,
@@ -112,6 +115,37 @@ function validTitle(title) {
   return clean;
 }
 
+// The file's name, without its extension, as the new recording's title.
+function importTitle(sourcePath) {
+  const stem = path.basename(sourcePath, path.extname(sourcePath));
+  return stem.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, MAX_TITLE) || 'Imported video';
+}
+
+// A copy-on-write clone when the disk can make one (instant, and no extra
+// space on APFS), else the bytes streamed across with progress.
+async function copyVideoFile(from, to, onProgress = () => {}) {
+  try {
+    await fs.promises.copyFile(from, to, fs.constants.COPYFILE_FICLONE_FORCE);
+    return;
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOSPC') throw err;
+    fs.rmSync(to, { force: true });
+  }
+  const total = fs.statSync(from).size || 1;
+  let done = 0;
+  let shown = 0;
+  const input = fs.createReadStream(from, { highWaterMark: 4 * 1024 * 1024 });
+  input.on('data', (chunk) => {
+    done += chunk.length;
+    const fraction = done / total;
+    if (fraction - shown >= 0.01) {
+      shown = fraction;
+      onProgress(Math.min(fraction, 0.99));
+    }
+  });
+  await pipeline(input, fs.createWriteStream(to, { flags: 'wx' }));
+}
+
 // `root` is a function returning the recordings folder, so a change of
 // folder in Settings applies straight away. `locale` (a string, or a function
 // for one) should be app.getLocale(): the windows format dates with it, while
@@ -131,7 +165,7 @@ function usableFolder(folder) {
   }
 }
 
-function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
+function createLibrary({ root, locale, now = Date.now, createThumbnail, copyFile = copyVideoFile }) {
   const rootReal = () => usableFolder(root());
   const copying = new Set();
 
@@ -244,16 +278,7 @@ function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
     const base = rootReal();
     sweepAbandonedCopies(base);
     const source = entry(id, dir);
-    let work;
-    for (let n = 0; ; n++) {
-      work = path.join(base, `.copying-${now()}-${n}`);
-      try {
-        fs.mkdirSync(work);
-        break;
-      } catch (err) {
-        if (err.code !== 'EEXIST') throw err;
-      }
-    }
+    const work = reserveWorkFolder(base);
     // cp wants a target that doesn't exist yet; `work` only reserves the name.
     const target = path.join(work, 'copy');
     const keep = recordingFileNames(dir);
@@ -271,12 +296,7 @@ function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
       // The copy keeps the original's date, so it sorts next to it.
       project.createdAt = source.createdAt;
       writeJson(file, project);
-      // Picked only now, and renamed in the same synchronous step, so two
-      // duplicates finishing together can't pick the same name.
-      let stamp = now();
-      while (fs.existsSync(path.join(base, String(stamp)))) stamp++;
-      copyId = String(stamp);
-      fs.renameSync(target, path.join(base, copyId));
+      copyId = moveIntoLibrary(base, target);
     } catch (err) {
       if (err.code === 'ENOSPC') throw new Error('There isn’t enough free space on the disk to make a copy.');
       // Moved to the Trash (or its drive unplugged) while it was being copied.
@@ -287,6 +307,65 @@ function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
       fs.rmSync(work, { recursive: true, force: true });
     }
     return entry(copyId, path.join(base, copyId));
+  }
+
+  // A hidden folder to build a copy or an import in: list() skips it, and
+  // sweepAbandonedCopies removes it if Loupe quits before it is finished.
+  function reserveWorkFolder(base) {
+    for (let n = 0; ; n++) {
+      const work = path.join(base, `.copying-${now()}-${n}`);
+      try {
+        fs.mkdirSync(work);
+        return work;
+      } catch (err) {
+        if (err.code !== 'EEXIST') throw err;
+      }
+    }
+  }
+
+  // The finished folder into the Library, named by the time. Picked only
+  // now, and renamed in the same synchronous step, so two copies finishing
+  // together can't pick the same name.
+  function moveIntoLibrary(base, folder) {
+    let stamp = now();
+    while (fs.existsSync(path.join(base, String(stamp)))) stamp++;
+    const id = String(stamp);
+    fs.renameSync(folder, path.join(base, id));
+    return id;
+  }
+
+  // A video file from anywhere as a new recording: checked first (so a file
+  // the editor can't play is refused before gigabytes are copied), copied
+  // into a hidden folder with its project.json, then moved into place.
+  // `onProgress(fraction)` follows the copy.
+  async function importVideo(sourcePath, { onProgress = () => {} } = {}) {
+    const file = videoFileName(sourcePath);
+    if (!path.isAbsolute(sourcePath)) throw new Error('That video couldn’t be opened. Is the file still there?');
+    const probe = await probeVideo(sourcePath);
+    const base = rootReal();
+    sweepAbandonedCopies(base);
+    const work = reserveWorkFolder(base);
+    const target = path.join(work, 'import');
+    copying.add(work);
+    try {
+      fs.mkdirSync(target);
+      await copyFile(sourcePath, path.join(target, file), onProgress);
+      const createdAt = now();
+      const title = importTitle(sourcePath);
+      writeJson(path.join(target, 'project.json'), importedProject(probe, { title, createdAt, file }));
+      const id = moveIntoLibrary(base, target);
+      onProgress(1);
+      // The video's own sound in a format the exporter can't play is left
+      // out, and the person told so.
+      return { ...entry(id, path.join(base, id)), soundLeftOut: probe.sound === 'other' };
+    } catch (err) {
+      if (err.code === 'ENOSPC') throw new Error('There isn’t enough free space on the disk to import that video.');
+      if (err.code === 'ENOENT') throw new Error('That video was moved or deleted while it was being imported.');
+      throw err;
+    } finally {
+      copying.delete(work);
+      fs.rmSync(work, { recursive: true, force: true });
+    }
   }
 
   // A copy cut short by Loupe quitting or crashing leaves its hidden folder
@@ -304,7 +383,18 @@ function createLibrary({ root, locale, now = Date.now, createThumbnail }) {
     }
   }
 
-  return { root, resolve, list, thumbnail, rename, duplicate };
+  return { root, resolve, list, thumbnail, rename, duplicate, importVideo };
+}
+
+// The Open dialog for a video to import; the path, or null when cancelled.
+async function chooseVideoFile(dialog, owner) {
+  const { canceled, filePaths } = await dialog.showOpenDialog(owner ?? undefined, {
+    title: 'Import a video',
+    buttonLabel: 'Import',
+    properties: ['openFile'],
+    filters: [{ name: 'Videos', extensions: VIDEO_EXTENSIONS.map((x) => x.slice(1)) }]
+  });
+  return canceled || !filePaths?.length ? null : filePaths[0];
 }
 
 // ~/Movies/Loupe rather than /Users/name/Movies/Loupe on macOS; Windows
@@ -377,6 +467,22 @@ function registerLibraryIpc({
   ipcMain.handle('library:revealRoot', () => shell.openPath(library.root()));
   ipcMain.handle('library:newRecording', () => { showPicker(); });
 
+  // Import a video (a dropped file's path, or one chosen here), then open it
+  // in the editor -- unless a recording or an export is in progress, when it
+  // just joins the Library and `blocked` says why it didn't open.
+  async function importAndOpen(e, sourcePath) {
+    const send = (fraction) => { if (!e.sender.isDestroyed()) e.sender.send('library:importProgress', fraction); };
+    const recording = await library.importVideo(sourcePath, { onProgress: send });
+    const blocked = openBlocked();
+    if (!blocked) openEditor(library.resolve(recording.id));
+    return { recording, opened: !blocked, blocked };
+  }
+  ipcMain.handle('library:importVideo', (e, sourcePath) => importAndOpen(e, sourcePath));
+  ipcMain.handle('library:chooseVideo', async (e) => {
+    const sourcePath = await chooseVideoFile(dialog, BrowserWindow.fromWebContents(e.sender));
+    return sourcePath ? importAndOpen(e, sourcePath) : null;
+  });
+
   // The confirmation is a native dialog shown from here, not the page, so a
   // recording can't be trashed without the user saying so.
   ipcMain.handle('library:trash', async (e, id) => {
@@ -406,5 +512,5 @@ function registerLibraryIpc({
 
 module.exports = {
   THUMB, MAX_TITLE, createLibrary, registerLibraryIpc, usableFolder,
-  defaultTitle, projectDuration, projectVideo, displayPath
+  defaultTitle, projectDuration, projectVideo, displayPath, chooseVideoFile
 };

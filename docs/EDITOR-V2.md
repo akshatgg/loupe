@@ -134,7 +134,14 @@ item is attached to.
   audio: {
     mic:    { volume: 1, muted: false, cleanUp: true, level: true },
     system: { volume: 0.8, muted: false },
-    music:  { file, volume: 0.3, duck: true } | null,     // file copied into the project folder
+    clips:  [{ id, file, name, start, from, length, fileDuration, volume, fadeIn, fadeOut,
+               duck, muted, loop, lane, points: [{ t, gain }], beats, source }],
+                                 // songs and sound files on the audio rows; `points` is the
+                                 // volume over time, `source` (with file null) the video's
+                                 // own sound detached from clips marked `detached: true`
+    lanes:  [{ muted, solo, locked }],                   // per audio row
+                                 // rows (core/audio/clips.js); files copied into music/.
+                                 // A project's old `music: {...}` opens as clip a1 (repeating)
     voiceover: [{ id, file, source, t, volume: 1 }]       // anchored to a source moment
   },
   captions: { show: false, language: "auto", segments: [{ id, source, start, end, text }],
@@ -232,6 +239,41 @@ flushes a pending save first; closing the editor and quitting flush too.
   shows a three-line card once (localStorage). An added recording's sound
   (`audio-preview.js` `sourcesChanged`), webcam and keys (`visual-media.js`
   `addSource`) join the preview too.
+- Imported videos (docs/superpowers/specs/2026-09-28-import-video-design.md):
+  the Library's "Import video" (or a file dropped on it) and Add recording's
+  "Choose a video file…" run `library.importVideo` (ipc/library.js): an
+  `.mp4`/`.mov`/`.m4v` checked by `video-probe.js` (H.264, HEVC, VP9 or AV1
+  picture; AAC sound or none), copied into a new project folder as
+  `video.<ext>`, with `sources.main.kind: "file"`, `cursor: null` and
+  `rotation` (clockwise quarter turns; the exporter's `video-source.js` turns
+  frames upright). `import-video.js` gives it a plain look and its own frame
+  rate. Without a cursor track a following zoom holds the middle.
+- Pro editing (`test/e2e/pro-editing.e2e.js`): I / O mark a range, shaded
+  over the tracks (`timeline.marks`), Delete removes it with `cutRange`, ⌥X
+  clears it, the Cut box starts from it; J / K / L shuttle (`player.shuttle`:
+  ±1, 2, 4, 8x; backwards is drawn frame by frame, sound at 1x only);
+  markers (`project.markers` [{ id, t, label, color }], output time): M adds,
+  ⇧M jumps to the next, flags on the ruler drag, double-click names and
+  colours them (`marker-dialog.js`); drags snap to markers.
+- Clip panel (`panels/clip.js`, the inspector for a selected clip or
+  overlay): Play backwards (`clip.reverse`, silent), freeze frames (⇧F:
+  `freezeFrame`, a clip with `hold` seconds showing its `start`), position /
+  scale / rotate / flip / crop (`clip.transform`) and colour (`clip.color`:
+  brightness, contrast, saturation, preset looks, a .cube LUT graded on the
+  GPU, `core/look.js`, `core/lut.js`, `layers/lut-gl.js`, `ipc/luts.js`);
+  ◆ keyframes (`core/keyframes.js`) on position, scale, rotation (clips, in
+  recording time) and opacity (overlays, from their start).
+- Transitions (`layers/transitions.js transitionPlan`): fade, crossfade, dip
+  to black / white, blur, wipe left / right / up / down, slide left / right,
+  circle, zoom; two-picture ones get the other side's held frame.
+- Overlays (`project.overlays`, `layers/overlays.js`, `timeline-overlays.js`,
+  `ipc/media.js`): pictures and videos on rows V2, V3... above the clips
+  (the Overlay button), a picture-in-picture until moved, trimmed and moved
+  like clips, placed, faded and keyframed in the Clip panel.
+  Checks: `test/e2e/clip-effects.e2e.js`, `test/e2e/overlays.e2e.js`.
+- `cut-dialog.js` ("Cut", X): From/To times (`timeline-math.js` `parseTime`,
+  `cutRanges`) -> "Remove this part" or "Keep only this part", core
+  `cutRange`s as one undo step.
 - `panels/index.js`: the sidebar, one module per panel exporting
   `{ id, title, icon, mount(container, editor) -> { update(what) } }`, in
   this order: Style, Zoom, Audio, Captions, Annotations, Webcam.
@@ -310,6 +352,23 @@ takes the same result.
   note shows on the stage meanwhile; the old mix keeps playing.
   `project:load` returns `folder` (file:// URL) so the page can find music
   and takes.
+- Audio clips (`timeline-music.js`, core `addAudioClip`, `updateAudioClip`,
+  `splitAudioClip`, `duplicateAudioClip`, `removeAudioClip`): each song or
+  sound file is a block on an "Audio n" row under the Sound strip -- drag to
+  move (down to another row, ⌥ for a copy), drag its ends to trim, its top
+  corner knobs to fade. A clip over another goes to the first free row.
+  Clicking one selects it (`{ kind: 'audio', id }`) and the Audio panel shows
+  its settings; S splits it, Delete removes it. The toolbar's Audio button
+  and dropped files add several at once (`addAudioFiles`), one after another
+  from the playhead. The line across a block is its volume (drag it; ⌥-click
+  for a point, drag points, double-click one to remove it); each row has
+  Mute / Solo / Lock (`setAudioLane`); "Beat marks" (`core/audio/beats.js`,
+  found when the song is decoded) draws the beats and every timeline drag
+  snaps to them; "Detach video sound" (`detachAudio`, `detachAllAudio`,
+  `reattachAudio`) turns a clip's own sound into an audio clip (not for
+  parts with a speed change). A level meter (-60..0 dBFS per side) sits by
+  the time while playing (`audio-preview.js levels()`).
+  Checks: `test/e2e/audio-clips.e2e.js` (12 cases, export and preview measured).
 - `timeline-audio.js`: the "Sound" strip under the clips (recording waveform
   per clip in output time, voiceover takes as draggable blue blocks, a purple
   line when there is music).

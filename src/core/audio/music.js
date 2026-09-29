@@ -1,4 +1,6 @@
-// Background music (project field audio.music = { file, volume, duck }).
+// Songs and sound files (project field audio.clips, see clips.js): each clip
+// placed where it starts in the video, from its point in the file, for its
+// length, repeating or not, with its fades, volume and ducking.
 //
 // The file is copied into the project folder by the main process
 // (src/main/ipc/music.js, IPC 'music:choose' / 'music:import'); the exporter
@@ -14,6 +16,10 @@
 //     given voice tracks.
 
 import { duckingCurve } from './duck.js';
+import { gainAt } from './mix.js';
+import { clipLength, clipGainAt } from './clips.js';
+
+const CURVE_RATE = 100;
 
 // Keep in sync with src/main/ipc/music.js (a test checks they match).
 export const MUSIC_EXTENSIONS = ['.mp3', '.m4a', '.aac', '.wav', '.aif', '.aiff', '.flac', '.ogg', '.opus', '.webm'];
@@ -76,12 +82,48 @@ function applyFades(channels, sampleRate, n, fadeIn, fadeOut) {
   }
 }
 
-export function musicTrack(settings, decoded, duration, { voiceTracks = [], duckOptions, fitOptions } = {}) {
-  const fitted = fitMusic(decoded, duration, fitOptions);
+// One audio clip as a mix.js track, in a video `videoDuration` long (the
+// part past the video's end isn't heard). `ducking` is the curve for the
+// voices, shared by every clip that ducks.
+export function audioClipTrack(clip, decoded, videoDuration, { ducking = null } = {}) {
+  const length = Math.min(clipLength(clip, videoDuration), videoDuration - clip.start);
+  if (!(length > 0)) return null;
+  const fitted = fitMusic(decoded, length, {
+    loop: clip.loop, offset: clip.from, fadeIn: clip.fadeIn, fadeOut: clip.fadeOut
+  });
+  const points = clip.points ?? [];
+  const duck = clip.duck ? ducking : null;
+  // Volume points and ducking make one curve over the clip, in video time.
+  let gain = duck;
+  if (points.length) {
+    const n = Math.max(2, Math.ceil(length * CURVE_RATE) + 1);
+    const values = new Float32Array(n);
+    for (let k = 0; k < n; k++) {
+      const t = Math.min(length, k / CURVE_RATE);
+      values[k] = clipGainAt(clip, t) * (duck ? gainAt(duck, clip.start + t) : 1);
+    }
+    gain = { rate: CURVE_RATE, start: clip.start, values };
+  }
   return {
     channels: fitted.channels,
     sampleRate: fitted.sampleRate,
-    startOffset: 0,
+    startOffset: clip.start,
+    volume: points.length ? 1 : clip.volume,
+    muted: clip.muted,
+    gain
+  };
+}
+
+export function musicTrack(settings, decoded, duration, { voiceTracks = [], duckOptions, fitOptions } = {}) {
+  const start = Math.min(Math.max(0, settings?.start ?? 0), duration);
+  const from = Math.max(0, settings?.from ?? 0);
+  // A song joined part way through comes up over a moment instead of with a
+  // click. The ducking curve is in video time, as the track's placement is.
+  const fitted = fitMusic(decoded, duration - start, { fadeIn: from > 0 ? 0.3 : 0, ...fitOptions, offset: from });
+  return {
+    channels: fitted.channels,
+    sampleRate: fitted.sampleRate,
+    startOffset: start,
     volume: settings?.volume ?? 0.3,
     gain: settings?.duck === false ? null : duckingCurve(voiceTracks, duration, duckOptions)
   };

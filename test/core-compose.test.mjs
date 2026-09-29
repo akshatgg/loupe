@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import * as P from '../src/core/project.js';
 import { buildTimeline } from '../src/core/timeline.js';
-import { drawFrame, frameState, exportSize, layout, LAYERS, aspectRatio } from '../src/core/compose.js';
+import { drawFrame, frameState, exportSize, layout, LAYERS, aspectRatio, cameraTrackFor } from '../src/core/compose.js';
 import { gradientLine, coverCrop } from '../src/core/layers/background.js';
 import { arrowPoints } from '../src/core/layers/cursor.js';
 import { parseCursorTrack, cursorAt, prepareCursor, cursorPosition, cursorOpacity } from '../src/core/cursor.js';
@@ -250,9 +250,10 @@ test('hide when idle fades the cursor out after it sits still', () => {
 
 test('every section 5 layer is registered in order', () => {
   assert.deepStrictEqual(LAYERS.map((l) => l.layer.name),
-    ['background', 'shadow', 'frame', 'cursor', 'annotations', 'keystrokes', 'webcam', 'captions', 'transitions']);
+    ['background', 'shadow', 'frame', 'cursor', 'overlays', 'annotations', 'keystrokes', 'webcam', 'captions', 'transitions']);
   // Annotations clip themselves: a title card covers the whole output.
-  assert.deepStrictEqual(LAYERS.map((l) => l.clip), [false, false, true, true, false, false, false, false, false]);
+  // Overlays are placed on the whole output, like the webcam.
+  assert.deepStrictEqual(LAYERS.map((l) => l.clip), [false, false, true, true, false, false, false, false, false, false]);
   let p = P.createProject({ main: MAIN });
   p = P.addAnnotation(p, { type: 'box', start: 0, end: 5 });
   assert.doesNotThrow(() => render(p));
@@ -343,4 +344,16 @@ test('an older project without the caption box setting gets it on load', () => {
   const old = { ...p, captions: { ...p.captions, style: { size: 1.5, position: 'top' } } };
   assert.deepStrictEqual(P.validateProject(old).captions.style, { size: 1.5, position: 'top', box: true });
   assert.throws(() => P.setCaptions(p, { style: { box: 'yes' } }), /box/i);
+});
+
+test('with no cursor track, a following zoom holds the middle of the picture', () => {
+  const main = { width: 1600, height: 1000, duration: 4, cursor: null };
+  let p = P.createProject({ main });
+  p = P.addZoom(p, { start: 1, end: 3, level: 2, follow: true });
+  for (const cursor of [undefined, []]) {
+    const track = cameraTrackFor(p, 'main', cursor, null);
+    const mid = track[Math.round(2 * track.length / 4)];
+    assert.ok(mid.zoom > 1.9, `zoomed in: ${mid.zoom}`);
+    assert.ok(Math.abs(mid.cx - 800) < 1 && Math.abs(mid.cy - 500) < 1, `centre: ${mid.cx}, ${mid.cy}`);
+  }
 });

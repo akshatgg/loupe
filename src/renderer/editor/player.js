@@ -11,6 +11,7 @@
 import { drawFrame, exportSize } from '../../core/compose.js';
 import { parseCursorTrack } from '../../core/cursor.js';
 import { clipLayout, clipIndexAt, rateAt } from './timeline-math.js';
+import { parseCube } from '../../core/lut.js';
 import { createAudioPreview } from './audio-preview.js';
 import { createVisualMedia } from './visual-media.js';
 
@@ -28,6 +29,10 @@ export function createPlayer({ canvas, store, sources, folder = null }) {
   const audio = createAudioPreview({ sources, folder });
   let outT = 0;
   let playing = false;
+  // Shuttle speed (J/K/L): 1 plays normally; 2, 4, 8 fast forward; -1, -2,
+  // -4, -8 backward, drawn frame by frame (a video can't play backwards).
+  // Sound is heard at 1 only.
+  let speed = 1;
   let wallStart = 0;
   let outStart = 0;
   let lastClip = -1;
@@ -36,7 +41,7 @@ export function createPlayer({ canvas, store, sources, folder = null }) {
   let size = { width: 2, height: 2 };
   let lastState = null;
   // Webcam, crossfade pictures, shortcuts and the background picture.
-  const visuals = createVisualMedia({ sources, loupe: window.loupe, onChange: () => { dirty = true; } });
+  const visuals = createVisualMedia({ sources, loupe: window.loupe, folder, onChange: () => { dirty = true; } });
 
   // One muted <video> (and its cursor track) per recording. Also used when a
   // recording is added to the project later (Add recording).
@@ -93,7 +98,28 @@ export function createPlayer({ canvas, store, sources, folder = null }) {
     dirty = true;
   }
 
-  function syncVideo(at, rate, jumped) {
+  // `backward`: the recording's moments go back as the video plays (a
+  // reversed clip, or J): a video can't play backwards, so it is paused and
+  // shown frame by frame. A freeze frame holds its moment the same way.
+  // The clips' LUTs, fetched from the project folder and parsed once each;
+  // a frame drawn before one arrives is simply ungraded, and redrawn after.
+  const luts = {};
+  const lutsLoading = new Set();
+  function lutsFor(p) {
+    for (const clip of p.clips) {
+      const rel = clip.color?.lut;
+      if (!rel || rel in luts || lutsLoading.has(rel) || !folder) continue;
+      lutsLoading.add(rel);
+      fetch(new URL(rel.split('/').map(encodeURIComponent).join('/'), folder))
+        .then((r) => (r.ok ? r.text() : Promise.reject(new Error(r.status))))
+        .then((text) => { luts[rel] = parseCube(text); })
+        .catch((err) => console.warn('Loupe: a LUT could not be read:', rel, err.message))
+        .finally(() => { lutsLoading.delete(rel); dirty = true; });
+    }
+    return luts;
+  }
+
+  function syncVideo(at, rate, jumped, backward = false) {
     for (const [key, v] of Object.entries(videos)) {
       if (key !== at.source) {
         if (!v.paused) v.pause();
@@ -101,7 +127,11 @@ export function createPlayer({ canvas, store, sources, folder = null }) {
       }
       if (v.readyState < 1) continue;
       const drift = v.currentTime - at.t;
-      if (playing) {
+      if (playing && (backward || rate === 0)) {
+        // Backward: paused, shown frame by frame as the playhead goes back.
+        if (!v.paused) v.pause();
+        if (Math.abs(drift) > 0.02 && !v.seeking) v.currentTime = at.t;
+      } else if (playing) {
         // A new clip is a jump -- unless it carries straight on from the last
         // one (a split nobody moved).
         if ((jumped && Math.abs(drift) > 0.05) || Math.abs(drift) > SEEK_DRIFT) v.currentTime = at.t;
@@ -120,9 +150,12 @@ export function createPlayer({ canvas, store, sources, folder = null }) {
     raf = requestAnimationFrame(frame);
     const tl = store.tl;
     if (playing) {
-      outT = outStart + (now - wallStart) / 1000;
+      outT = outStart + (speed * (now - wallStart)) / 1000;
       if (outT >= tl.duration) {
         outT = tl.duration;
+        setPlaying(false);
+      } else if (outT <= 0 && speed < 0) {
+        outT = 0;
         setPlaying(false);
       }
       dirty = true;
@@ -135,13 +168,15 @@ export function createPlayer({ canvas, store, sources, folder = null }) {
     const at = tl.toSource(outT);
     const jumped = at.clipIndex !== lastClip;
     lastClip = at.clipIndex;
-    const rate = rateAt(p, layout, outT);
-    syncVideo(at, rate, jumped);
-    audio.sync({ project: p, at, rate, playing, jumped, outT });
+    const clip = p.clips[at.clipIndex];
+    const held = clip?.hold > 0;
+    const rate = held ? 0 : rateAt(p, layout, outT) * Math.abs(speed);
+    syncVideo(at, rate, jumped, (speed < 0) !== Boolean(clip?.reverse));
+    audio.sync({ project: p, at, rate, playing: playing && speed === 1, jumped, outT });
     const frames = visuals.sync({ project: p, tl, outT, at, rate, playing });
     const v = videos[at.source];
     if (v && v.readyState >= 2) frames[at.source] = v;
-    lastState = drawFrame(ctx, { project: p, tl, outT, frames, size, assets: { ...visuals.assets, cursors } });
+    lastState = drawFrame(ctx, { project: p, tl, outT, frames, size, assets: { ...visuals.assets, cursors, luts: lutsFor(p) } });
     // Seeks land asynchronously; keep drawing until the frame has arrived.
     if (!playing && v && (v.seeking || v.readyState < 2)) dirty = true;
   }
@@ -150,11 +185,22 @@ export function createPlayer({ canvas, store, sources, folder = null }) {
     for (const fn of listeners) fn(outT, playing);
   }
 
-  function setPlaying(on) {
-    if (on === playing) return;
+  function setPlaying(on, nextSpeed = 1) {
+    if (on === playing && (!on || nextSpeed === speed)) return;
+    if (on && playing) {
+      // A new speed while playing: carry on from here.
+      outStart = outT;
+      wallStart = performance.now();
+      speed = nextSpeed;
+      dirty = true;
+      emitTime();
+      return;
+    }
     playing = on;
+    speed = on ? nextSpeed : 1;
     if (on) {
-      if (outT >= duration() - 1e-3) outT = 0;
+      if (speed > 0 && outT >= duration() - 1e-3) outT = 0;
+      if (speed < 0 && outT <= 1e-3) outT = duration();
       wallStart = performance.now();
       outStart = outT;
       lastClip = -1;
@@ -187,6 +233,9 @@ export function createPlayer({ canvas, store, sources, folder = null }) {
     get visuals() { return visuals; },
     play: () => setPlaying(true),
     pause: () => setPlaying(false),
+    // J/K/L: play at `s` (see `speed` above); 0 stops.
+    shuttle: (s) => setPlaying(s !== 0, s || 1),
+    get speed() { return playing ? speed : 0; },
     toggle: () => setPlaying(!playing),
     seek(t) {
       outT = Math.min(duration(), Math.max(0, Number.isFinite(t) ? t : 0));

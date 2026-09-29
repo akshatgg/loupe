@@ -22,6 +22,7 @@
 
 import { sameSound, playbackAction, computePeaks } from './audio-math.js';
 import { h } from './ui.js';
+import { detectBeats } from '../../core/audio/beats.js';
 
 // Edits in quick succession (a slider drag) make one mix.
 const RENDER_DELAY_MS = 180;
@@ -30,12 +31,19 @@ export function createAudioPreview({ sources, folder = null }) {
   let worker = null;
   let ctx = null;
   let gain = null;
+  let meterIn = null;
+  let meters = null;
+  const meterBuf = new Float32Array(2048);
   let buffer = null;
   let active = null; // { node, startedAtCtx, startedAtOut, buffer }
   let muted = false;
   let lastProject = null;
   let timer = null;
   let seq = 0;
+  // The project each render was asked for, by seq, and the one the mix now
+  // playing was made from (all of it, not a quick first pass).
+  const asked = new Map();
+  let mixedProject = null;
   let shownSeq = 0;
   const peaks = {};
   const files = new Map(); // id -> { status: 'loading'|'ready'|'failed', peaks, duration }
@@ -89,6 +97,10 @@ export function createAudioPreview({ sources, folder = null }) {
       if (msg.seq < shownSeq) return;
       shownSeq = msg.seq;
       buffer = msg.empty ? null : toBuffer(msg);
+      if (!msg.pending) {
+        mixedProject = asked.get(msg.seq) ?? mixedProject;
+        for (const k of asked.keys()) if (k <= msg.seq) asked.delete(k);
+      }
       if (msg.seq === seq) setState({ ready: !msg.pending, preparing: msg.pending });
     } else if (msg.type === 'error') {
       console.warn('audio preview:', msg.message);
@@ -101,6 +113,11 @@ export function createAudioPreview({ sources, folder = null }) {
       gain = ctx.createGain();
       gain.gain.value = muted ? 0 : 1;
       gain.connect(ctx.destination);
+      // The level meter listens to what plays (before the preview's own
+      // mute), one analyser per side.
+      meterIn = ctx.createChannelSplitter(2);
+      meters = [ctx.createAnalyser(), ctx.createAnalyser()];
+      meters.forEach((a, i) => { a.fftSize = 2048; meterIn.connect(a, i); });
     }
     return ctx;
   }
@@ -130,6 +147,8 @@ export function createAudioPreview({ sources, folder = null }) {
       const pcm = { channels, sampleRate: decoded.sampleRate };
       entry.peaks = computePeaks([pcm]);
       entry.duration = decoded.duration;
+      // A song's beats, for its beat marks (a few ms a minute).
+      if (kind === 'music') entry.beats = detectBeats(pcm);
       entry.status = 'ready';
       ensureWorker().postMessage({ type: 'pcm', id, pcm });
     })().catch((err) => {
@@ -146,10 +165,13 @@ export function createAudioPreview({ sources, folder = null }) {
   function requestRender(project) {
     clearTimeout(timer);
     timer = setTimeout(() => {
-      const music = project.audio.music ? loadFile('music', project.audio.music.file) : null;
+      // { [file]: id } for every file an audio clip plays.
+      const music = {};
+      for (const clip of project.audio.clips) if (clip.file) music[clip.file] ??= loadFile('music', clip.file);
       const takes = {};
       for (const take of project.audio.voiceover) takes[take.id] = loadFile('take', take.file);
       seq++;
+      asked.set(seq, project);
       setState({ preparing: true });
       ensureWorker().postMessage({ type: 'render', seq, project, music, takes });
     }, lastProject ? RENDER_DELAY_MS : 0);
@@ -176,6 +198,7 @@ export function createAudioPreview({ sources, folder = null }) {
       const node = ctx.createBufferSource();
       node.buffer = buffer;
       node.connect(gain);
+      node.connect(meterIn);
       // What starts now is heard after the output latency; start that much
       // further in, so the sound lines up with the picture when it is heard.
       const latency = (ctx.outputLatency || 0) + (ctx.baseLatency || 0);
@@ -188,6 +211,9 @@ export function createAudioPreview({ sources, folder = null }) {
     sync,
     get state() { return state; },
     get mix() { return buffer; },
+    // Whether the mix now playing is the whole sound of `project` (every edit
+    // that changes the sound heard, mixed in -- a rename needs no new mix).
+    upToDate: (project) => Boolean(mixedProject) && sameSound(mixedProject, project),
     // Whether sound is playing, and the output time it is at.
     get playing() { return active !== null; },
     get position() { return active ? active.startedAtOut + (ctx.currentTime - active.startedAtCtx) : null; },
@@ -196,7 +222,33 @@ export function createAudioPreview({ sources, folder = null }) {
       return () => listeners.delete(fn);
     },
     peaks: (key) => peaks[key] ?? null,
+    // What is playing right now, per side: { peak, rms } in dBFS over the
+    // last ~40 ms, or null when nothing plays. For the level meter.
+    levels() {
+      if (!active || !meters) return null;
+      return meters.map((a) => {
+        a.getFloatTimeDomainData(meterBuf);
+        let peak = 0;
+        let sum = 0;
+        for (const v of meterBuf) { const x = Math.abs(v); if (x > peak) peak = x; sum += v * v; }
+        const db = (x) => (x > 1e-6 ? 20 * Math.log10(x) : -120);
+        return { peak: db(peak), rms: db(Math.sqrt(sum / meterBuf.length)) };
+      });
+    },
     file: (kind, file) => files.get(`${kind}:${file}`) ?? null,
+    // The file decoded (or failed): its { status, peaks, duration }. Adding a
+    // song waits for this to know how long its clip is.
+    ready(kind, file) {
+      const entry = files.get(loadFile(kind, file));
+      if (entry.status !== 'loading') return Promise.resolve(entry);
+      return new Promise((resolve) => {
+        const off = this.onState(() => {
+          if (entry.status === 'loading') return;
+          off();
+          resolve(entry);
+        });
+      });
+    },
     // `sources` is the player's own object, so an added recording is already
     // in it; a worker made earlier only needs telling.
     sourcesChanged() {

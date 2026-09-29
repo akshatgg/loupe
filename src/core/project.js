@@ -9,6 +9,9 @@
 // Error rather than writing something the renderer or exporter can't draw.
 
 import { buildTimeline } from './timeline.js';
+import { COLOR_FILTERS } from './look.js';
+import { setKeyframe, removeKeyframe } from './keyframes.js';
+import { clipLength, clipEnd, freeLane, audioName, laneOf, splitPoints, MAX_LANES, MIN_AUDIO_SECONDS } from './audio/clips.js';
 
 export const VERSION = 2;
 export const SPEED_MIN = 0.25;
@@ -18,6 +21,8 @@ export const ZOOM_LEVEL_MAX = 8;
 // Shorter than this and a clip, zoom or speed stretch can't be grabbed in
 // the timeline (and a clip that short is a single frame or two anyway).
 export const MIN_CLIP_SECONDS = 0.1;
+// The longest a freeze frame holds (seconds).
+const MAX_HOLD = 3600;
 export const MIN_RANGE_SECONDS = 0.1;
 // v1 recorded a zoom keyframe on every scroll tick; a stretch whose zoom
 // never got past this was a nudge of the wheel, not a zoom anyone meant.
@@ -28,7 +33,10 @@ export const BACKGROUND_TYPES = ['none', 'color', 'gradient', 'image'];
 export const HIGHLIGHTS = ['none', 'spotlight', 'ring'];
 const MAX_TITLE = 200;
 export const ANNOTATION_TYPES = ['text', 'title', 'arrow', 'box', 'blur'];
-export const TRANSITION_TYPES = ['fade', 'crossfade', 'dip'];
+export const TRANSITION_TYPES = [
+  'fade', 'crossfade', 'dip', 'dip-white', 'blur',
+  'wipe-left', 'wipe-right', 'wipe-up', 'wipe-down', 'slide-left', 'slide-right', 'circle', 'zoom'
+];
 export const EXPORT_FORMATS = ['mp4', 'webm', 'gif'];
 export const EXPORT_RESOLUTIONS = ['720p', '1080p', '1440p', '4k'];
 export const EXPORT_QUALITIES = ['high', 'balanced', 'small'];
@@ -109,7 +117,10 @@ export function defaultAudio() {
   return {
     mic: { volume: 1, muted: false, cleanUp: true, level: true },
     system: { volume: 0.8, muted: false },
-    music: null,
+    // Songs and sound files on the timeline's audio rows (audio/clips.js),
+    // and each row's mute / solo / lock ([{ muted, solo, locked }], by row).
+    clips: [],
+    lanes: [],
     voiceover: []
   };
 }
@@ -165,6 +176,8 @@ export function createProject({ main, title, createdAt = null, style } = {}) {
     zooms: [],
     style: style ? mergeStyle(defaultStyle(), style) : defaultStyle(),
     annotations: [],
+    markers: [],
+    overlays: [],
     transitions: [],
     audio: defaultAudio(),
     captions: defaultCaptions(),
@@ -283,6 +296,8 @@ export function migrate(v1, { createdAt = null } = {}) {
       keystrokes: { show: main.keys !== null, position: 'bottom' }
     },
     annotations: [],
+    markers: [],
+    overlays: [],
     transitions: [],
     audio: { ...defaultAudio(), mic: { volume: 1, muted: false, cleanUp: false, level: false } },
     captions: defaultCaptions(),
@@ -351,6 +366,11 @@ function normalizeSource(s, key) {
   if (out.systemAudio !== null) str(out.systemAudio, `Source ${key} system audio`);
   if (out.keys !== null) str(out.keys, `Source ${key} keys`);
   if (out.cursor !== null) str(out.cursor, `Source ${key} cursor`);
+  // An imported video's picture is turned this far clockwise (its file says
+  // so); recordings have none.
+  if (out.rotation !== undefined && ![0, 90, 180, 270].includes(out.rotation)) {
+    fail(`Source ${key} rotation must be 0, 90, 180 or 270`);
+  }
   if (out.webcam !== null) {
     if (!isObj(out.webcam)) fail(`Source ${key} webcam must be an object`);
     str(out.webcam.file, `Source ${key} webcam file`);
@@ -376,7 +396,47 @@ function validateClip(clip, sources) {
   if (clip.start > clip.end || clip.end > meta.duration + 1e-6) {
     fail(`Clip ${clip.id} range ${clip.start}..${clip.end} is outside its recording`);
   }
+  // Its sound moved to an audio clip ("detach audio").
+  if (clip.detached !== undefined) bool(clip.detached, `Clip ${clip.id} detached`);
+  // A freeze frame: the moment `start` held for `hold` seconds.
+  if (clip.hold !== undefined) num(clip.hold, 'Freeze frame length', EPS, MAX_HOLD);
+  if (clip.reverse !== undefined) bool(clip.reverse, `Clip ${clip.id} reverse`);
+  if (clip.hold !== undefined && clip.reverse) fail('A freeze frame can\u2019t be reversed');
+  if (clip.transform !== undefined) validateTransform(clip.transform);
+  if (clip.keyframes !== undefined) validateKeyframes(clip.keyframes, CLIP_ANIMATABLE);
+  if (clip.color !== undefined) validateColor(clip.color);
   return clip;
+}
+
+// A clip's place and colour (look.js); every field optional.
+function validateTransform(t) {
+  if (!isObj(t)) fail('A clip\u2019s position must be an object');
+  if (t.x !== undefined) num(t.x, 'Position x', -1, 1);
+  if (t.y !== undefined) num(t.y, 'Position y', -1, 1);
+  if (t.scale !== undefined) num(t.scale, 'Scale', 0.1, 5);
+  if (t.rotate !== undefined) num(t.rotate, 'Rotation', -360, 360);
+  if (t.flipH !== undefined) bool(t.flipH, 'Flip left to right');
+  if (t.flipV !== undefined) bool(t.flipV, 'Flip upside down');
+  if (t.crop !== undefined) {
+    if (!isObj(t.crop)) fail('Crop must be an object');
+    for (const side of ['left', 'top', 'right', 'bottom']) {
+      if (t.crop[side] !== undefined) num(t.crop[side], `Crop ${side}`, 0, 0.45);
+    }
+  }
+}
+
+function validateColor(c) {
+  if (!isObj(c)) fail('A clip\u2019s colour must be an object');
+  if (c.brightness !== undefined) num(c.brightness, 'Brightness', -1, 1);
+  if (c.contrast !== undefined) num(c.contrast, 'Contrast', -1, 1);
+  if (c.saturation !== undefined) num(c.saturation, 'Saturation', -1, 1);
+  if (c.filter !== undefined) oneOf(c.filter, COLOR_FILTERS, 'Colour filter');
+  // A LUT is a file the project copied into its luts/ folder.
+  if (c.lut !== undefined && c.lut !== null) {
+    str(c.lut, 'LUT file', { max: 1024 });
+    if (!/^luts\/[^/\\]+\.cube$/i.test(c.lut) || c.lut.includes('..')) fail('A LUT must be a .cube file in the project\u2019s luts folder');
+  }
+  if (c.lutMix !== undefined) num(c.lutMix, 'LUT amount', 0, 1);
 }
 
 function validateSpeedSegment(s, sources) {
@@ -475,9 +535,82 @@ function validateAnnotation(a, sources) {
   return a;
 }
 
+// A project saved before audio clips had one `music` setting. It becomes
+// the first clip, repeating to the end of the video with the 3-second fade
+// it always had, so it sounds as it did.
+function upgradeAudio(audio) {
+  if (!isObj(audio)) return audio;
+  // Clips saved before a setting existed get its default.
+  if (Array.isArray(audio.clips)) {
+    audio = { ...audio, clips: audio.clips.map((c) => (isObj(c) ? { ...defaultAudioClip(), ...c } : c)) };
+  }
+  if (!('music' in audio)) return audio;
+  const { music, ...rest } = audio;
+  if (!isObj(music) || (Array.isArray(rest.clips) && rest.clips.length)) return rest;
+  const from = isNum(music.from) ? music.from : 0;
+  return {
+    ...rest,
+    clips: [{
+      ...defaultAudioClip(),
+      id: 'a1', file: music.file, name: audioName(music.file),
+      start: isNum(music.start) ? music.start : 0, from, length: null, fileDuration: null,
+      volume: music.volume, fadeIn: from > 0 ? 0.3 : 0, fadeOut: 3,
+      duck: music.duck, muted: false, loop: true, lane: 0
+    }]
+  };
+}
+
+export function defaultAudioClip() {
+  return {
+    name: '', start: 0, from: 0, length: null, fileDuration: null,
+    volume: 0.3, fadeIn: 0, fadeOut: 0, duck: true, muted: false, loop: false, lane: 0,
+    points: [], beats: false, source: null
+  };
+}
+
+const MAX_POINTS = 500;
+
+function validateAudioClip(c, sources) {
+  if (!isObj(c)) fail('An audio clip is not an object');
+  str(c.id, 'Audio clip id', { max: 64 });
+  if (c.source !== null && c.source !== undefined) {
+    // The video's own sound, detached from it.
+    if (!sources?.[c.source]) fail(`Audio uses unknown recording ${JSON.stringify(c.source)}`);
+    if (c.file !== null) fail('Detached video sound has no file');
+  } else {
+    str(c.file, 'Audio file', { max: 4096 });
+  }
+  str(c.name, 'Audio name', { empty: true, max: 300 });
+  num(c.start, 'Audio start', 0);
+  num(c.from, 'Song position', 0);
+  if (c.length !== null) num(c.length, 'Audio length', MIN_AUDIO_SECONDS);
+  if (c.fileDuration !== null) num(c.fileDuration, 'Audio file length', 0);
+  num(c.volume, 'Audio volume', 0, 2);
+  num(c.fadeIn, 'Fade in', 0);
+  num(c.fadeOut, 'Fade out', 0);
+  // Against the clip's own length when that is known without the video's.
+  const known = c.length ?? (!c.loop && c.fileDuration > 0 ? c.fileDuration - c.from : null);
+  if (known !== null && c.fadeIn + c.fadeOut > known + 1e-6) fail('The fades are longer than the clip');
+  bool(c.duck, 'Lower audio under speech');
+  bool(c.muted, 'Audio muted');
+  bool(c.loop, 'Repeat audio');
+  bool(c.beats, 'Show beats');
+  if (!Array.isArray(c.points)) fail('Volume points must be a list');
+  if (c.points.length > MAX_POINTS) fail('Too many volume points');
+  let last = -Infinity;
+  for (const pt of c.points) {
+    if (!isObj(pt)) fail('A volume point is not an object');
+    num(pt.t, 'Volume point time', 0);
+    num(pt.gain, 'Volume point level', 0, 2);
+    if (pt.t < last) fail('Volume points must be in time order');
+    last = pt.t;
+  }
+  if (!Number.isInteger(c.lane) || c.lane < 0 || c.lane >= MAX_LANES) fail(`Audio row must be 0 to ${MAX_LANES - 1}`);
+}
+
 function validateAudio(audio, sources) {
   if (!isObj(audio)) fail('Audio settings must be an object');
-  const { mic, system, music, voiceover } = audio;
+  const { mic, system, clips, voiceover } = audio;
   if (!isObj(mic)) fail('Microphone settings must be an object');
   num(mic.volume, 'Microphone volume', 0, 2);
   bool(mic.muted, 'Microphone muted');
@@ -486,11 +619,16 @@ function validateAudio(audio, sources) {
   if (!isObj(system)) fail('System audio settings must be an object');
   num(system.volume, 'System audio volume', 0, 2);
   bool(system.muted, 'System audio muted');
-  if (music !== null) {
-    if (!isObj(music)) fail('Music must be an object');
-    str(music.file, 'Music file', { max: 4096 });
-    num(music.volume, 'Music volume', 0, 2);
-    bool(music.duck, 'Lower music under speech');
+  if (!Array.isArray(clips)) fail('Audio clips must be a list');
+  if (clips.length > 500) fail('Too many audio clips');
+  clips.forEach((c) => validateAudioClip(c, sources));
+  if (new Set(clips.map((c) => c.id)).size !== clips.length) fail('Two audio clips have the same id');
+  const { lanes } = audio;
+  if (!Array.isArray(lanes) || lanes.length > MAX_LANES) fail('Audio rows must be a list');
+  for (const l of lanes) {
+    if (l === null) continue;
+    if (!isObj(l)) fail('An audio row is not an object');
+    for (const k of ['muted', 'solo', 'locked']) if (l[k] !== undefined) bool(l[k], `Audio row ${k}`);
   }
   if (!Array.isArray(voiceover)) fail('Voiceover must be a list');
   for (const v of voiceover) {
@@ -565,8 +703,10 @@ export function validateProject(p) {
     zooms: p.zooms ?? [],
     style: p.style ? mergeStyle(defaultStyle(), p.style) : defaultStyle(),
     annotations: p.annotations ?? [],
+    markers: p.markers ?? [],
+    overlays: p.overlays ?? [],
     transitions: p.transitions ?? [],
-    audio: p.audio ? { ...defaultAudio(), ...p.audio } : defaultAudio(),
+    audio: p.audio ? upgradeAudio({ ...defaultAudio(), ...p.audio }) : defaultAudio(),
     captions: p.captions ? mergeCaptions(p.captions) : defaultCaptions(),
     export: p.export ? { ...defaultExport(), ...p.export } : defaultExport()
   };
@@ -582,6 +722,12 @@ export function validateProject(p) {
   validateStyle(out.style);
   if (!Array.isArray(out.annotations)) fail('Annotations must be a list');
   out.annotations.forEach((a) => validateAnnotation(a, sources));
+  if (!Array.isArray(out.overlays)) fail('Overlays must be a list');
+  out.overlays.forEach(validateOverlay);
+  if (new Set(out.overlays.map((o) => o.id)).size !== out.overlays.length) fail('Two overlays have the same id');
+  if (!Array.isArray(out.markers)) fail('Markers must be a list');
+  out.markers.forEach(validateMarker);
+  if (new Set(out.markers.map((m) => m.id)).size !== out.markers.length) fail('Two markers have the same id');
   if (!Array.isArray(out.transitions)) fail('Transitions must be a list');
   out.transitions.forEach((t) => validateTransition(t, out.clips));
   validateAudio(out.audio, sources);
@@ -632,20 +778,38 @@ export function trimEnd(project, clipId, t) {
   return withClips(project, clips);
 }
 
+// Clip i's part between output times o1 and o2 (inside it): a freeze frame
+// holds for that long; a reversed clip's part runs from later to earlier.
+// The clip's own ends are kept exactly (no rounding through the timeline).
+function pieceOf(project, tl, i, o1, o2) {
+  const clip = project.clips[i];
+  const b = tl.clipBounds()[i];
+  if (clip.hold > 0) return { ...clip, hold: o2 - o1 };
+  const at = (o) => (Math.abs(o - b.outStart) < 1e-9 ? (clip.reverse ? clip.end : clip.start)
+    : Math.abs(o - b.outEnd) < 1e-9 ? (clip.reverse ? clip.start : clip.end) : tl.clipSourceAt(i, o));
+  const s1 = at(o1);
+  const s2 = at(o2);
+  return clip.reverse ? { ...clip, start: s2, end: s1 } : { ...clip, start: s1, end: s2 };
+}
+
+const pieceLength = (c) => (c.hold > 0 ? c.hold : c.end - c.start);
+
 // Splits the clip playing at output time `outT` in two. Splitting within
 // MIN_CLIP_SECONDS of either end of a clip would leave a sliver; refused.
 export function splitAt(project, outT) {
   num(outT, 'Split time');
   const tl = buildTimeline(project);
   if (outT <= 0 || outT >= tl.duration) fail('Pick a moment inside the video to split');
-  const at = tl.toSource(outT);
-  const clip = project.clips[at.clipIndex];
-  if (at.t - clip.start < MIN_CLIP_SECONDS || clip.end - at.t < MIN_CLIP_SECONDS) {
+  const i = tl.toSource(outT).clipIndex;
+  const clip = project.clips[i];
+  const b = tl.clipBounds()[i];
+  const first = pieceOf(project, tl, i, b.outStart, outT);
+  const second = { ...pieceOf(project, tl, i, outT, b.outEnd), id: nextId('c', project.clips) };
+  if (pieceLength(first) < MIN_CLIP_SECONDS || pieceLength(second) < MIN_CLIP_SECONDS) {
     fail('Too close to the edge of a clip to split');
   }
   const clips = project.clips.slice();
-  const second = { ...clip, id: nextId('c', project.clips), start: at.t };
-  clips.splice(at.clipIndex, 1, { ...clip, end: at.t }, second);
+  clips.splice(i, 1, first, second);
   // A transition after the old clip now follows the second half.
   const transitions = project.transitions.map((t) => (t.after === clip.id ? { ...t, after: second.id } : t));
   return { ...project, clips, transitions };
@@ -668,17 +832,15 @@ export function cutRange(project, outStart, outEnd) {
   project.clips.forEach((clip, i) => {
     const { outStart: cs, outEnd: ce } = bounds[i];
     if (ce <= a + 1e-9 || cs >= b - 1e-9) { clips.push(clip); return; }
-    // Output times strictly inside this clip map back into it (the timeline
-    // is half-open), so a and b give the exact source moments of the cut.
     // A piece shorter than a split or trim could leave takes the rest with
     // it: a sliver can't be grabbed and shows no frame.
-    const cutFrom = a > cs + 1e-9 ? tl.toSource(a).t : clip.start;
-    const cutTo = b < ce - 1e-9 ? tl.toSource(b).t : clip.end;
-    const keepBefore = cutFrom - clip.start >= MIN_CLIP_SECONDS;
-    const keepAfter = clip.end - cutTo >= MIN_CLIP_SECONDS;
-    if (keepBefore) clips.push({ ...clip, end: cutFrom });
+    const before = a > cs + 1e-9 ? pieceOf(project, tl, i, cs, a) : null;
+    const after = b < ce - 1e-9 ? pieceOf(project, tl, i, b, ce) : null;
+    const keepBefore = Boolean(before) && pieceLength(before) >= MIN_CLIP_SECONDS;
+    const keepAfter = Boolean(after) && pieceLength(after) >= MIN_CLIP_SECONDS;
+    if (keepBefore) clips.push(before);
     if (keepAfter) {
-      const piece = { ...clip, start: cutTo, id: keepBefore ? nextId('c', ids) : clip.id };
+      const piece = { ...after, id: keepBefore ? nextId('c', ids) : clip.id };
       ids.push(piece);
       clips.push(piece);
       // Cut out of the middle: the clip's transition stays at its end, which
@@ -688,6 +850,77 @@ export function cutRange(project, outStart, outEnd) {
   });
   if (!clips.length) fail('Can\u2019t cut the whole video');
   return withClips({ ...project, transitions }, clips);
+}
+
+// ---------------------------------------------------------------- freeze, reverse
+
+// A freeze frame of the moment at output time `outT`, `seconds` long: the
+// clip there is split and the still goes between (before the first clip at
+// its very start, after the last at the very end). One on a freeze frame
+// lengthens it.
+export function freezeFrame(project, outT, seconds = 2) {
+  num(outT, 'Freeze time', 0);
+  num(seconds, 'Freeze frame length', MIN_CLIP_SECONDS, MAX_HOLD);
+  const tl = buildTimeline(project);
+  const o = Math.min(outT, tl.duration);
+  const at = tl.toSource(Math.min(o, Math.max(0, tl.duration - 1e-9)));
+  const i = at.clipIndex;
+  const clip = project.clips[i];
+  if (clip.hold > 0) return setHold(project, clip.id, clip.hold + seconds);
+  const b = tl.clipBounds()[i];
+  const atEnd = o >= tl.duration - 1e-9;
+  const t = atEnd ? (clip.reverse ? clip.start : clip.end) : at.t;
+  const still = { id: nextId('c', project.clips), source: clip.source, start: t, end: t, hold: seconds };
+  let p = project;
+  let insertAt;
+  if (o - b.outStart < MIN_CLIP_SECONDS && !atEnd) insertAt = i;
+  else if (b.outEnd - o < MIN_CLIP_SECONDS || atEnd) insertAt = i + 1;
+  else {
+    p = splitAt(project, o);
+    insertAt = i + 1;
+  }
+  const clips = p.clips.slice();
+  clips.splice(insertAt, 0, { ...still, id: nextId('c', p.clips) });
+  return validateProject({ ...p, clips });
+}
+
+export function setHold(project, clipId, seconds) {
+  const i = clipIndex(project, clipId);
+  if (!(project.clips[i].hold > 0)) fail('That clip isn\u2019t a freeze frame');
+  num(seconds, 'Freeze frame length', MIN_CLIP_SECONDS, MAX_HOLD);
+  const clips = project.clips.slice();
+  clips[i] = { ...clips[i], hold: seconds };
+  return { ...project, clips };
+}
+
+// A clip's look: { transform: patch | null, color: patch | null } -- a
+// patch merges (crop by side), null takes that part back to as recorded.
+export function setClipLook(project, clipId, { transform, color } = {}) {
+  const i = clipIndex(project, clipId);
+  const clip = { ...project.clips[i] };
+  if (transform === null) delete clip.transform;
+  else if (transform !== undefined) {
+    if (!isObj(transform)) fail('A clip\u2019s position must be an object');
+    const was = clip.transform ?? {};
+    clip.transform = { ...was, ...transform };
+    if (transform.crop !== undefined) clip.transform.crop = { ...(was.crop ?? {}), ...transform.crop };
+  }
+  if (color === null) delete clip.color;
+  else if (color !== undefined) clip.color = { ...(clip.color ?? {}), ...color };
+  const clips = project.clips.slice();
+  clips[i] = clip;
+  validateClip(clip, project.sources);
+  return { ...project, clips };
+}
+
+// Plays clip `clipId` backwards (its sound is left out), or forwards again.
+export function setClipReverse(project, clipId, on) {
+  bool(on, 'Reverse');
+  const i = clipIndex(project, clipId);
+  if (project.clips[i].hold > 0) fail('A freeze frame can\u2019t be reversed');
+  const clips = project.clips.slice();
+  clips[i] = { ...clips[i], reverse: on };
+  return { ...project, clips };
 }
 
 export function moveClip(project, from, to) {
@@ -878,7 +1111,377 @@ function mergeKnown(base, patch, what) {
   return out;
 }
 
-// Patch the audio settings: { mic: {volume: 0.5} }, { music: null }, a new
+// ---------------------------------------------------------------- overlays
+//
+// Pictures and videos on rows above the main video (layers/overlays.js).
+
+export const OVERLAY_KINDS = ['image', 'video'];
+const OVERLAY_ANIMATABLE = ['x', 'y', 'scale', 'rotate', 'opacity'];
+const CLIP_ANIMATABLE = ['x', 'y', 'scale', 'rotate'];
+// How long a new picture shows, in seconds.
+const DEFAULT_PICTURE_SECONDS = 5;
+
+function validateKeyframes(kf, allowed) {
+  if (!isObj(kf)) fail('Keyframes must be an object');
+  for (const [prop, list] of Object.entries(kf)) {
+    if (!allowed.includes(prop)) fail(`${prop} can\u2019t be animated`);
+    if (!Array.isArray(list) || list.length > 500) fail('Keyframes must be a list');
+    let last = -Infinity;
+    for (const k of list) {
+      if (!isObj(k)) fail('A keyframe is not an object');
+      num(k.t, 'Keyframe time', 0);
+      num(k.v, 'Keyframe value', -360, 360);
+      if (k.ease !== undefined) oneOf(k.ease, ['linear'], 'Keyframe easing');
+      if (k.t < last) fail('Keyframes must be in time order');
+      last = k.t;
+    }
+  }
+}
+
+export function defaultOverlay() {
+  return {
+    name: '', start: 0, from: 0, length: DEFAULT_PICTURE_SECONDS, fileDuration: null, lane: 0,
+    x: 0.3, y: 0.3, scale: 0.35, rotate: 0, opacity: 1, fadeIn: 0, fadeOut: 0, keyframes: {},
+    // A video file's own quarter turn (a phone video), as video-probe.js reads it.
+    mediaRotation: 0
+  };
+}
+
+function validateOverlay(o) {
+  if (!isObj(o)) fail('An overlay is not an object');
+  str(o.id, 'Overlay id', { max: 64 });
+  oneOf(o.kind, OVERLAY_KINDS, 'Overlay kind');
+  str(o.file, 'Overlay file', { max: 1024 });
+  if (!/^media\/[^/\\]+$/.test(o.file) || o.file.includes('..')) fail('An overlay must be a file in the project\u2019s media folder');
+  str(o.name, 'Overlay name', { empty: true, max: 300 });
+  num(o.start, 'Overlay start', 0);
+  num(o.from, 'Overlay start in its file', 0);
+  num(o.length, 'Overlay length', MIN_CLIP_SECONDS);
+  if (o.fileDuration !== null) num(o.fileDuration, 'Overlay file length', 0);
+  if (!Number.isInteger(o.lane) || o.lane < 0 || o.lane >= MAX_LANES) fail(`Overlay row must be 0 to ${MAX_LANES - 1}`);
+  num(o.x, 'Overlay x', -1.5, 1.5);
+  num(o.y, 'Overlay y', -1.5, 1.5);
+  num(o.scale, 'Overlay scale', 0.02, 5);
+  num(o.rotate, 'Overlay rotation', -360, 360);
+  num(o.opacity, 'Opacity', 0, 1);
+  num(o.fadeIn, 'Overlay fade in', 0);
+  num(o.fadeOut, 'Overlay fade out', 0);
+  validateKeyframes(o.keyframes, OVERLAY_ANIMATABLE);
+  if (![0, 90, 180, 270].includes(o.mediaRotation)) fail('An overlay\u2019s turn must be 0, 90, 180 or 270');
+}
+
+function overlayAt(project, id) {
+  const i = project.overlays.findIndex((o) => o.id === id);
+  if (i < 0) fail(`No overlay ${JSON.stringify(id)}`);
+  return i;
+}
+
+const withOverlays = (project, overlays) => {
+  overlays.forEach(validateOverlay);
+  return { ...project, overlays };
+};
+
+// A picture (5 s) or video (its length) from the project's media folder at
+// `start`, on the first overlay row where it fits, in the corner (a
+// picture-in-picture) until moved.
+export function addOverlay(project, { kind, file, name, start = 0, fileDuration = null, ...rest } = {}) {
+  oneOf(kind, OVERLAY_KINDS, 'Overlay kind');
+  const length = kind === 'video' && fileDuration > 0 ? fileDuration : DEFAULT_PICTURE_SECONDS;
+  const o = {
+    ...defaultOverlay(), length, ...rest, id: nextId('o', project.overlays), kind, file,
+    name: name ?? String(file).split('/').pop().replace(/\.[^.]+$/, ''), start, fileDuration
+  };
+  validateOverlay(o);
+  o.lane = freeLane(project.overlays, o.start, o.start + o.length, Infinity, {});
+  if (o.lane < 0) fail(`Every overlay row is taken there (${MAX_LANES} rows)`);
+  return withOverlays(project, [...project.overlays, o]);
+}
+
+// Moves, trims or changes one overlay; over another on its row, it goes to
+// the first free row.
+export function updateOverlay(project, id, patch) {
+  const i = overlayAt(project, id);
+  if (!isObj(patch) || 'id' in patch) fail('An overlay change must be an object without an id');
+  const o = { ...project.overlays[i], ...patch };
+  validateOverlay(o);
+  o.lane = freeLane(project.overlays, o.start, o.start + o.length, Infinity, { prefer: o.lane, except: id });
+  if (o.lane < 0) fail(`Every overlay row is taken there (${MAX_LANES} rows)`);
+  const overlays = project.overlays.slice();
+  overlays[i] = o;
+  return withOverlays(project, overlays);
+}
+
+export function removeOverlay(project, id) {
+  const i = overlayAt(project, id);
+  return { ...project, overlays: project.overlays.filter((_, k) => k !== i) };
+}
+
+// A keyframe of an overlay's property at `t` seconds from its start.
+export function setOverlayKeyframe(project, id, prop, t, v) {
+  const i = overlayAt(project, id);
+  if (!OVERLAY_ANIMATABLE.includes(prop)) fail(`${prop} can\u2019t be animated`);
+  const o = project.overlays[i];
+  if (t < -1e-6 || t > o.length + 1e-6) fail('Put the playhead over the overlay to set a keyframe');
+  return updateOverlay(project, id, { keyframes: { ...o.keyframes, [prop]: setKeyframe(o.keyframes[prop], clamp(t, 0, o.length), v) } });
+}
+
+export function removeOverlayKeyframe(project, id, prop, t) {
+  const o = project.overlays[overlayAt(project, id)];
+  const list = removeKeyframe(o.keyframes[prop], t);
+  const keyframes = { ...o.keyframes };
+  if (list.length) keyframes[prop] = list;
+  else delete keyframes[prop];
+  return updateOverlay(project, id, { keyframes });
+}
+
+// A keyframe of a main clip's position or size at recording time `t`.
+export function setClipKeyframe(project, clipId, prop, t, v) {
+  const i = clipIndex(project, clipId);
+  if (!CLIP_ANIMATABLE.includes(prop)) fail(`${prop} can\u2019t be animated`);
+  const clip = project.clips[i];
+  if (t < clip.start - 1e-6 || t > clip.end + 1e-6) fail('Put the playhead inside the clip to set a keyframe');
+  const clips = project.clips.slice();
+  clips[i] = { ...clip, keyframes: { ...(clip.keyframes ?? {}), [prop]: setKeyframe(clip.keyframes?.[prop], t, v) } };
+  validateClip(clips[i], project.sources);
+  return { ...project, clips };
+}
+
+export function removeClipKeyframe(project, clipId, prop, t) {
+  const i = clipIndex(project, clipId);
+  const clip = project.clips[i];
+  const list = removeKeyframe(clip.keyframes?.[prop], t);
+  const keyframes = { ...(clip.keyframes ?? {}) };
+  if (list.length) keyframes[prop] = list;
+  else delete keyframes[prop];
+  const clips = project.clips.slice();
+  clips[i] = { ...clip, keyframes };
+  return { ...project, clips };
+}
+
+// ---------------------------------------------------------------- markers
+//
+// A note on a moment of the video, as an editor's markers (M): output time,
+// so it stays at that moment of the finished video. [{ id, t, label, color }]
+
+export const MARKER_COLORS = ['yellow', 'red', 'green', 'blue', 'purple'];
+
+function validateMarker(m) {
+  if (!isObj(m)) fail('A marker is not an object');
+  str(m.id, 'Marker id', { max: 64 });
+  num(m.t, 'Marker time', 0);
+  str(m.label, 'Marker name', { empty: true, max: 200 });
+  oneOf(m.color, MARKER_COLORS, 'Marker colour');
+}
+
+const sortedMarkers = (markers) => [...markers].sort((a, b) => a.t - b.t);
+
+export function addMarker(project, { t, label = '', color = 'yellow' } = {}) {
+  const marker = { id: nextId('m', project.markers), t, label, color };
+  validateMarker(marker);
+  if (project.markers.some((m) => Math.abs(m.t - t) < 1e-3)) fail('There\u2019s already a marker there');
+  return { ...project, markers: sortedMarkers([...project.markers, marker]) };
+}
+
+export function updateMarker(project, id, patch) {
+  const i = project.markers.findIndex((m) => m.id === id);
+  if (i < 0) fail(`No marker ${JSON.stringify(id)}`);
+  if (!isObj(patch) || 'id' in patch) fail('A marker change must be an object without an id');
+  const marker = { ...project.markers[i], ...patch };
+  validateMarker(marker);
+  const markers = project.markers.slice();
+  markers[i] = marker;
+  return { ...project, markers: sortedMarkers(markers) };
+}
+
+export function removeMarker(project, id) {
+  if (!project.markers.some((m) => m.id === id)) fail(`No marker ${JSON.stringify(id)}`);
+  return { ...project, markers: project.markers.filter((m) => m.id !== id) };
+}
+
+// ---------------------------------------------------------------- audio clips
+
+function audioClipAt(project, id) {
+  const i = project.audio.clips.findIndex((c) => c.id === id);
+  if (i < 0) fail(`No audio clip ${JSON.stringify(id)}`);
+  return i;
+}
+
+function withAudioClips(project, clips) {
+  const audio = { ...project.audio, clips };
+  validateAudio(audio, project.sources);
+  return { ...project, audio };
+}
+
+const lockedLanes = (project) => new Set(Array.from({ length: MAX_LANES }, (_, i) => i).filter((i) => laneOf(project.audio, i).locked));
+
+function unlocked(project, clip) {
+  if (laneOf(project.audio, clip.lane).locked) fail(`Audio row ${clip.lane + 1} is locked. Unlock it to change its clips.`);
+}
+
+// The row `clip` goes on among `others`: its own (or `prefer`) when free.
+function laneFor(others, clip, duration, prefer = clip.lane, locked = new Set()) {
+  const lane = freeLane(others, clip.start, clipEnd(clip, duration), duration, { prefer, except: clip.id, locked });
+  if (lane < 0) fail(`Every audio row is taken there (${MAX_LANES} rows). Move a clip or delete one first.`);
+  return lane;
+}
+
+// A song or sound file (already in the project's music/ folder) at `start`,
+// on the first audio row where it fits.
+export function addAudioClip(project, { file, name, start = 0, fileDuration = null, ...rest } = {}) {
+  const duration = buildTimeline(project).duration;
+  const clip = {
+    ...defaultAudioClip(), ...rest, id: nextId('a', project.audio.clips), file,
+    name: name ?? audioName(file), start, fileDuration
+  };
+  validateAudioClip({ ...clip, lane: 0 }, project.sources);
+  clip.lane = laneFor(project.audio.clips, clip, duration, null, lockedLanes(project));
+  return withAudioClips(project, [...project.audio.clips, clip]);
+}
+
+// Moves, trims or changes one clip. A clip moved or lengthened over another
+// on its row goes to the first free row (as in CapCut); `lane` in the patch
+// is the row it was dropped on.
+export function updateAudioClip(project, id, patch) {
+  const i = audioClipAt(project, id);
+  if (!isObj(patch)) fail('An audio change must be an object');
+  if ('id' in patch) fail('An audio clip\u2019s id can\'t be changed');
+  unlocked(project, project.audio.clips[i]);
+  const clip = { ...project.audio.clips[i], ...patch };
+  if (Array.isArray(clip.points)) clip.points = [...clip.points].sort((a, b) => a?.t - b?.t);
+  validateAudioClip(clip, project.sources);
+  const duration = buildTimeline(project).duration;
+  clip.lane = laneFor(project.audio.clips, clip, duration, clip.lane, lockedLanes(project));
+  const clips = project.audio.clips.slice();
+  clips[i] = clip;
+  return withAudioClips(project, clips);
+}
+
+export function removeAudioClip(project, id) {
+  const i = audioClipAt(project, id);
+  unlocked(project, project.audio.clips[i]);
+  return withAudioClips(project, project.audio.clips.filter((_, k) => k !== i));
+}
+
+// Splits a clip at output time `outT` into two that play on from each other:
+// the first keeps the fade in, the second the fade out.
+export function splitAudioClip(project, id, outT) {
+  num(outT, 'Split time');
+  const i = audioClipAt(project, id);
+  const clip = project.audio.clips[i];
+  unlocked(project, clip);
+  const duration = buildTimeline(project).duration;
+  const end = clipEnd(clip, duration);
+  if (outT <= clip.start || outT >= end) fail('Put the playhead inside the audio clip to split it');
+  const delta = outT - clip.start;
+  if (delta < MIN_AUDIO_SECONDS || end - outT < MIN_AUDIO_SECONDS) fail('Too close to the edge of the audio clip to split');
+  // A repeating clip's second half carries on from the same point of the file.
+  const span = clip.fileDuration > 0 ? clip.fileDuration - clip.from : null;
+  const from = clip.from + (clip.loop && span > 0 ? delta % span : delta);
+  const [before, after] = splitPoints(clip.points, delta);
+  const first = { ...clip, length: delta, fadeOut: 0, fadeIn: Math.min(clip.fadeIn, delta), points: before };
+  const second = {
+    ...clip, id: nextId('a', project.audio.clips), start: outT, from,
+    length: clip.length === null ? null : clip.length - delta, fadeIn: 0,
+    fadeOut: Math.min(clip.fadeOut, end - outT), points: after
+  };
+  const clips = project.audio.clips.slice();
+  clips.splice(i, 1, first, second);
+  return withAudioClips(project, clips);
+}
+
+// A copy right after the original, on its row when there is room.
+export function duplicateAudioClip(project, id) {
+  const clip = project.audio.clips[audioClipAt(project, id)];
+  const duration = buildTimeline(project).duration;
+  const copy = { ...clip, id: nextId('a', project.audio.clips), start: clipEnd(clip, duration) };
+  copy.lane = laneFor(project.audio.clips, copy, duration, clip.lane, lockedLanes(project));
+  return withAudioClips(project, [...project.audio.clips, copy]);
+}
+
+// A row's mute / solo / lock: setAudioLane(p, 1, { solo: true }).
+export function setAudioLane(project, lane, patch) {
+  if (!Number.isInteger(lane) || lane < 0 || lane >= MAX_LANES) fail(`There is no audio row ${JSON.stringify(lane)}`);
+  if (!isObj(patch)) fail('A row change must be an object');
+  for (const k of Object.keys(patch)) if (!['muted', 'solo', 'locked'].includes(k)) fail(`Unknown audio row setting ${JSON.stringify(k)}`);
+  const lanes = Array.from({ length: Math.max(project.audio.lanes.length, lane + 1) }, (_, i) => project.audio.lanes[i] ?? null);
+  lanes[lane] = { ...laneOf(project.audio, lane), ...patch };
+  const audio = { ...project.audio, lanes };
+  validateAudio(audio, project.sources);
+  return { ...project, audio };
+}
+
+// ---- detach audio: a video clip's own sound as an audio clip
+
+// Why clip i's sound can't be detached, or null. Its sound must play at the
+// recording's own speed: stretched sound would drift from a detached copy.
+function detachProblem(project, tl, i) {
+  const clip = project.clips[i];
+  if (clip.detached) return 'That clip\u2019s sound is already detached';
+  const meta = project.sources[clip.source];
+  if (!meta.mic && !meta.systemAudio) return 'That clip has no sound to detach';
+  const b = tl.clipBounds()[i];
+  if (Math.abs((b.outEnd - b.outStart) - (clip.end - clip.start)) > 1e-6) {
+    return 'That clip has a speed change, so its sound can\u2019t be detached yet';
+  }
+  return null;
+}
+
+function detachOne(project, tl, i, duration) {
+  const clip = project.clips[i];
+  const b = tl.clipBounds()[i];
+  const meta = project.sources[clip.source];
+  const sound = {
+    ...defaultAudioClip(), id: nextId('a', project.audio.clips), file: null, source: clip.source,
+    name: project.clips.length > 1 ? `Clip ${i + 1} sound` : 'Video sound',
+    start: b.outStart, from: clip.start, length: clip.end - clip.start, fileDuration: meta.duration,
+    volume: 1, duck: false
+  };
+  sound.lane = laneFor(project.audio.clips, sound, duration, null, lockedLanes(project));
+  const clips = project.clips.slice();
+  clips[i] = { ...clip, detached: true };
+  return { ...project, clips, audio: { ...project.audio, clips: [...project.audio.clips, sound] } };
+}
+
+// Clip `clipId`'s sound leaves the video and becomes an audio clip on the
+// first free row, at the same moment: move it, trim it, change it, or
+// delete it to keep only the music.
+export function detachAudio(project, clipId) {
+  const i = clipIndex(project, clipId);
+  const tl = buildTimeline(project);
+  const problem = detachProblem(project, tl, i);
+  if (problem) fail(problem);
+  return validateProject(detachOne(project, tl, i, tl.duration));
+}
+
+// Every clip's sound that can be detached (speed-changed parts stay).
+export function detachAllAudio(project) {
+  const tl = buildTimeline(project);
+  let p = project;
+  project.clips.forEach((_, i) => {
+    if (!detachProblem(p, tl, i)) p = detachOne(p, tl, i, tl.duration);
+  });
+  return p === project ? project : validateProject(p);
+}
+
+// A detached sound back on its video: the audio clip goes, and the video
+// clips it came from play their own sound again.
+export function reattachAudio(project, audioClipId) {
+  const i = audioClipAt(project, audioClipId);
+  const sound = project.audio.clips[i];
+  if (!sound.source) fail('That audio isn\u2019t sound from the video');
+  unlocked(project, sound);
+  const to = sound.from + (sound.length ?? 0);
+  const clips = project.clips.map((c) => (c.detached && c.source === sound.source && c.start < to - 1e-6 && c.end > sound.from + 1e-6
+    ? { ...c, detached: false } : c));
+  return validateProject({
+    ...project, clips, audio: { ...project.audio, clips: project.audio.clips.filter((_, k) => k !== i) }
+  });
+}
+
+export { clipLength as audioClipLength, clipEnd as audioClipEnd, laneOf as audioLaneOf };
+export { clipGainAt as audioClipGainAt } from './audio/clips.js';
+
+// Patch the audio settings: { mic: {volume: 0.5} }, { clips: [...] }, a new
 // voiceover list, ...
 export function setAudio(project, patch) {
   const audio = validateAudio(mergeKnown(project.audio, patch, 'Audio'), project.sources);

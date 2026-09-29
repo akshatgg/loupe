@@ -12,6 +12,11 @@
 // recorder's HEVC has them), only after later samples arrive. So the source
 // keeps feeding until the wanted frame has come out, holding at most a few
 // decoded frames: hardware decoders stall if too many frames stay open.
+//
+// An imported phone video is stored sideways with a note to turn it
+// (`rotation`, clockwise, from the file's matrix); the decoder hands frames
+// over as stored, so they are turned upright here and everything after sees
+// the picture the way a player shows it.
 
 import { sampleData } from './demux.js';
 
@@ -19,7 +24,7 @@ const MAX_AHEAD = 16;
 
 const micro = (seconds) => Math.round(seconds * 1e6);
 
-export async function openVideoSource(demuxed, label) {
+export async function openVideoSource(demuxed, label, { rotation = 0 } = {}) {
   const track = demuxed.video;
   if (!track) throw new Error(`${label} has no video in it.`);
   const config = {
@@ -31,7 +36,49 @@ export async function openVideoSource(demuxed, label) {
   };
   const support = await VideoDecoder.isConfigSupported(config);
   if (!support.supported) throw new Error(`This computer can't decode the video in ${label} (${track.codec}).`);
-  return new VideoSource(demuxed.read ?? ((s) => sampleData(demuxed.buffer, s)), track, config, label);
+  const source = new VideoSource(demuxed.read ?? ((s) => sampleData(demuxed.buffer, s)), track, config, label);
+  return rotation ? new UprightSource(source, rotation) : source;
+}
+
+// The source's frames turned `rotation` (90, 180, 270) degrees clockwise.
+// Like VideoSource it owns what it returns: a frame stays open until the
+// next one is made (a caller that keeps one clones it, as visuals.js does).
+export class UprightSource {
+  constructor(source, rotation) {
+    this.source = source;
+    this.rotation = rotation;
+    this.canvas = null;
+    this.ctx = null;
+    this.current = null;
+  }
+
+  async frameAt(t) {
+    const frame = await this.source.frameAt(t);
+    if (this.current?.timestamp === frame.timestamp) return this.current;
+    const w = frame.displayWidth;
+    const h = frame.displayHeight;
+    const sideways = this.rotation === 90 || this.rotation === 270;
+    const cw = sideways ? h : w;
+    const ch = sideways ? w : h;
+    if (!this.canvas || this.canvas.width !== cw || this.canvas.height !== ch) {
+      this.canvas = new OffscreenCanvas(cw, ch);
+      this.ctx = this.canvas.getContext('2d');
+    }
+    const { ctx } = this;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.translate(cw / 2, ch / 2);
+    ctx.rotate((this.rotation * Math.PI) / 180);
+    ctx.drawImage(frame, -w / 2, -h / 2, w, h);
+    this.current?.close();
+    this.current = new VideoFrame(this.canvas, { timestamp: frame.timestamp, duration: frame.duration ?? undefined });
+    return this.current;
+  }
+
+  close() {
+    this.current?.close();
+    this.current = null;
+    this.source.close();
+  }
 }
 
 export class VideoSource {

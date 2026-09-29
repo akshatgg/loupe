@@ -280,6 +280,31 @@ window.loupe.onSettingsChanged?.((s) => zoomShortcuts.set(s.zoomTriggers));
 
 document.getElementById('recordings').onclick = () => window.loupe.openLibrary();
 
+// Import video: main asks for the file, copies it into the Library and opens
+// it in the editor. Problems show in the banner.
+const importButton = document.getElementById('importVideo');
+importButton.onclick = async () => {
+  const banner = document.getElementById('banner');
+  importButton.disabled = true;
+  importButton.textContent = 'Importing…';
+  try {
+    const result = await window.loupe.importVideoToLibrary();
+    if (result && !result.opened) {
+      banner.hidden = false;
+      banner.textContent = `Imported “${result.recording.title}” into your recordings. ${result.blocked}`;
+    } else if (result) {
+      // The editor is open on it: nothing is being recorded from here.
+      window.close();
+    }
+  } catch (err) {
+    banner.hidden = false;
+    banner.textContent = String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+  } finally {
+    importButton.disabled = false;
+    importButton.textContent = 'Import video';
+  }
+};
+
 // ---- recording additions ------------------------------------------------------
 // Computer sound, the camera bubble, keyboard shortcuts and the countdown.
 // Saved as soon as they change (main.js, recording-settings.js) and read by

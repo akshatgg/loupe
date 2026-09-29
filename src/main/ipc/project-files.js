@@ -69,7 +69,46 @@ function audioFileUrls(projectDir, project) {
   for (const take of Array.isArray(audio.voiceover) ? audio.voiceover : []) {
     if (typeof take?.id === 'string') voiceover[take.id] = url('voiceover', take.file);
   }
-  return { music: audio.music ? url('music', audio.music.file) : null, voiceover };
+  // Every file the audio clips play, once each: { [file]: url or null }.
+  const music = {};
+  for (const clip of Array.isArray(audio.clips) ? audio.clips : []) {
+    if (typeof clip?.file === 'string' && !(clip.file in music)) music[clip.file] = url('music', clip.file);
+  }
+  return { music, voiceover };
 }
 
-module.exports = { requireProjectDir, resolveProjectFile, openUnique, audioFileUrls };
+// The LUTs a project's clips use (clip.color.lut), as { [file]: url | null }
+// for the exporter: only files inside the project's luts/ folder.
+function lutFileUrls(projectDir, project) {
+  const out = {};
+  for (const clip of Array.isArray(project?.clips) ? project.clips : []) {
+    const rel = clip?.color?.lut;
+    if (typeof rel !== 'string' || rel in out) continue;
+    try {
+      const full = resolveProjectFile(projectDir, 'luts', rel);
+      out[rel] = fs.existsSync(full) ? pathToFileURL(full).href : null;
+    } catch {
+      out[rel] = null;
+    }
+  }
+  return out;
+}
+
+// The overlays' pictures and videos (project.overlays[].file), as
+// { [file]: url | null }: only files inside the project's media/ folder.
+function mediaFileUrls(projectDir, project) {
+  const out = {};
+  for (const o of Array.isArray(project?.overlays) ? project.overlays : []) {
+    const rel = o?.file;
+    if (typeof rel !== 'string' || rel in out) continue;
+    try {
+      const full = resolveProjectFile(projectDir, 'media', rel);
+      out[rel] = fs.existsSync(full) ? pathToFileURL(full).href : null;
+    } catch {
+      out[rel] = null;
+    }
+  }
+  return out;
+}
+
+module.exports = { requireProjectDir, resolveProjectFile, openUnique, audioFileUrls, lutFileUrls, mediaFileUrls };

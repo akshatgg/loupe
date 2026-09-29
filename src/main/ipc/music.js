@@ -15,6 +15,8 @@ const path = require('node:path');
 const { requireProjectDir, openUnique } = require('./project-files');
 
 const SUBDIR = 'music';
+// Files added in one go from the Open dialog.
+const MAX_AT_ONCE = 20;
 // Keep in sync with MUSIC_EXTENSIONS in src/core/audio/music.js (a test
 // checks). Formats Chromium can decode.
 const MUSIC_EXTENSIONS = ['.mp3', '.m4a', '.aac', '.wav', '.aif', '.aiff', '.flac', '.ogg', '.opus', '.webm'];
@@ -78,17 +80,21 @@ function registerMusicIpc({ ipcMain, dialog, BrowserWindow, getProjectDir }) {
   ipcMain.handle('music:import', (_e, sourcePath) =>
     importMusic(requireProjectDir(getProjectDir), sourcePath));
 
+  // One or more songs or sound files: [{ file, name }] in the order chosen,
+  // or null when cancelled. Each becomes an audio clip on the timeline.
   ipcMain.handle('music:choose', async (e) => {
     const projectDir = requireProjectDir(getProjectDir);
     const win = BrowserWindow.fromWebContents?.(e.sender) ?? undefined;
     const { canceled, filePaths } = await dialog.showOpenDialog(win, {
-      title: 'Add music',
+      title: 'Add audio',
       buttonLabel: 'Add',
-      properties: ['openFile'],
+      properties: ['openFile', 'multiSelections'],
       filters: [{ name: 'Audio', extensions: MUSIC_EXTENSIONS.map((x) => x.slice(1)) }]
     });
     if (canceled || !filePaths?.length) return null;
-    return importMusic(projectDir, filePaths[0]);
+    const added = [];
+    for (const file of filePaths.slice(0, MAX_AT_ONCE)) added.push(await importMusic(projectDir, file));
+    return added;
   });
 }
 

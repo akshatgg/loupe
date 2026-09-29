@@ -152,10 +152,22 @@ export function buildTimeline(project) {
   project.clips.forEach((clip, clipIndex) => {
     const map = mapFor(clip.source);
     const outA = mapToOutput(map, clip.start);
-    const length = Math.max(0, mapToOutput(map, clip.end) - outA);
+    // A freeze frame lasts its `hold` seconds, whatever its (empty) range.
+    const length = clip.hold > 0 ? clip.hold : Math.max(0, mapToOutput(map, clip.end) - outA);
     bounds.push({ clipIndex, outStart: acc, outEnd: acc + length, mapStart: outA });
     acc += length;
   });
+
+  // The recording moment clip i shows at output time o (o inside the clip,
+  // its ends included): held for a freeze frame, mirrored when reversed.
+  function clipSourceAt(i, o) {
+    const clip = project.clips[i];
+    const b = bounds[i];
+    if (clip.hold > 0) return clip.start;
+    const local = clip.reverse ? b.outEnd - o : o - b.outStart;
+    const t = mapToSource(mapFor(clip.source), b.mapStart + local);
+    return Math.min(clip.end, Math.max(clip.start, t));
+  }
   const duration = acc;
 
   function toSource(outT) {
@@ -165,19 +177,18 @@ export function buildTimeline(project) {
     // the very end to the last one.
     let i = bounds.findIndex((b) => o < b.outEnd);
     if (i < 0) i = bounds.length - 1;
-    const b = bounds[i];
     const clip = project.clips[i];
-    const map = mapFor(clip.source);
-    const t = mapToSource(map, b.mapStart + (o - b.outStart));
-    return { clipIndex: i, source: clip.source, t: Math.min(clip.end, Math.max(clip.start, t)) };
+    return { clipIndex: i, source: clip.source, t: clipSourceAt(i, o) };
   }
 
   function toOutput(source, t) {
     for (let i = 0; i < project.clips.length; i++) {
       const clip = project.clips[i];
-      if (clip.source !== source || t < clip.start - EPS || t > clip.end + EPS) continue;
+      // A freeze frame shows a moment but doesn't play it: that is the clips around it.
+      if (clip.hold > 0 || clip.source !== source || t < clip.start - EPS || t > clip.end + EPS) continue;
       const map = mapFor(source);
-      return bounds[i].outStart + mapToOutput(map, t) - bounds[i].mapStart;
+      const local = mapToOutput(map, t) - bounds[i].mapStart;
+      return clip.reverse ? bounds[i].outEnd - local : bounds[i].outStart + local;
     }
     return null;
   }
@@ -196,6 +207,9 @@ export function buildTimeline(project) {
   function audioPlan() {
     const out = [];
     project.clips.forEach((clip, i) => {
+      // Freeze frames are silent; reversed clips too (sound can't be
+      // stretched backwards).
+      if (clip.hold > 0 || clip.reverse) return;
       const map = mapFor(clip.source);
       const edges = audioEdges(map, clip.start, clip.end);
       for (let k = 1; k < edges.length; k++) {
@@ -206,14 +220,16 @@ export function buildTimeline(project) {
         const ob = bounds[i].outStart + mapToOutput(map, b) - bounds[i].mapStart;
         const rate = (b - a) / (ob - oa);
         const prev = out.at(-1);
+        const detached = Boolean(clip.detached);
         // Neighbouring slices at the same rate are one slice: fewer seams.
-        if (prev && prev.source === clip.source && Math.abs(prev.srcEnd - a) < EPS &&
+        if (prev && prev.source === clip.source && prev.detached === detached && Math.abs(prev.srcEnd - a) < EPS &&
             Math.abs(prev.outStart + (prev.srcEnd - prev.srcStart) / prev.rate - oa) < 1e-7 &&
             Math.abs(prev.rate - rate) < 1e-9) {
           prev.srcEnd = b;
           continue;
         }
-        out.push({ source: clip.source, srcStart: a, srcEnd: b, outStart: oa, rate });
+        // `detached`: this clip's sound plays from an audio clip instead.
+        out.push({ source: clip.source, srcStart: a, srcEnd: b, outStart: oa, rate, detached });
       }
     });
     return out;
@@ -223,5 +239,5 @@ export function buildTimeline(project) {
     return bounds.map(({ clipIndex, outStart, outEnd }) => ({ clipIndex, outStart, outEnd }));
   }
 
-  return { duration, toSource, toOutput, framePlan, audioPlan, clipBounds };
+  return { duration, toSource, toOutput, framePlan, audioPlan, clipBounds, clipSourceAt };
 }

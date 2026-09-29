@@ -6,6 +6,11 @@
 //                                         the Library's recordings, minus the one open
 //   project:recordingThumbnail (id)    -> file:// URL or null (made once, like the Library's)
 //   project:appendRecording (id)       -> { key, meta, files, zooms, title }
+//   project:importVideo ()             -> the same, or null if nothing was chosen:
+//                                         a video file chosen here is imported
+//                                         into the Library (ipc/library.js
+//                                         importVideo) and appended like one
+//                                         of its recordings, plus `soundLeftOut`
 //
 // The page names a recording by its Library id only; main resolves it to a
 // folder inside the recordings folder (ipc/library.js), reads that project,
@@ -17,6 +22,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { readProject, sourceFiles } = require('./project');
+const { chooseVideoFile } = require('./library');
 
 // "src2", "src3", ... -- the first key no source uses yet.
 function nextSourceKey(sources) {
@@ -49,7 +55,7 @@ function recordingToAppend(otherDir) {
   return { meta, zooms, title: project.title };
 }
 
-function registerAppendRecordingIpc({ ipcMain, library, store, projectDir }) {
+function registerAppendRecordingIpc({ ipcMain, library, store, projectDir, dialog, BrowserWindow }) {
   const others = () => {
     const dir = projectDir();
     return library().list().filter((r) => !(dir && sameFolder(library().resolve(r.id), dir)));
@@ -57,9 +63,12 @@ function registerAppendRecordingIpc({ ipcMain, library, store, projectDir }) {
 
   ipcMain.handle('project:recordings', () => others().filter((r) => r.hasVideo));
   ipcMain.handle('project:recordingThumbnail', (_e, id) => library().thumbnail(id));
-  ipcMain.handle('project:appendRecording', (_e, id) => {
+  const openDir = () => {
     const dir = projectDir();
     if (!dir) throw new Error('There is no recording open.');
+    return dir;
+  };
+  function append(dir, id) {
     const otherDir = library().resolve(id);
     if (sameFolder(otherDir, dir)) throw new Error('That’s the recording you’re editing.');
     const { meta, zooms, title } = recordingToAppend(otherDir);
@@ -68,6 +77,16 @@ function registerAppendRecordingIpc({ ipcMain, library, store, projectDir }) {
     if (files.missing) throw new Error('That recording’s video file is missing, so it can’t be added.');
     store.addSource(dir, key, meta);
     return { key, meta, files, zooms, title };
+  }
+  ipcMain.handle('project:appendRecording', (_e, id) => append(openDir(), id));
+  ipcMain.handle('project:importVideo', async (e) => {
+    const dir = openDir();
+    const sourcePath = await chooseVideoFile(dialog, BrowserWindow?.fromWebContents?.(e.sender));
+    if (!sourcePath) return null;
+    const imported = await library().importVideo(sourcePath);
+    // The editor may have been closed (or switched) while the file copied.
+    if (projectDir() !== dir) throw new Error('The video was added to the Library, but the recording it was for is no longer open.');
+    return { ...append(dir, imported.id), soundLeftOut: imported.soundLeftOut };
   });
 }
 

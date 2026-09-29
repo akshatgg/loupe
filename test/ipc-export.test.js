@@ -85,7 +85,7 @@ test('a v1 project becomes a v2 job with file URLs and the output beside it', ()
   assert.match(job.sources.main.video, /^file:\/\/.*raw\.mov$/);
   assert.match(job.sources.main.cursor, /^file:\/\/.*cursor\.bin$/);
   assert.strictEqual(job.sources.main.systemAudio, null);
-  assert.deepStrictEqual(job.audioFiles, { music: null, voiceover: {} });
+  assert.deepStrictEqual(job.audioFiles, { music: {}, voiceover: {} });
   // 1440x900 at 720p keeps the recording's shape.
   assert.strictEqual(out, path.join(dir, 'Recording.mp4'), 'named after the video');
   fs.rmSync(dir, { recursive: true, force: true });

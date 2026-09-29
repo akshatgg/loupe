@@ -40,13 +40,20 @@
       <div class="group">
         <button id="play" type="button" class="play-btn" aria-label="Play"></button>
         <span id="time" class="time">0:00.0 / 0:00.0</span>
+        <div id="meter" class="meter" role="meter" aria-label="Sound level" title="Sound level (dB) while playing">
+          <div class="meter-row"><span class="meter-fill"></span><span class="meter-peak"></span></div>
+          <div class="meter-row"><span class="meter-fill"></span><span class="meter-peak"></span></div>
+        </div>
       </div>
       <div class="group tools">
         <button id="splitBtn" type="button" class="tool" title="Split at the playhead (S)"></button>
+        <button id="cutBtn" type="button" class="tool" title="Cut by typing times (X)"></button>
         <button id="zoomBtn" type="button" class="tool" title="Add a zoom at the playhead (Z)"></button>
         <button id="deleteBtn" type="button" class="tool" title="Delete what’s selected (Delete)" disabled></button>
         <span class="tool-sep" aria-hidden="true"></span>
         <button id="addRecBtn" type="button" class="tool" title="Add another recording after this one"></button>
+        <button id="addAudioBtn" type="button" class="tool" title="Add songs or sound files: each becomes a clip on the audio rows"></button>
+        <button id="addOverlayBtn" type="button" class="tool" title="Put a logo, picture or video over the video"></button>
       </div>
       <div class="group tl-zoom">
         <button id="tlOut" type="button" class="icon-btn small" aria-label="Zoom the timeline out"></button>

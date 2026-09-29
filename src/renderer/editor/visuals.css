@@ -126,5 +126,8 @@ textarea.text-input { resize: vertical; display: block; }
 .tl-join:hover { transform: scale(1.12); color: var(--ink); border-color: var(--ink-3); }
 .tl-join.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .tl-join.open { box-shadow: 0 0 0 3px var(--accent-soft), 0 2px 6px rgba(0,0,0,.45); }
-.join-menu .menu-sep { width: 1px; align-self: stretch; margin: 3px 4px; background: var(--line-2); }
+/* Fourteen transitions: they wrap into a block, the lengths on a row below. */
+.join-menu { flex-wrap: wrap; max-width: 470px; row-gap: 3px; }
+.join-menu .menu-label { flex-basis: 100%; padding: 2px 6px 4px; }
+.join-menu .menu-sep { flex-basis: 100%; height: 1px; margin: 4px 0; background: var(--line-2); }
 .anno-back { display: inline-flex; align-items: center; gap: 4px; margin: 0 0 12px -4px; }

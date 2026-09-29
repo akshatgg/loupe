@@ -114,18 +114,27 @@ async function main() {
     // A tone is not speech: clean-up would remove it, so turn it off.
     await ed.clickOn('#micCleanUp + .switch');
     await waitFor(async () => (await audio()).mic.cleanUp === false, 'clean-up off');
-    await ed.clickOn('.panel-section:nth-of-type(2) .mute-btn');
+    await ed.clickOn('#systemSection .mute-btn');
     assert.strictEqual((await audio()).system.muted, true);
     assert.strictEqual(await ed.js('document.querySelector("#systemVolume").closest(".field").classList.contains("disabled")'), true);
-    await ed.clickOn('.panel-section:nth-of-type(2) .mute-btn');
+    await ed.clickOn('#systemSection .mute-btn');
     assert.strictEqual((await audio()).system.muted, false);
     ok('switches and mute buttons change the project');
 
     musicPick = song;
+    // Audio goes in at the playhead: from the start, as the windows below expect.
+    await ed.js('window.__editor.player.seek(0)');
     await ed.clickOn('#addMusic');
-    await waitFor(async () => (await audio()).music?.file === 'music/Song for the demo.wav', 'the music in the project');
+    await waitFor(async () => (await audio()).clips[0]?.file === 'music/Song for the demo.wav', 'the song as an audio clip');
     assert.ok(fs.existsSync(path.join(dir, 'music', 'Song for the demo.wav')), 'the song is copied into the project');
-    assert.deepStrictEqual((await audio()).music, { file: 'music/Song for the demo.wav', volume: 0.3, duck: true });
+    const clip = { ...(await audio()).clips[0] };
+    delete clip.id;
+    assert.deepStrictEqual(clip, {
+      file: 'music/Song for the demo.wav', name: 'Song for the demo', start: 0, from: 0, length: null,
+      fileDuration: clip.fileDuration, volume: 0.3, fadeIn: 0, fadeOut: 0, duck: true, muted: false, loop: false, lane: 0,
+      points: [], beats: false, source: null
+    });
+    assert.ok(Math.abs(clip.fileDuration - 20) < 0.05, `the song's length is known: ${clip.fileDuration}`);
     await ready('the mix with music');
     await waitFor(async () => (await measure([{ freq: 220, from: 1, to: 2 }]))[0] > 0.01, 'music in the preview', 20000);
     ok('Add music copies the song in and the preview plays it');

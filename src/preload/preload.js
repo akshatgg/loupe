@@ -13,6 +13,10 @@ contextBridge.exposeInMainWorld('loupe', {
   onSettingsChanged: (cb) => ipcRenderer.on('settings:changed', (_e, s) => cb(s)),
   // App shell (src/main/app-shell.js): the Library and Settings windows.
   openLibrary: () => ipcRenderer.invoke('shell:openLibrary'),
+  // Picker: pick a video file in main's Open dialog, import it into the
+  // Library and open it in the editor (src/main/ipc/library.js):
+  // { recording, opened, blocked }, or null when nothing was chosen.
+  importVideoToLibrary: () => ipcRenderer.invoke('library:chooseVideo'),
   openSettings: (section) => ipcRenderer.invoke('shell:openSettings', section),
   // App menu commands meant for the editor when it is in front:
   // 'undo' | 'redo' | 'shortcuts' (src/main/app-shell.js).
@@ -59,6 +63,9 @@ contextBridge.exposeInMainWorld('loupe', {
   listRecordings: () => ipcRenderer.invoke('project:recordings'),
   recordingThumbnail: (id) => ipcRenderer.invoke('project:recordingThumbnail', id),
   appendRecording: (id) => ipcRenderer.invoke('project:appendRecording', id),
+  // A video file from anywhere: chosen in main's Open dialog, imported into
+  // the Library and added like a recording; null when nothing was chosen.
+  importVideo: () => ipcRenderer.invoke('project:importVideo'),
   // Export runs in a hidden window (src/main/ipc/export.js): resolves with
   // { file, ... } once saved; progress arrives as { phase, frame, total }.
   exportVideo: (opts) => ipcRenderer.invoke('export:start', opts),
@@ -95,7 +102,12 @@ contextBridge.exposeInMainWorld('loupe', {
   // Audio: voiceover takes and background music, saved into the project folder.
   saveVoiceover: (take) => ipcRenderer.invoke('voiceover:save', take),
   deleteVoiceover: (file) => ipcRenderer.invoke('voiceover:delete', { file }),
+  // [{ file, name }] -- one or more songs or sound files -- or null.
   chooseMusic: () => ipcRenderer.invoke('music:choose'),
+  // A .cube LUT for a clip's colour, copied into the project: { file, name } or null.
+  chooseLut: () => ipcRenderer.invoke('lut:choose'),
+  // A picture or video for an overlay, copied into the project, or null.
+  chooseMedia: () => ipcRenderer.invoke('media:choose'),
   // A File dropped on the editor; only its path crosses to main, which copies it.
   importMusicFile: (file) =>
     ipcRenderer.invoke('music:import', webUtils.getPathForFile(file)),

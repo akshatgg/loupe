@@ -76,14 +76,17 @@ async function render(request) {
   const keys = [...new Set(project.clips.map((c) => c.source))];
   const loaded = await Promise.all(keys.map((k) =>
     loadRecording(k, sources[k] ?? {}, project.sources[k]?.mic)));
-  const inputs = { mic: {}, system: {}, music: null, voiceover: {} };
+  const inputs = { mic: {}, system: {}, music: {}, voiceover: {} };
   keys.forEach((k, i) => {
     if (loaded[i].mic) inputs.mic[k] = loaded[i].mic;
     if (loaded[i].system) inputs.system[k] = loaded[i].system;
   });
   // Music or a take the page hasn't finished decoding yet is left out for
   // now; the page asks again once it arrives.
-  if (request.music) inputs.music = files.get(request.music) ?? null;
+  for (const [file, id] of Object.entries(request.music ?? {})) {
+    const pcm = files.get(id);
+    if (pcm) inputs.music[file] = pcm;
+  }
   for (const [takeId, id] of Object.entries(request.takes ?? {})) {
     const pcm = files.get(id);
     if (pcm) inputs.voiceover[takeId] = pcm;

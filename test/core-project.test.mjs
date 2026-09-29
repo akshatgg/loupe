@@ -322,10 +322,11 @@ test('setStyle merges nested patches and validates them', () => {
 
 test('setAudio, setCaptions, setExport and setTitle validate their patches', () => {
   const p = fresh();
-  const a = P.setAudio(p, { mic: { volume: 0.5 }, music: { file: 'song.m4a', volume: 0.3, duck: true } });
+  const a = P.setAudio(p, { mic: { volume: 0.5 } });
   assert.deepStrictEqual(a.audio.mic, { volume: 0.5, muted: false, cleanUp: true, level: true });
-  assert.strictEqual(a.audio.music.file, 'song.m4a');
-  assert.strictEqual(P.setAudio(a, { music: null }).audio.music, null);
+  // Songs are clips now (addAudioClip); the old single setting is refused.
+  assert.throws(() => P.setAudio(p, { music: { file: 'song.m4a', volume: 0.3, duck: true } }), /Unknown audio setting/);
+  assert.throws(() => P.setAudio(p, { clips: [{ id: 'a1', file: 'x.m4a' }] }), /Audio name|Audio start|must be/);
   assert.throws(() => P.setAudio(p, { mic: { volume: 5 } }), /volume/);
   assert.throws(() => P.setAudio(p, { voiceover: [{ id: 'v1', file: 'v.m4a', source: 'main', t: -1, volume: 1 }] }), /Voiceover time/);
   const c = P.setCaptions(p, { show: true, segments: [{ id: 's1', source: 'main', start: 1, end: 2, text: 'hi' }] });
@@ -401,4 +402,11 @@ test('migrating a v1 project with a huge number of zoom keyframes stays quick', 
   assert.strictEqual(p.zooms.length, 200000);
   assert.strictEqual(new Set(p.zooms.map((z) => z.id)).size, 200000, 'ids stay unique');
   assert.ok(Date.now() - started < 3000, `took ${Date.now() - started} ms`);
+});
+
+test('an imported video keeps its rotation; anything but a quarter turn is refused', () => {
+  const main = { kind: 'file', width: 90, height: 160, duration: 2, cursor: null, rotation: 270 };
+  assert.strictEqual(P.createProject({ main }).sources.main.rotation, 270);
+  assert.strictEqual(P.createProject({ main: { width: 10, height: 10, duration: 1 } }).sources.main.rotation, undefined);
+  assert.throws(() => P.createProject({ main: { ...main, rotation: 45 } }), /rotation/);
 });
