@@ -173,6 +173,20 @@ function createSpeechModels({ root, fetchImpl = fetch, host = HOST, catalog = MO
     onBytes(have);
 
     const out = fs.createWriteStream(part, { flags: have ? 'a' : 'w' });
+    // The stream's own failures are kept here rather than thrown at the
+    // process: a cancelled download's open or close finishes long after this
+    // function rejected and nobody is listening, and an unhandled 'error'
+    // there would take the whole app (or a test run) down with it.
+    let streamError = null;
+    out.on('error', (err) => { streamError ??= err; });
+    const closed = new Promise((resolve) => out.once('close', resolve));
+    // Flushes what arrived (so a resume picks up from it) and waits for the
+    // handle to be closed, so nothing touches the file after this returns --
+    // the folder can be deleted the moment a cancel is reported.
+    const closeOut = async () => {
+      out.end();
+      await closed;
+    };
     let written = have;
     try {
       for await (const chunk of res.body) {
@@ -185,7 +199,7 @@ function createSpeechModels({ root, fetchImpl = fetch, host = HOST, catalog = MO
         onBytes(buf.length);
       }
     } catch (err) {
-      out.destroy();
+      await closeOut();
       if (signal.aborted) throw new SpeechModelError('cancelled', 'Download cancelled');
       if (err instanceof SpeechModelError) {
         if (err.code === 'corrupt') await fs.promises.rm(part, { force: true });
@@ -193,8 +207,12 @@ function createSpeechModels({ root, fetchImpl = fetch, host = HOST, catalog = MO
       }
       throw new SpeechModelError('network', `The download stopped part way. Check your internet connection and try again. (${err.message})`);
     }
-    out.end();
-    await once(out, 'close');
+    await closeOut();
+    // A write that failed on its way to the disk (no space, the folder gone)
+    // leaves a short file: it is a failed download, not a corrupt one.
+    if (streamError) {
+      throw new SpeechModelError('network', `The download couldn\u2019t be saved. (${streamError.message})`);
+    }
 
     if (written !== file.size || hash.digest('hex') !== expected) {
       await fs.promises.rm(part, { force: true });

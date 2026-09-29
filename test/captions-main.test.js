@@ -181,6 +181,42 @@ test('a download can be cancelled', async () => {
   }
 });
 
+// The bug this guards: cancel() aborted the download and ensure() rejected
+// while the part file's stream was still opening. Whoever cancelled then
+// deleted the folder (Remove does, and so does a test's clean-up), the open
+// failed with ENOENT, and that error -- on a stream nobody was listening to
+// any more -- reached the process as an uncaughtException.
+test('a cancelled download leaves no file handle behind to fail later', async () => {
+  const uncaught = [];
+  const onUncaught = (err) => uncaught.push(err);
+  process.on('uncaughtException', onUncaught);
+  try {
+    // Cancel at a spread of moments, so one of them lands while a part file
+    // is being opened.
+    for (const wait of [0, 1, 2, 3, 5, 8, 13, 21]) {
+      const root = tmp();
+      const { catalog, bodies } = fixture();
+      const models = createSpeechModels({ root, fetchImpl: fakeFetch(bodies, { delayMs: 3 }), catalog });
+      const p = models.ensure('tiny');
+      await new Promise((r) => setTimeout(r, wait));
+      const cancelled = models.cancel('tiny');
+      // (A very early cancel can land before anything is in flight, and a
+      // slow machine can finish the download first: either way nothing may
+      // be left writing afterwards.)
+      await p.then(
+        () => assert.ok(!cancelled, 'a cancelled download should not resolve'),
+        (err) => assert.strictEqual(err.code, 'cancelled')
+      );
+      // Once it has rejected, nothing is still writing: the folder can go.
+      fs.rmSync(root, { recursive: true, force: true });
+      await new Promise((r) => setTimeout(r, 30));
+      assert.deepStrictEqual(uncaught.map((e) => e.message), [], `cancelled after ${wait} ms`);
+    }
+  } finally {
+    process.off('uncaughtException', onUncaught);
+  }
+});
+
 test('saving subtitles only takes a format, the text and a plain file name', () => {
   assert.deepStrictEqual(validateSubtitlePayload({ format: 'srt', text: '1\n', name: 'My demo.srt' }),
     { format: 'srt', text: '1\n', name: 'My demo' });
