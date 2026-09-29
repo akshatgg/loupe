@@ -7,6 +7,9 @@ dist/
 .DS_Store
 *.mov
 *.m4a
+# ...but the tiny videos and songs the tests read are committed: CI checks
+# the repo out fresh, and without them those tests fail there only.
+!test/fixtures/**
 .build-native/
 .vercel
 .env*
