@@ -514,3 +514,28 @@ test('the Mac swap script replaces the app, and puts the old one back if it can\
   assert.strictEqual(r.status, 0);
   assert.strictEqual(fs.readFileSync(path.join(app, 'which'), 'utf8'), 'new');
 });
+
+test('Update now after Loupe last found nothing new checks again, then installs what it finds', async () => {
+  const dmg = crypto.randomBytes(2000);
+  const routes = { ...macRoutes(dmg), [RELEASES_API]: release('0.2.0') };
+  const h = harness({ bundle: '/Applications/Loupe.app', runCommand: fakeMacTools(), routes });
+  assert.strictEqual((await h.updater.check()).status, 'current');
+
+  // A release comes out while Loupe is open.
+  routes[RELEASES_API] = release('0.3.0');
+  assert.strictEqual(h.updater.requestInstall(), true);
+  const st = await h.updater.check(); // shares the check Update now started
+  assert.strictEqual(st.status, 'ready');
+  assert.strictEqual(st.latest.version, '0.3.0');
+  assert.strictEqual(st.pending, true, 'it installs as soon as it is ready');
+  assert.strictEqual(h.fetchImpl.calls.filter((c) => c.url === RELEASES_API).length, 2);
+});
+
+test('Update now with nothing newer out ends as up to date, not waiting forever', async () => {
+  const h = harness({ bundle: '/Applications/Loupe.app', runCommand: fakeMacTools(), routes: { [RELEASES_API]: release('0.2.0') } });
+  await h.updater.check();
+  h.updater.requestInstall();
+  const st = await h.updater.check();
+  assert.strictEqual(st.status, 'current');
+  assert.strictEqual(st.pending, false);
+});

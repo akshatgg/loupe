@@ -4,7 +4,7 @@ const { RELEASES_PAGE, CHECK_INTERVAL_MS } = require('../updates');
 
 // Updates IPC for every window's Update now button and the Settings window,
 // and the one dialog Loupe shows by itself: when the check it makes on
-// opening (and once a day while open) finds a newer version.
+// opening (and every hour while open) finds a newer version.
 //
 //   updates:state            -> the updater state (updates.js createUpdater)
 //   updates:check            -> checks now, resolves to the new state
@@ -37,15 +37,19 @@ function registerUpdatesIpc({ ipcMain, electron, getUpdater, isBusy = () => fals
     app.quit();
   };
 
+  // Update now. Where Loupe installs itself it never just waits: a ready
+  // update restarts Loupe, anything else is remembered and -- unless a
+  // download is already running -- checked for again (updates.js
+  // requestInstall), so a release out since the last check is found too.
   function updateNow() {
     const s = updater.state();
-    if (!s.latest) return;
-    if (!updater.installsItself()) {
+    if (updater.installsItself()) {
+      if (s.status === 'ready') restartToUpdate();
+      else updater.requestInstall();
+    } else if (s.status === 'available') {
       openReleasePage();
-    } else if (s.status === 'ready') {
-      restartToUpdate();
     } else {
-      updater.requestInstall();
+      updater.check();
     }
   }
 
@@ -118,7 +122,7 @@ function registerUpdatesIpc({ ipcMain, electron, getUpdater, isBusy = () => fals
     }
   }
 
-  // Each time Loupe opens (with the setting on), and once a day after that
+  // Each time Loupe opens (with the setting on), and every hour after that
   // while it stays open.
   function launchCheck() {
     const timer = setInterval(autoCheck, CHECK_INTERVAL_MS);

@@ -20,6 +20,7 @@ function harness(state, { busy = false, response = 1, autoState = state } = {}) 
     requestInstall: () => { calls.push('requestInstall'); return true; },
     installsItself: () => state.kind === 'installer' || state.kind === 'bundle',
     autoCheck: async () => autoState,
+    check: () => { calls.push('check'); },
     brewCommand: 'brew upgrade --cask loupe'
   };
   const ipc = registerUpdatesIpc({
@@ -115,4 +116,16 @@ test('no dialog when Loupe is up to date, or when the user pressed Check now', a
   manual.ipc.stateChanged(available);
   await tick();
   assert.strictEqual(manual.dialogs.length, 0);
+});
+
+test('Update now never does nothing: up to date or after an error, it checks again', () => {
+  for (const status of ['current', 'error', 'idle']) {
+    const h = harness({ kind: 'bundle', status, latest: status === 'current' ? latest : null });
+    h.handlers['updates:install']();
+    assert.deepStrictEqual(h.calls, ['requestInstall'], status);
+  }
+  // Where Loupe can't install itself: checks, then says how to get it.
+  const h = harness({ kind: 'download', status: 'current', latest });
+  h.handlers['updates:install']();
+  assert.deepStrictEqual(h.calls, ['check']);
 });
