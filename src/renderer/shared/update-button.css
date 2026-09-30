@@ -1,4 +1,7 @@
-/* Update now (update-button.js): the picker and the Library, top right. */
+/* Update now (update-button.js): the picker and the Library, top right.
+   Hidden unless a newer Loupe exists -- display below would otherwise beat
+   the hidden attribute, and the picker has no global [hidden] rule. */
+.update-now[hidden] { display: none; }
 .update-now { appearance: none; border: 0; font: inherit; font-weight: 500; flex: none;
               display: inline-flex; align-items: center; gap: 6px;
               padding: 8px 16px; border-radius: 18px; cursor: pointer;
