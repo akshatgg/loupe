@@ -491,4 +491,5 @@ window.loupe.getRecordingSettings().then(async (s) => {
 
 window.addEventListener('focus', refreshPermissions);
 window.loupeUpdateButton.mount(document.getElementById('updateNow'));
+document.getElementById('openSettings').addEventListener('click', () => window.loupe.openSettings());
 load();

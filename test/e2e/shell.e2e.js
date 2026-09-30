@@ -351,6 +351,28 @@ async function run() {
 
   // -- Settings -----------------------------------------------------------------
   let settingsWin;
+  await check('the picker, the Library and the editor each have a Settings button', async () => {
+    const opensSettings = async (win, click) => {
+      const before = windowTitled('Settings');
+      if (before) { before.destroy(); await waitFor('Settings to close', () => !windowTitled('Settings')); }
+      await js(win, click);
+      const w = await waitFor('the Settings window', () => windowTitled('Settings'));
+      await waitFor('it to show', () => w.isVisible());
+      w.destroy();
+      await waitFor('Settings to close', () => !windowTitled('Settings'));
+    };
+    picker.show();
+    await opensSettings(picker, 'document.getElementById("openSettings").click()');
+    library.show();
+    await opensSettings(library, 'document.getElementById("openSettings").click()');
+    await js(library, `document.querySelector('.card').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+    const editor = await waitFor('the editor', () => editorWindow());
+    await waitFor('the editor to load', () => !editor.webContents.isLoading());
+    await opensSettings(editor, 'document.getElementById("settingsBtn").click()');
+    editor.close();
+    await waitFor('the editor to close', () => !editorWindow());
+  });
+
   await check('Settings… opens the Settings window at General', async () => {
     clickMenu('settings');
     settingsWin = await waitFor('the Settings window', () => windowTitled('Settings'));

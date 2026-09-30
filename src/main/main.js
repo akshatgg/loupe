@@ -486,6 +486,11 @@ async function stopRecording() {
     } else if (result?.dir) {
       openEditorWindow(result.dir);
       opened = true;
+      // The picker was only hidden while recording. It is closed now rather
+      // than kept hidden: a hidden window would keep Loupe running with
+      // nothing on screen once the editor and Library are closed (Windows
+      // quits when the last window closes). New recording makes a fresh one.
+      if (pickerWindow && !pickerWindow.isDestroyed()) pickerWindow.close();
       appShell.recordingsChanged();
       if (failedCapture) tellUser(editorWindow, captureProblem({ started: true }));
     }
@@ -689,7 +694,7 @@ ipcMain.handle('bar:arm', (_e, rawOpts) => {
   barPhase = 'armed';
   createBarWindow();
   extras.onArm();
-  pickerWindow?.hide();
+  if (pickerWindow && !pickerWindow.isDestroyed()) pickerWindow.hide();
 });
 
 // Bar: the pause button, and Cancel/Esc during the countdown.
@@ -871,7 +876,24 @@ registerBackgroundIpc({ ipcMain: editorIpc, dialog, BrowserWindow, getProjectDir
 // which is out of scope for this fix -- see control-bar-report.md.
 let stopShortcutRegistered = false;
 
+// One Loupe at a time: opening it again (the Start menu, the Dock, a second
+// double-click) brings the running one forward instead of starting another
+// that would fight it over the recordings, settings and helpers. Installed
+// copies only -- run from source, the app shares its name with an installed
+// Loupe and would hand over to it.
+const singleInstance = !app.isPackaged || app.requestSingleInstanceLock();
+if (!singleInstance) app.quit();
+app.on('second-instance', () => {
+  // Mid-recording nothing jumps in front of what is being recorded.
+  if (barWindow) return;
+  const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed() && w.isVisible() && w.isFocusable());
+  if (!win) { showPicker(); return; }
+  if (win.isMinimized()) win.restore();
+  win.focus();
+});
+
 app.whenReady().then(() => {
+  if (!singleInstance) return;
   // Groups Loupe's windows under one taskbar button with the right name.
   if (IS_WINDOWS) app.setAppUserModelId('tech.markai.loupe');
   appShell.ready();

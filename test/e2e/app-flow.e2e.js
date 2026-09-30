@@ -80,8 +80,9 @@ async function colourWindow() {
 
 // One recording through the picker and the bar. Returns its folder.
 async function record(seconds) {
+  // After a recording the picker is closed; New Recording makes a new one.
+  if (!pageOf('picker')) Menu.getApplicationMenu().getMenuItemById('new-recording').click();
   const picker = await waitFor('the picker', () => pageOf('picker'));
-  if (!picker.isVisible()) picker.show();
   await waitFor('the picker to load', () => !picker.webContents.isLoading());
   await waitFor('the sources', () => js(picker, `document.querySelectorAll('#list li[role=option]').length > 0`), 30000);
   // The Entire screen tab is first; pick the first display and Continue.
@@ -164,8 +165,8 @@ async function run() {
     assert.deepStrictEqual(project.clips.map((c) => c.source), ['main']);
     assert.deepStrictEqual(project.style.background, { type: 'color', value: '#224466' }, 'the default preset');
     assert.strictEqual(project.style.padding, 0.08);
-    const picker = pageOf('picker');
-    assert.ok(!picker || !picker.isVisible(), 'the picker stays out of the way');
+    // Closed, not just hidden: nothing invisible keeps Loupe running.
+    await waitFor('the picker to close', () => !pageOf('picker'));
     const inEditor = await js(editor, 'window.__editor.store.project.title');
     assert.strictEqual(inEditor, project.title);
     await waitFor('the window title', () => editor.getTitle() === project.title);

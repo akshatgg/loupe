@@ -10,6 +10,8 @@ h1 { font-size: 19px; font-weight: 400; }
 .sub .link { font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis;
              direction: rtl; text-align: left; margin-left: 4px; }
 .tools { display: flex; align-items: center; gap: 10px; }
+.btn.icon { width: 34px; padding: 0; display: inline-grid; place-items: center; }
+.btn.icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
 
 .search { position: relative; display: flex; align-items: center; }
 .search svg { position: absolute; left: 10px; width: 14px; height: 14px; fill: none;
