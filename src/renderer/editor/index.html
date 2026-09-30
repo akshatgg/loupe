@@ -9,7 +9,7 @@
 <body>
   <div id="app">
     <header id="topbar">
-      <div class="brand" aria-hidden="true"><span class="lens"></span></div>
+      <button id="backBtn" type="button" class="btn nav-back" title="Back to your recordings. Your edits are saved.">Recordings</button>
       <input id="title" type="text" spellcheck="false" aria-label="Video title" maxlength="200">
       <div class="history">
         <button id="undo" type="button" class="icon-btn" aria-label="Undo" disabled></button>
@@ -18,6 +18,8 @@
       <span class="spacer"></span>
       <span id="saveState" class="save-state" aria-live="polite"></span>
       <button id="shortcutsBtn" type="button" class="icon-btn" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"></button>
+      <button id="settingsBtn" type="button" class="icon-btn" title="Settings" aria-label="Settings"></button>
+      <button id="newRecBtn" type="button" class="btn" title="Record something new. This video stays open."><span class="recdot" aria-hidden="true"></span>New recording</button>
       <button id="exportBtn" type="button" class="btn primary">Export</button>
     </header>
 

@@ -295,6 +295,24 @@ async function run() {
     editor.close();
   });
 
+  await check('the editor leads back to the Recordings and into a new recording', async () => {
+    await js(library, `document.querySelector('.card[data-id="${firstId}"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+    const editor = await waitFor('the editor', () => editorWindow());
+    await waitFor('the editor to load', () => !editor.webContents.isLoading());
+    await waitFor('its buttons', () => js(editor, 'return document.getElementById("backBtn").textContent === "Recordings"'));
+    await shot(editor, '07b-editor-navigation');
+
+    picker.hide();
+    await js(editor, 'document.getElementById("newRecBtn").click()');
+    await waitFor('the picker', () => picker.isVisible());
+    assert.ok(editorWindow(), 'the video stays open');
+
+    library.hide();
+    await js(editor, 'document.getElementById("backBtn").click()');
+    await waitFor('the editor to close', () => !editorWindow());
+    await waitFor('the Library', () => library.isVisible());
+  });
+
   await check('a recording open in the editor can\'t be moved to the Trash', async () => {
     await js(library, `document.querySelector('.card[data-id="${firstId}"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
     const editor = await waitFor('the editor', () => editorWindow());
@@ -335,6 +353,28 @@ async function run() {
 
   // -- Settings -----------------------------------------------------------------
   let settingsWin;
+  await check('the picker, the Library and the editor each have a Settings button', async () => {
+    const opensSettings = async (win, click) => {
+      const before = windowTitled('Settings');
+      if (before) { before.destroy(); await waitFor('Settings to close', () => !windowTitled('Settings')); }
+      await js(win, click);
+      const w = await waitFor('the Settings window', () => windowTitled('Settings'));
+      await waitFor('it to show', () => w.isVisible());
+      w.destroy();
+      await waitFor('Settings to close', () => !windowTitled('Settings'));
+    };
+    picker.show();
+    await opensSettings(picker, 'document.getElementById("openSettings").click()');
+    library.show();
+    await opensSettings(library, 'document.getElementById("openSettings").click()');
+    await js(library, `document.querySelector('.card').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+    const editor = await waitFor('the editor', () => editorWindow());
+    await waitFor('the editor to load', () => !editor.webContents.isLoading());
+    await opensSettings(editor, 'document.getElementById("settingsBtn").click()');
+    editor.close();
+    await waitFor('the editor to close', () => !editorWindow());
+  });
+
   await check('Settings… opens the Settings window at General', async () => {
     clickMenu('settings');
     settingsWin = await waitFor('the Settings window', () => windowTitled('Settings'));

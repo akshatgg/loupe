@@ -69,11 +69,11 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 }
 #topbar > * { -webkit-app-region: no-drag; }
 #topbar .spacer { flex: 1; -webkit-app-region: drag; }
-.brand { width: 26px; height: 26px; display: grid; place-items: center; }
-.brand .lens {
-  width: 16px; height: 16px; border-radius: 50%; border: 2.5px solid var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
-}
+/* Back to the Library (top left) and New recording, as other editors lead
+   from a project back home and into a new one. */
+.nav-back { padding: 0 12px 0 6px; gap: 2px; background: transparent; border-color: transparent; color: var(--ink-2); }
+.nav-back:hover { color: var(--ink); }
+.recdot { width: 9px; height: 9px; border-radius: 50%; background: #f28b82; flex: none; }
 #title {
   width: min(420px, 38vw); height: 32px; padding: 0 10px; border-radius: 8px;
   border: 1px solid transparent; background: transparent; color: var(--ink);
