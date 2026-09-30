@@ -106,11 +106,18 @@
       each('[data-reveal-label]', function (el) {
         el.textContent = next === 'win' ? 'Show in Explorer' : 'Show in Finder';
       });
-      each('[data-os-cta]', function (el) {
-        el.textContent = next === 'win' ? 'Download for Windows' : 'Download for Mac';
+      // The download buttons at the top: the one for this computer leads.
+      each('[data-os-jump]', function (el) {
+        el.classList.toggle('btn--primary', el.getAttribute('data-os-jump') === next);
       });
       platformListeners.forEach(function (fn) { fn(next); });
     }
+
+    // Download for Mac / for Windows: the link scrolls to the download
+    // section, opened at that system's tab.
+    each('[data-os-jump]', function (el) {
+      el.addEventListener('click', function () { select(el.getAttribute('data-os-jump'), false); });
+    });
 
     tabs.forEach(function (tab, i) {
       tab.addEventListener('click', function () { select(tab.getAttribute('data-platform-tab'), false); });
@@ -194,7 +201,6 @@
   function initRelease() {
     var line = document.querySelector('[data-release]');
     var textEl = document.querySelector('[data-release-text]');
-    var link = document.querySelector('[data-release-link]');
     if (!line || !textEl || !window.fetch) return;
 
     var ctrl = window.AbortController ? new AbortController() : null;
@@ -213,9 +219,6 @@
           text += ' · released ' + when.getUTCDate() + ' ' + MONTHS[when.getUTCMonth()] + ' ' + when.getUTCFullYear();
         }
         textEl.textContent = text + '.';
-        if (typeof rel.html_url === 'string' && rel.html_url.indexOf('https://github.com/akshatgg/loupe/') === 0) {
-          link.href = rel.html_url;
-        }
         line.hidden = false;
         // The newest release may predate Windows builds: then say so rather
         // than offer a link that would not download anything.
