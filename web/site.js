@@ -253,7 +253,7 @@
     var pauseBtn = demo.querySelector('[data-pause]');
     var motion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
 
-    var EMAIL = 'maya@northwind.co';
+    var QUERY = 'Lisbon, Portugal';
     var LOOP = 15;
     var KEY_HELD = [[1.7, 3.3], [10.15, 11.45]];
     var IN_TICKS = [], OUT_TICKS = [];
@@ -283,11 +283,11 @@
           y: (r.top - s.top + r.height * ay) / s.height * 100
         };
       }
-      var e = stage.querySelector('[data-t="email"]').getBoundingClientRect();
+      var e = stage.querySelector('[data-t="query"]').getBoundingClientRect();
       geo = {
         home: { x: 71, y: 77 },
-        email: at('[data-t="email"]', 0.4, 0.58),
-        send: at('[data-t="send"]', 0.46, 0.6),
+        query: at('[data-t="query"]', 0.4, 0.58),
+        go: at('[data-t="go"]', 0.46, 0.6),
         pill: at('[data-t="pill"]', 0.55, 0.62),
         field: {
           l: (e.left - s.left) / s.width * 100, r: (e.right - s.left) / s.width * 100,
@@ -303,8 +303,8 @@
     function cursorAt(t) {
       var g = geo;
       var pts = [
-        [0, g.home], [0.35, g.home], [1.5, g.email], [6.3, g.email],
-        [7.35, g.send], [8.75, g.send], [9.85, g.pill], [12.3, g.pill],
+        [0, g.home], [0.35, g.home], [1.5, g.query], [6.3, g.query],
+        [7.35, g.go], [8.75, g.go], [9.85, g.pill], [12.3, g.pill],
         [14.2, g.home], [LOOP, g.home]
       ];
       for (var k = 1; k < pts.length; k++) {
@@ -414,8 +414,8 @@
       var up = within(t, IN_TICKS, 0.12), down = within(t, OUT_TICKS, 0.1);
       flag('scroll', up || down, up ? 'up' : 'down');
 
-      var n = t < TYPE_START ? 0 : Math.min(EMAIL.length, Math.floor((t - TYPE_START) / TYPE_STEP) + 1);
-      setTyped(t < SENT ? EMAIL.slice(0, n) : '');
+      var n = t < TYPE_START ? 0 : Math.min(QUERY.length, Math.floor((t - TYPE_START) / TYPE_STEP) + 1);
+      setTyped(t < SENT ? QUERY.slice(0, n) : '');
       flag('focus', t >= 1.4 && t < SENT);
       flag('press', t >= PRESS && t < SENT);
       flag('click', t >= PRESS && t < PRESS + 0.7);
@@ -428,15 +428,15 @@
       setText(gestureEl, typeof line === 'function' ? line() : line);
     }
 
-    // One still frame for reduced motion: zoomed in on the invite row.
+    // One still frame for reduced motion: zoomed in on the search row.
     function still() {
       var z = 2.2, half = 50 / z;
-      var cx = clamp((geo.field.l + geo.send.x) / 2 + 0.6, half, 100 - half);
-      var cy = clamp(geo.send.y + 6, half, 100 - half);
-      setVars({ z: z, fx: cx - half, fy: cy - half, cx: geo.send.x, cy: geo.send.y });
+      var cx = clamp((geo.field.l + geo.go.x) / 2 + 0.6, half, 100 - half);
+      var cy = clamp(geo.go.y + 6, half, 100 - half);
+      setVars({ z: z, fx: cx - half, fy: cy - half, cx: geo.go.x, cy: geo.go.y });
       setZoomText(z);
       ['out', 'idle', 'ibeam', 'key', 'scroll', 'press', 'click', 'sent', 'focus'].forEach(function (n) { flag(n, false); });
-      setTyped(EMAIL);
+      setTyped(QUERY);
       setText(timeEl, '0:08');
       setText(gestureEl, 'Hold ' + keyGlyph('option') + ' and scroll up to zoom in');
     }

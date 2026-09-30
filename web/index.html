@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Loupe: a screen recorder for Mac and Windows that zooms while you record</title>
-<meta name="description" content="Loupe records your screen for demos and tutorials, on Mac and Windows. Zoom in while you record, then trim, add a background, captions and music, and export MP4, WebM or GIF up to 4K. Free, with no account and no watermark.">
+<meta name="description" content="Loupe records your screen for demos and tutorials, on Mac and Windows. Zoom in while you record, or import a video. Trim and crop it, add a background, music and captions, and export MP4, WebM or GIF up to 4K. Free, with no account and no watermark.">
 <link rel="canonical" href="https://loupeapp.vercel.app/">
 <meta name="theme-color" content="#1a1a1c">
 <meta name="color-scheme" content="dark">
@@ -39,23 +39,29 @@
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
   "name": "Loupe",
-  "description": "A screen recorder for Mac and Windows that zooms in while you record, with an editor for trimming, backgrounds, captions, sound and export.",
+  "description": "A screen recorder for Mac and Windows that zooms in while you record, with a video editor for recordings and imported videos: trimming, cropping, transitions, backgrounds, captions, sound and export.",
   "url": "https://loupeapp.vercel.app/",
   "applicationCategory": "MultimediaApplication",
   "operatingSystem": "macOS 14 or later, Windows 10 (version 2004) or later",
   "downloadUrl": "https://github.com/akshatgg/loupe/releases/latest",
   "featureList": [
     "Zoom in while you record by holding a key and scrolling",
-    "Trim, cut and split, with undo",
+    "Import MP4, MOV and M4V videos and edit them",
+    "Trim, cut and split, with markers and undo",
+    "Crop, move, rotate and flip clips, with keyframes",
+    "Transitions, reverse and freeze frame",
+    "Colour adjustments, looks and .cube LUTs",
+    "Overlays: logos, pictures and videos",
     "Edit zooms and change the speed of any part",
     "Backgrounds, padding, rounded corners and shadow",
     "Wide, vertical, square and 4:5 videos",
     "Cursor effects and keyboard shortcut badges",
     "Webcam bubble",
     "Text, arrows and blur",
-    "Transitions and presets",
+    "Style presets",
     "Computer sound, noise clean-up and even volume",
-    "Music that lowers when you talk, and voiceover",
+    "Songs and sound files with fades and beat marks, lowered when you talk",
+    "Voiceover takes",
     "Captions made on your computer, with an editable transcript and .srt files",
     "Export MP4, WebM or GIF from 720p to 4K, or to fit a size limit",
     "Share links that expire after 7 days"
@@ -75,6 +81,7 @@
     </a>
     <nav class="top__nav" aria-label="Main">
       <a class="top__link" href="#zoom">How it works</a>
+      <a class="top__link top__link--wide" href="#import">Import</a>
       <a class="top__link" href="#editor">Editor</a>
       <a class="top__link top__link--wide" href="#captions">Captions</a>
       <a class="top__link top__link--wide" href="#export">Export</a>
@@ -93,7 +100,7 @@
       <div class="hero__head">
         <h1 id="hero-h">Zoom in while you record.</h1>
         <div class="hero__aside">
-          <p class="lead">Loupe records your screen for demos and tutorials. Hold <kbd data-keyglyph="option">⌥</kbd><span data-key-name="option-after">&nbsp;Option</span> and scroll, and the video zooms in on your cursor, so whatever you’re talking about fills the frame. Then trim it, give it a look, add captions and send it.</p>
+          <p class="lead">Loupe records your screen for demos and tutorials. Hold <kbd data-keyglyph="option">⌥</kbd><span data-key-name="option-after">&nbsp;Option</span> and scroll, and the video zooms in on your cursor, so whatever you’re talking about fills the frame. Or bring in a video you already have. Then trim and crop it, add music and captions, give it a look and send it.</p>
           <div class="hero__actions">
             <a class="btn btn--primary" href="#download" data-os-cta>Download Loupe</a>
             <a class="btn" href="https://github.com/akshatgg/loupe">View the source</a>
@@ -106,7 +113,7 @@
         <div class="demo__grid">
           <div class="demo__screenwrap">
             <p class="demo__label" aria-hidden="true">Your screen</p>
-            <div class="screen" role="img" aria-label="Animation of a Mac screen being recorded with Loupe. The cursor moves to an email field in a web app, and a blue outline closes in around it with a badge reading 2.4×, marking what the video will show. The person types an email address and clicks Send invite while the outline follows the cursor, then zooms back out. A small control bar at the bottom shows the recording timer and zoom level.">
+            <div class="screen" role="img" aria-label="Animation of a Mac screen being recorded with Loupe. The cursor moves to a search field in a travel website, and a blue outline closes in around it with a badge reading 2.4×, marking what the video will show. The person types Lisbon, Portugal and clicks Search while the outline follows the cursor, then zooms back out. A small control bar at the bottom shows the recording timer and zoom level.">
               <div class="stage" data-stage>
                 <div class="st-wall"></div>
                 <div class="st-menubar">
@@ -119,27 +126,27 @@
                   <div class="st-toolbar">
                     <span class="st-lights"><i></i><i></i><i></i></span>
                     <span class="st-nav">‹ ›</span>
-                    <span class="st-url">app.northwind.co/settings/team</span>
+                    <span class="st-url">wayfarer.example/trips/new</span>
                   </div>
                   <div class="st-page">
                     <div class="st-side">
-                      <div class="st-org"><i></i>Northwind</div>
-                      <span>Overview</span><span>Projects</span><span>Billing</span><span class="on">Team</span><span>Settings</span>
+                      <div class="st-org"><i></i>Wayfarer</div>
+                      <span>Explore</span><span class="on">Trips</span><span>Saved</span><span>Help</span>
                     </div>
                     <div class="st-main">
-                      <p class="st-h">Team</p>
-                      <p class="st-sub">Invite people to work on Northwind with you.</p>
-                      <p class="st-label">Email address</p>
-                      <div class="st-invite">
-                        <span class="st-input" data-t="email"><span class="st-typed" data-typed>maya@northwind.co</span><span class="st-caret"></span><span class="st-ph">name@company.com</span></span>
-                        <span class="st-btn" data-t="send"><span class="st-btn__a">Send invite</span><span class="st-btn__b">Invite sent</span></span>
+                      <p class="st-h">Plan a trip</p>
+                      <p class="st-sub">Find somewhere to stay for your dates.</p>
+                      <p class="st-label">Where to?</p>
+                      <div class="st-search">
+                        <span class="st-input" data-t="query"><span class="st-typed" data-typed>Lisbon, Portugal</span><span class="st-caret"></span><span class="st-ph">City or region</span></span>
+                        <span class="st-btn" data-t="go"><span class="st-btn__a">Search</span><span class="st-btn__b">Found 4</span></span>
                       </div>
-                      <p class="st-label st-label--list">Members</p>
-                      <ul class="st-members">
-                        <li><i class="st-av" style="background:#c7d7f5">J</i><b>Jonas Weber</b><span>jonas@northwind.co</span><em>Owner</em></li>
-                        <li><i class="st-av" style="background:#f6d6c3">P</i><b>Priya Raman</b><span>priya@northwind.co</span><em>Admin</em></li>
-                        <li><i class="st-av" style="background:#cfe9d9">S</i><b>Sam Okafor</b><span>sam@northwind.co</span><em>Member</em></li>
-                        <li class="st-new"><i class="st-av" style="background:#e4d4f4">M</i><b>Maya Chen</b><span>maya@northwind.co</span><em class="st-pending" data-t="pill">Invited</em></li>
+                      <p class="st-label st-label--list">Places to stay</p>
+                      <ul class="st-results">
+                        <li><i class="st-av" style="background:#c7d7f5">A</i><b>Alfama Loft</b><span>2 guests · 3 nights</span><em>€348</em></li>
+                        <li><i class="st-av" style="background:#f6d6c3">B</i><b>Baixa Rooms</b><span>2 guests · 3 nights</span><em>€366</em></li>
+                        <li><i class="st-av" style="background:#cfe9d9">C</i><b>Chiado House</b><span>2 guests · 3 nights</span><em>€402</em></li>
+                        <li class="st-new"><i class="st-av" style="background:#e4d4f4">R</i><b>River View Flat</b><span>2 guests · 3 nights</span><em class="st-best" data-t="pill">€312 · Best price</em></li>
                       </ul>
                     </div>
                   </div>
@@ -151,10 +158,10 @@
                     <span class="st-title">Demo script</span>
                   </div>
                   <ol>
-                    <li>Open Team settings</li>
-                    <li>Zoom in on the invite box</li>
-                    <li>Invite Maya</li>
-                    <li>Show that she’s pending</li>
+                    <li>Start a new trip</li>
+                    <li>Zoom in on the search box</li>
+                    <li>Search for Lisbon</li>
+                    <li>Point out the best price</li>
                     <li>Zoom out, wrap up</li>
                   </ol>
                 </div>
@@ -262,12 +269,12 @@
       <div class="split__b specimen" aria-hidden="true">
         <div class="specimen__screen">
           <div class="specimen__page">
-            <p class="sp-h">Billing</p>
-            <div class="sp-row"><span>Plan</span><b>Team, yearly</b></div>
-            <div class="sp-row"><span>Seats</span><b>4 of 10</b></div>
-            <div class="sp-row"><span>Next invoice</span><b>$96.00</b><i class="sp-btn">Change plan</i></div>
-            <div class="sp-row"><span>Card</span><b>Visa ending 4242</b></div>
-            <div class="sp-row"><span>Receipts</span><b>billing@northwind.co</b></div>
+            <p class="sp-h">Your trip</p>
+            <div class="sp-row"><span>Where</span><b>Lisbon, Portugal</b></div>
+            <div class="sp-row"><span>When</span><b>12–15 October</b></div>
+            <div class="sp-row"><span>Stay</span><b>River View Flat</b><i class="sp-btn">Change dates</i></div>
+            <div class="sp-row"><span>Guests</span><b>2 adults</b></div>
+            <div class="sp-row"><span>Total</span><b>€312.00</b></div>
           </div>
           <div class="specimen__shot"><span class="specimen__badge">2.0×</span></div>
         </div>
@@ -332,59 +339,90 @@
     </div>
   </section>
 
+  <!-- ============================== Import ============================== -->
+  <section class="sec" id="import" aria-labelledby="import-h">
+    <div class="wrap split split--flip">
+      <div class="split__a">
+        <h2 id="import-h">Bring a video you already have</h2>
+        <p>Loupe isn’t only for its own recordings. Import an MP4, MOV or M4V video, a clip from your phone or anything else, and edit it in the same editor, with every tool below.</p>
+        <h3>From anywhere in Loupe</h3>
+        <p>Press Import video when you start a recording or in your library, or drag a video onto the library window. Loupe works on its own copy, so your file stays as it was.</p>
+        <h3>Join videos together</h3>
+        <p>In the editor, Add recording puts another recording or video file after the one you’re editing, so a few clips become one video.</p>
+      </div>
+
+      <div class="split__b imp" role="img" aria-label="Loupe’s library window with a video file, holiday.mov, being dragged onto it. A dashed outline reads Drop a video to import. Behind it are recordings with thumbnails, and buttons for Import video and New recording.">
+        <div class="imp__bar"><b>Recordings</b><span class="imp__b">Import video</span><span class="imp__b imp__b--go"><i></i>New recording</span></div>
+        <div class="imp__grid">
+          <div class="imp__card"><i class="imp__thumb" style="--c1:#5b6fd6;--c2:#8e63c9"></i><b>Product tour</b><span>1:24</span></div>
+          <div class="imp__card"><i class="imp__thumb" style="--c1:#1f8a70;--c2:#7ad3a8"></i><b>Bug report</b><span>0:42</span></div>
+          <div class="imp__card"><i class="imp__thumb" style="--c1:#c2703a;--c2:#f2c14e"></i><b>Lisbon trip</b><span>2:05</span></div>
+          <div class="imp__card"><i class="imp__thumb" style="--c1:#374151;--c2:#6b7280"></i><b>Weekly update</b><span>3:10</span></div>
+        </div>
+        <div class="imp__drop"><span>Drop a video to import</span></div>
+        <div class="imp__file"><i></i><span>holiday.mov</span></div>
+      </div>
+    </div>
+  </section>
+
   <!-- ============================== Editor ============================== -->
   <section class="sec" id="editor" aria-labelledby="editor-h">
     <div class="wrap">
-      <h2 id="editor-h" class="sec__h">Fix it afterwards, not with a retake</h2>
-      <p class="sec__lead">When you stop, Loupe opens your recording in an editor. Nothing is final until you export, and your original recording is never changed.</p>
+      <h2 id="editor-h" class="sec__h">Edit it like a video editor</h2>
+      <p class="sec__lead">When you stop recording, or import a video, Loupe opens it in the editor. Nothing is final until you export, and your original is never changed.</p>
 
-      <div class="ed" role="img" aria-label="The Loupe editor: a video preview above a timeline. The timeline shows the recording split into two clips with a fade between them, three zoom segments in blue, one of them selected, and a speed track with one stretch sped up to 4× in amber and one slowed to 0.5× in teal. Buttons along the bottom read Play, Undo, Split, Add zoom and Export.">
-        <div class="ed__chrome"><span class="st-lights"><i></i><i></i><i></i></span><span class="ed__title">Loupe — Edit</span></div>
+      <div class="ed" role="img" aria-label="The Loupe editor: a preview of a travel website above a timeline with labelled rows. V2 has a logo picture and a video laid over the top. Clips has a recording and an imported video joined by a crossfade. Sound has the recording’s audio. A1 has a song that fades in and out, with its beat marks. Zoom has three zoom segments in blue, one of them selected. Speed has one stretch sped up to 4× in amber and one slowed to 0.5× in teal. Notes has a title and an arrow. Buttons along the bottom read Play, Split, Cut, Zoom, Add recording, Audio, Overlay and Export.">
+        <div class="ed__chrome"><span class="st-lights"><i></i><i></i><i></i></span><span class="ed__title">Loupe — Lisbon trip</span></div>
         <div class="ed__view">
           <div class="ed__frame">
             <div class="ed__zoomed">
-              <p class="ed__h">Team</p>
-              <p class="ed__s">Invite people to work on Northwind with you.</p>
-              <p class="ed__lab">Email address</p>
-              <div class="ed__row"><span class="ed__input">maya@northwind.co</span><span class="ed__btn">Send invite<span class="ed__click"></span></span></div>
+              <p class="ed__h">Plan a trip</p>
+              <p class="ed__s">Find somewhere to stay for your dates.</p>
+              <p class="ed__lab">Where to?</p>
+              <div class="ed__row"><span class="ed__input">Lisbon, Portugal</span><span class="ed__btn">Search<span class="ed__click"></span></span></div>
               <svg class="ed__cursor" viewBox="0 0 14 21" aria-hidden="true"><path d="M1 1v15.6l3.8-3.6 2.5 5.9 2.6-1.1-2.5-5.8h5.3z" fill="#111" stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/></svg>
             </div>
           </div>
         </div>
         <div class="ed__timeline">
           <div class="ed__ruler"><span style="left:0">0:00</span><span style="left:17.86%">0:15</span><span style="left:35.71%">0:30</span><span style="left:53.57%">0:45</span><span style="left:71.43%">1:00</span><span style="left:89.29%">1:15</span></div>
-          <div class="ed__clips">
-            <span class="ed__clip" style="left:0;width:59.4%">Clip 1</span>
-            <span class="ed__clip" style="left:60.2%;width:39.8%">Clip 2</span>
-            <i class="ed__fade" style="left:59.8%" title="Fade"></i>
-          </div>
-          <div class="ed__track">
-            <span class="ed__seg" style="left:6%;width:15%">2.4×</span>
-            <span class="ed__seg ed__seg--sel" style="left:33%;width:17%">1.8×<i class="ed__del">×</i></span>
-            <span class="ed__seg" style="left:68%;width:19%">3.0×</span>
-            <i class="ed__playhead" style="left:36.5%"></i>
-          </div>
-          <div class="ed__speed">
-            <span class="ed__sp ed__sp--fast" style="left:22%;width:10%">4×</span>
-            <span class="ed__sp ed__sp--slow" style="left:53%;width:12%">0.5×</span>
+          <div class="ed__lanes">
+            <div class="ed__lane"><span class="ed__name">V2</span><div class="ed__body"><span class="ed__ov" style="left:3%;width:22%">logo.png</span><span class="ed__ov" style="left:66%;width:18%">map.mp4</span></div></div>
+            <div class="ed__lane"><span class="ed__name">Clips</span><div class="ed__body"><span class="ed__clip" style="left:0;width:59.4%">Recording</span><span class="ed__clip" style="left:60.2%;width:39.8%">holiday.mov</span><i class="ed__fade" style="left:59.8%" title="Crossfade"></i></div></div>
+            <div class="ed__lane"><span class="ed__name">Sound</span><div class="ed__body"><svg class="ed__wave" viewBox="0 0 400 20" preserveAspectRatio="none" aria-hidden="true"><path d="M1 7.4v5.3M5 8.0v4.1M9 6.2v7.6M13 8.2v3.5M17 6.6v6.8M21 7.2v5.6M25 8.3v3.4M29 6.7v6.6M33 8.4v3.3M37 7.0v6.0M41 8.0v4.0M45 7.9v4.3M49 5.5v8.9M53 2.7v14.6M57 7.6v4.7M61 6.9v6.1M65 4.1v11.8M69 1.9v16.3M73 4.5v11.1M77 5.7v8.6M81 1.7v16.7M85 8.2v3.7M89 2.5v15.0M93 6.5v7.1M97 7.5v5.0M101 7.7v4.6M105 6.3v7.3M109 2.8v14.4M113 7.2v5.5M117 4.4v11.1M121 6.3v7.5M125 7.2v5.6M129 6.6v6.8M133 8.3v3.4M137 8.3v3.4M141 7.8v4.4M145 6.1v7.8M149 7.0v6.0M153 7.4v5.2M157 6.5v7.1M161 5.3v9.3M165 6.4v7.2M169 2.9v14.1M173 3.6v12.8M177 6.8v6.4M181 4.5v11.0M185 4.8v10.4M189 2.4v15.3M193 3.4v13.2M197 6.5v7.0M201 1.6v16.7M205 7.7v4.7M209 5.6v8.9M213 3.2v13.6M217 7.4v5.1M221 5.1v9.8M225 8.2v3.5M229 3.8v12.4M233 3.1v13.7M237 4.5v11.0M241 5.4v9.1M245 7.4v5.2M249 6.1v7.9M253 6.4v7.2M257 6.5v7.1M261 6.9v6.2M265 5.6v8.9M269 5.2v9.6M273 6.8v6.3M277 6.2v7.6M281 8.1v3.8M285 3.6v12.8M289 4.0v12.1M293 1.5v16.9M297 2.7v14.5M301 6.5v7.0M305 5.8v8.4M309 3.8v12.4M313 8.3v3.3M317 5.3v9.5M321 7.3v5.4M325 7.7v4.6M329 8.1v3.8M333 3.1v13.8M337 7.6v4.8M341 6.8v6.5M345 5.8v8.5M349 2.4v15.2M353 7.9v4.1M357 5.4v9.3M361 6.6v6.8M365 5.4v9.2M369 5.6v8.7M373 5.5v9.0M377 7.5v4.9M381 7.0v5.9M385 7.2v5.5M389 5.4v9.2M393 5.1v9.7M397 8.0v4.1"/></svg></div></div>
+            <div class="ed__lane"><span class="ed__name">A1</span><div class="ed__body"><span class="ed__music" style="left:0;width:100%"><span>song.mp3</span></span></div></div>
+            <div class="ed__lane"><span class="ed__name">Zoom</span><div class="ed__body">
+              <span class="ed__seg" style="left:6%;width:15%">2.4×</span>
+              <span class="ed__seg ed__seg--sel" style="left:33%;width:17%">1.8×<i class="ed__del">×</i></span>
+              <span class="ed__seg" style="left:68%;width:19%">3.0×</span>
+            </div></div>
+            <div class="ed__lane"><span class="ed__name">Speed</span><div class="ed__body">
+              <span class="ed__sp ed__sp--fast" style="left:22%;width:10%">4×</span>
+              <span class="ed__sp ed__sp--slow" style="left:53%;width:12%">0.5×</span>
+            </div></div>
+            <div class="ed__lane"><span class="ed__name">Notes</span><div class="ed__body"><span class="ed__note" style="left:1%;width:13%">Title</span><span class="ed__note" style="left:36%;width:11%">Arrow</span></div></div>
+            <i class="ed__playhead" style="--at:.365"></i>
           </div>
           <div class="ed__times"><span>0:30</span><span>1:24</span></div>
         </div>
         <div class="ed__foot">
           <span class="ed__b">Play</span>
           <span class="ed__now">1.8×</span>
-          <span class="ed__b">Undo</span>
           <span class="ed__b">Split</span>
-          <span class="ed__b ed__b--opt">Add zoom</span>
+          <span class="ed__b">Cut</span>
+          <span class="ed__b ed__b--opt">Zoom</span>
+          <span class="ed__b ed__b--opt">Add recording</span>
+          <span class="ed__b ed__b--opt">Audio</span>
+          <span class="ed__b ed__b--opt">Overlay</span>
           <span class="ed__spacer"></span>
           <span class="ed__b ed__b--go">Export</span>
         </div>
       </div>
 
-      <div class="feats">
+      <div class="feats feats--three">
         <div class="feat">
           <h3>Trim, cut and split</h3>
-          <p>Drag the ends to trim, split at the playhead, and delete the parts you don’t need. You can add another recording to the end, too.</p>
+          <p>Drag a clip’s ends to trim it, split it at the playhead, or type the times of a part to cut out or keep. In and out points and named markers help you find your place.</p>
         </div>
         <div class="feat">
           <h3>Zooms you can change</h3>
@@ -392,15 +430,35 @@
         </div>
         <div class="feat">
           <h3>Change the pace</h3>
-          <p>Speed up or slow down any stretch, from 0.25× to 8×, with a smooth ease in and out. Voices keep a natural pitch.</p>
+          <p>Speed up or slow down any stretch, from 0.25× to 8×. Voices keep a natural pitch.</p>
           <div class="pace" aria-hidden="true">
             <span class="pace__bar"><i class="pace__slow"></i><i class="pace__fast"></i></span>
             <span class="pace__ticks"><span>0.25×</span><span>1×</span><span>8×</span></span>
           </div>
         </div>
         <div class="feat">
+          <h3>Crop, move and rotate</h3>
+          <p>Crop any clip, move it, resize it, rotate it or flip it. Add keyframes and it moves or grows smoothly over time.</p>
+        </div>
+        <div class="feat">
+          <h3>Transitions</h3>
+          <p>Fade, crossfade, dip to black or white, blur, wipe, slide, circle or zoom from one clip to the next, for a quarter of a second up to two seconds.</p>
+        </div>
+        <div class="feat">
+          <h3>Backwards and freeze frame</h3>
+          <p>Play a clip backwards, or hold the frame under the playhead for two seconds.</p>
+        </div>
+        <div class="feat">
+          <h3>Colour</h3>
+          <p>Change brightness, contrast and saturation, pick a look such as Warm, Vivid, Faded or black and white, or load a .cube LUT.</p>
+        </div>
+        <div class="feat">
+          <h3>Overlays</h3>
+          <p>Put a logo, a picture or another video over your clip. Place it, size it, change its opacity and fade it in and out.</p>
+        </div>
+        <div class="feat">
           <h3>Undo anything</h3>
-          <p>Every change can be undone and redone, with the shortcuts you already know. Your original recording is never touched.</p>
+          <p>Every change can be undone and redone, with the shortcuts you already know.</p>
         </div>
       </div>
     </div>
@@ -414,20 +472,20 @@
 
       <figure class="look" data-look data-aspect="16:9">
         <div class="look__stage">
-          <div class="look__canvas" role="img" aria-label="A finished video: the recording of a team settings page sits on a blue gradient background with space around it, rounded corners and a soft shadow. An arrow points at the Send invite button, where the cursor has a ring around it, and the email addresses in the member list are blurred. A badge at the bottom shows the shortcut being pressed, a caption reads “Invite your team from Settings”, and a round webcam bubble sits in the corner.">
+          <div class="look__canvas" role="img" aria-label="A finished video: the recording of a travel website sits on a blue gradient background with space around it, rounded corners and a soft shadow. An arrow points at the Search button, where the cursor has a ring around it, and the card numbers in the list of bookings are blurred. A badge at the bottom shows the shortcut being pressed, a caption reads “Search for a place to stay”, and a round webcam bubble sits in the corner.">
             <div class="look__rec">
               <div class="look__page">
-                <div class="lp-bar"><i></i><i></i><i></i><span>app.northwind.co/settings/team</span></div>
+                <div class="lp-bar"><i></i><i></i><i></i><span>wayfarer.example/trips/new</span></div>
                 <div class="lp-body">
-                  <div class="lp-side"><b><i></i>Northwind</b><span>Overview</span><span>Projects</span><span class="on">Team</span><span>Settings</span></div>
+                  <div class="lp-side"><b><i></i>Wayfarer</b><span>Explore</span><span class="on">Trips</span><span>Saved</span><span>Help</span></div>
                   <div class="lp-main">
-                    <p class="lp-h">Team</p>
-                    <p class="lp-s">Invite people to work on Northwind with you.</p>
-                    <div class="lp-row"><span class="lp-in">maya@northwind.co</span><span class="lp-btn">Send invite<svg class="lp-arrow" viewBox="0 0 100 60" aria-hidden="true"><path d="M8 52C30 50 56 40 80 14" fill="none" stroke="#ff5a4e" stroke-width="5" stroke-linecap="round"/><path d="M66 12l16-2-3 16" fill="none" stroke="#ff5a4e" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lp-ring"></span><svg class="lp-cursor" viewBox="0 0 14 21" aria-hidden="true"><path d="M1 1v15.6l3.8-3.6 2.5 5.9 2.6-1.1-2.5-5.8h5.3z" fill="#111" stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/></svg></span></div>
+                    <p class="lp-h">Plan a trip</p>
+                    <p class="lp-s">Find somewhere to stay for your dates.</p>
+                    <div class="lp-row"><span class="lp-in">Lisbon, Portugal</span><span class="lp-btn">Search<svg class="lp-arrow" viewBox="0 0 100 60" aria-hidden="true"><path d="M8 52C30 50 56 40 80 14" fill="none" stroke="#ff5a4e" stroke-width="5" stroke-linecap="round"/><path d="M66 12l16-2-3 16" fill="none" stroke="#ff5a4e" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="lp-ring"></span><svg class="lp-cursor" viewBox="0 0 14 21" aria-hidden="true"><path d="M1 1v15.6l3.8-3.6 2.5 5.9 2.6-1.1-2.5-5.8h5.3z" fill="#111" stroke="#fff" stroke-width="1.2" stroke-linejoin="round"/></svg></span></div>
                     <ul class="lp-list">
-                      <li><i style="background:#c7d7f5"></i><b>Jonas Weber</b><span>jonas@northwind.co</span></li>
-                      <li><i style="background:#f6d6c3"></i><b>Priya Raman</b><span>priya@northwind.co</span></li>
-                      <li><i style="background:#cfe9d9"></i><b>Sam Okafor</b><span>sam@northwind.co</span></li>
+                      <li><i style="background:#c7d7f5"></i><b>Porto, June</b><span>Card ending 4242</span></li>
+                      <li><i style="background:#f6d6c3"></i><b>Seville, April</b><span>Card ending 1881</span></li>
+                      <li><i style="background:#cfe9d9"></i><b>Madrid, March</b><span>Card ending 0057</span></li>
                       <li class="lp-blur" aria-hidden="true"></li>
                     </ul>
                   </div>
@@ -435,7 +493,7 @@
               </div>
             </div>
             <p class="look__keys" aria-hidden="true"><kbd data-mod>⌘</kbd><kbd>K</kbd></p>
-            <p class="look__cap" aria-hidden="true">Invite your team from Settings</p>
+            <p class="look__cap" aria-hidden="true">Search for a place to stay</p>
             <span class="look__cam" aria-hidden="true">
               <svg viewBox="0 0 40 40"><rect width="40" height="40" fill="#51607a"/><circle cx="20" cy="16" r="7.5" fill="#e3c3a8"/><path d="M6 40c1-9 7-14 14-14s13 5 14 14z" fill="#2f3a4d"/><path d="M12.5 15c0-6 3.5-9 7.5-9s7.5 3 7.5 8c-2-3-5-4-7.5-4s-5.5 1.5-7.5 5z" fill="#3b2a22"/></svg>
             </span>
@@ -474,8 +532,8 @@
           <p>Add a title or a label, point at what matters, and blur anything private, like an email address.</p>
         </div>
         <div class="feat">
-          <h3>Transitions and presets</h3>
-          <p>Fade between the parts you cut. Save a look as a preset and make it the one new recordings start with.</p>
+          <h3>Presets</h3>
+          <p>Save a look as a preset, and make it the one new recordings start with.</p>
         </div>
       </div>
     </div>
@@ -490,10 +548,14 @@
         <p>Record your microphone and the sound playing on your computer, each with its own volume.</p>
         <h3>Cleaner and more even</h3>
         <p>Clean up background noise like hum, fans and keyboard clicks, and even out your volume so quiet and loud moments sound alike.</p>
+        <h3>Songs and sound effects</h3>
+        <p>Add songs or sound files, such as MP3, WAV or FLAC. Fade them in and out, let them repeat, and cut on the beat with beat marks.</p>
         <h3>Music that makes room for you</h3>
-        <p>Add a music track and Loupe lowers it whenever you talk, then brings it back up.</p>
+        <p>Loupe lowers the music whenever someone talks, then brings it back up.</p>
+        <h3>The video’s own sound</h3>
+        <p>Detach a clip’s sound into its own track to move it, split it or turn it down on its own.</p>
         <h3>Voiceover</h3>
-        <p>Rather talk afterwards? Record a voiceover while the video plays, after a 3, 2, 1 count-in.</p>
+        <p>Rather talk afterwards? Record a voiceover while the video plays, after a 3, 2, 1 count-in, and keep the take you like.</p>
       </div>
 
       <figure class="split__b mix">
@@ -536,14 +598,14 @@
         <p>Show them on the video, with the size and position you like, or save an <b>.srt</b> file for YouTube and other players.</p>
       </div>
 
-      <div class="split__b cap" role="img" aria-label="Loupe’s Captions panel. A switch reads Show captions on the video and is turned on. Below it, a transcript lists lines with their times; one line, “Open Team settings from the sidebar”, is being edited. A button at the bottom reads Save .srt.">
+      <div class="split__b cap" role="img" aria-label="Loupe’s Captions panel. A switch reads Show captions on the video and is turned on. Below it, a transcript lists lines with their times; one line, “Type where you want to go”, is being edited. A button at the bottom reads Save .srt.">
         <div class="cap__head"><b>Captions</b><span class="cap__lang">English</span></div>
         <div class="cap__tog"><i></i>Show captions on the video</div>
         <ol class="cap__list">
-          <li><span>0:02</span><p>Here’s how to add someone to your team.</p></li>
-          <li class="cap__edit"><span>0:05</span><p>Open Team settings from the sidebar.<i class="cap__caret"></i></p></li>
-          <li><span>0:09</span><p>Type their email address and press Send invite.</p></li>
-          <li><span>0:14</span><p>They show up as invited until they accept.</p></li>
+          <li><span>0:02</span><p>Here’s how to find a place to stay.</p></li>
+          <li class="cap__edit"><span>0:05</span><p>Type where you want to go.<i class="cap__caret"></i></p></li>
+          <li><span>0:09</span><p>Press Search to see what’s free on your dates.</p></li>
+          <li><span>0:14</span><p>The best price is marked for you.</p></li>
         </ol>
         <div class="cap__foot"><span class="cap__btn">Save .srt</span><span class="cap__hint">Click a time to jump there</span></div>
       </div>
@@ -590,8 +652,8 @@
       <div class="feats feats--app">
         <div class="feat">
           <svg class="feat__icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="8" height="6" rx="1.5"/><rect x="13" y="4" width="8" height="6" rx="1.5"/><rect x="3" y="14" width="8" height="6" rx="1.5"/><rect x="13" y="14" width="8" height="6" rx="1.5"/></svg>
-          <h3>A library of your recordings</h3>
-          <p>Every recording in one window, with a preview, its length and date. Open, rename, duplicate or delete one, or start a new recording.</p>
+          <h3>A library of your videos</h3>
+          <p>Every recording and imported video in one window, with a preview, its length and date. Open, rename, duplicate or delete one, import a video, or start a new recording.</p>
         </div>
         <div class="feat">
           <svg class="feat__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg>
@@ -653,7 +715,7 @@
               <code class="cmd__code" id="cmd-homebrew">/bin/bash <span class="nw">-c</span> "$(curl <span class="nw">-fsSL</span> https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code>
               <button class="copy" type="button" data-copy="cmd-homebrew" data-copy-name="Copy the Homebrew install command" hidden><span data-copy-label>Copy</span></button>
             </div>
-            <p class="dl__sub dl__sub--after">To update later: <code>brew upgrade --cask loupe</code></p>
+            <p class="dl__sub dl__sub--after">To update later: <code>brew upgrade --cask loupe</code>. For an older version, name it: <code>brew install --cask akshatgg/tap/loupe@2.0.0</code></p>
           </div>
 
           <div class="dl__alt">
