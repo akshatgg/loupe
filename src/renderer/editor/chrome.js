@@ -12,6 +12,7 @@ const fill = (id, name, label, size = 18) => {
 fill('undo', 'undo');
 fill('redo', 'redo');
 fill('shortcutsBtn', 'keyboard', null, 20);
+fill('backBtn', 'back', 'Recordings');
 fill('play', 'play', null, 20);
 fill('splitBtn', 'split', 'Split');
 fill('cutBtn', 'cut', 'Cut');

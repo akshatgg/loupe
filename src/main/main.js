@@ -917,6 +917,14 @@ function sendToEditor(channel, data) {
   if (editorWindow && !editorWindow.isDestroyed()) editorWindow.webContents.send(channel, data);
 }
 registerProjectIpc({ ipcMain: editorIpc, store: projects, projectDir: () => openEditorDir() });
+// The editor's Recordings button: back to the Library, as leaving a project
+// returns to the home screen in other editors. The video is saved as it
+// closes. While an export runs the editor stays open -- closing it would
+// cancel the export -- and the Library just comes forward.
+editorIpc.handle('editor:backToLibrary', () => {
+  appShell.openLibrary();
+  if (!exporter.busy() && editorWindow && !editorWindow.isDestroyed()) editorWindow.close();
+});
 registerExportIpc({
   ipcMain: editorIpc, runner: exporter, projectDir: () => openEditorDir(), shell,
   beforeStart: () => projects.flush(),

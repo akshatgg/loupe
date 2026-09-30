@@ -407,6 +407,8 @@ async function start() {
   $('tlIn').onclick = actions.timelineZoomIn;
   $('tlFit').onclick = actions.timelineFit;
   $('shortcutsBtn').onclick = actions.cheatSheet;
+  $('backBtn').onclick = () => loupe.backToLibrary();
+  $('newRecBtn').onclick = () => loupe.newRecording();
 
   document.addEventListener('keydown', (e) => {
     const typing = e.target.closest?.('input[type="text"], input:not([type]), textarea, [contenteditable="true"]');

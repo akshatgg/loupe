@@ -21,6 +21,10 @@ contextBridge.exposeInMainWorld('loupe', {
   onSettingsChanged: (cb) => ipcRenderer.on('settings:changed', (_e, s) => cb(s)),
   // App shell (src/main/app-shell.js): the Library and Settings windows.
   openLibrary: () => ipcRenderer.invoke('shell:openLibrary'),
+  // Editor: its Recordings button -- back to the Library, leaving the video
+  // (main.js editor:backToLibrary) -- and New recording (the picker).
+  backToLibrary: () => ipcRenderer.invoke('editor:backToLibrary'),
+  newRecording: () => ipcRenderer.invoke('library:newRecording'),
   // Picker: pick a video file in main's Open dialog, import it into the
   // Library and open it in the editor (src/main/ipc/library.js):
   // { recording, opened, blocked }, or null when nothing was chosen.

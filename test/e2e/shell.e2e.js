@@ -293,6 +293,24 @@ async function run() {
     editor.close();
   });
 
+  await check('the editor leads back to the Recordings and into a new recording', async () => {
+    await js(library, `document.querySelector('.card[data-id="${firstId}"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
+    const editor = await waitFor('the editor', () => editorWindow());
+    await waitFor('the editor to load', () => !editor.webContents.isLoading());
+    await waitFor('its buttons', () => js(editor, 'return document.getElementById("backBtn").textContent === "Recordings"'));
+    await shot(editor, '07b-editor-navigation');
+
+    picker.hide();
+    await js(editor, 'document.getElementById("newRecBtn").click()');
+    await waitFor('the picker', () => picker.isVisible());
+    assert.ok(editorWindow(), 'the video stays open');
+
+    library.hide();
+    await js(editor, 'document.getElementById("backBtn").click()');
+    await waitFor('the editor to close', () => !editorWindow());
+    await waitFor('the Library', () => library.isVisible());
+  });
+
   await check('a recording open in the editor can\'t be moved to the Trash', async () => {
     await js(library, `document.querySelector('.card[data-id="${firstId}"]').dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))`);
     const editor = await waitFor('the editor', () => editorWindow());
