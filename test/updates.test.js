@@ -6,10 +6,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { spawnSync } = require('node:child_process');
 const {
-  RELEASES_API, CHECK_INTERVAL_MS, parseVersion, compareVersions, fetchLatestRelease,
+  RELEASES_API, parseVersion, compareVersions, fetchLatestRelease,
   parseLatestYml, formatLatestYml, downloadVerifiedInstaller, installKind, installerArgs,
-  shouldAutoCheck, createUpdater
+  shouldAutoCheck, createUpdater, replaceableBundle, updateAsset, MAC_SWAP_SCRIPT, BUNDLE_ID
 } = require('../src/main/updates');
 const { writeLatestYml } = require('../packaging/latest-yml');
 const { DEFAULT_SETTINGS, normalizeSettings } = require('../src/main/settings');
@@ -41,6 +42,8 @@ function fakeFetch(routes) {
 
 const EXE_URL = 'https://github.com/akshatgg/loupe/releases/download/v0.3.0/Loupe-Setup-x64.exe';
 const YML_URL = 'https://github.com/akshatgg/loupe/releases/download/v0.3.0/latest.yml';
+const DMG_URL = 'https://github.com/akshatgg/loupe/releases/download/v0.3.0/Loupe-arm64.dmg';
+const MAC_YML_URL = 'https://github.com/akshatgg/loupe/releases/download/v0.3.0/latest-mac.yml';
 
 function release(version = '0.3.0', extra = {}) {
   return {
@@ -50,7 +53,8 @@ function release(version = '0.3.0', extra = {}) {
     html_url: `https://github.com/akshatgg/loupe/releases/tag/v${version}`,
     published_at: '2026-09-15T10:00:00Z',
     assets: [
-      { name: 'Loupe-arm64.dmg', browser_download_url: 'https://example/arm.dmg', size: 1 },
+      { name: 'Loupe-arm64.dmg', browser_download_url: DMG_URL, size: 1 },
+      { name: 'latest-mac.yml', browser_download_url: MAC_YML_URL, size: 1 },
       { name: 'Loupe-Setup-x64.exe', browser_download_url: EXE_URL, size: 10 },
       { name: 'latest.yml', browser_download_url: YML_URL, size: 1 }
     ],
@@ -78,7 +82,7 @@ test('the latest release is read from the GitHub API', async () => {
   const r = await fetchLatestRelease(fetchImpl);
   assert.strictEqual(r.version, '0.3.0');
   assert.strictEqual(r.url, 'https://github.com/akshatgg/loupe/releases/tag/v0.3.0');
-  assert.strictEqual(r.assets.length, 3);
+  assert.strictEqual(r.assets.length, 4);
   assert.strictEqual(fetchImpl.calls[0].opts.headers['User-Agent'], 'Loupe');
 });
 
@@ -134,6 +138,22 @@ test('packaging/latest-yml.js hashes the real installer file', async () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('packaging/latest-yml.js writes both Mac DMGs into one manifest', async () => {
+  const dir = tmpDir();
+  const arm = path.join(dir, 'Loupe-arm64.dmg');
+  const intel = path.join(dir, 'Loupe-x64.dmg');
+  fs.writeFileSync(arm, 'arm bytes');
+  fs.writeFileSync(intel, 'intel bytes!');
+  const out = await writeLatestYml({ version: '0.3.0', installer: [arm, intel], out: path.join(dir, 'latest-mac.yml') });
+  const m = parseLatestYml(fs.readFileSync(out, 'utf8'));
+  assert.strictEqual(m.version, '0.3.0');
+  assert.deepStrictEqual(m.files.map((f) => [f.url, f.sha512, f.size]), [
+    ['Loupe-arm64.dmg', sha512(Buffer.from('arm bytes')), 9],
+    ['Loupe-x64.dmg', sha512(Buffer.from('intel bytes!')), 12]
+  ]);
+  assert.strictEqual(m.path, 'Loupe-arm64.dmg');
+});
+
 test('downloading a new installer removes older ones, and nothing else in the folder', async () => {
   const dir = tmpDir();
   const exe = crypto.randomBytes(1000);
@@ -179,41 +199,53 @@ test('the Windows installer is kept only when its sha512 matches latest.yml', as
 
   // No manifest in the release at all.
   const bare = { ...rel, assets: rel.assets.filter((a) => a.name !== 'latest.yml') };
-  await assert.rejects(downloadVerifiedInstaller({ release: bare, fetchImpl: fakeFetch({}), dir }), /no Windows installer/);
+  await assert.rejects(downloadVerifiedInstaller({ release: bare, fetchImpl: fakeFetch({}), dir }), /no Loupe-Setup-x64\.exe/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('install kind: installer on Windows, brew when a Caskroom exists, download otherwise', () => {
-  assert.strictEqual(installKind('win32', () => true), 'installer');
-  assert.strictEqual(installKind('darwin', (p) => p === '/opt/homebrew/Caskroom/loupe'), 'homebrew');
-  assert.strictEqual(installKind('darwin', (p) => p === '/usr/local/Caskroom/loupe'), 'homebrew');
-  assert.strictEqual(installKind('darwin', () => false), 'download');
+test('install kind: installer on Windows, the app itself on a Mac where it can be replaced', () => {
+  assert.strictEqual(installKind('win32', { exists: () => true }), 'installer');
+  assert.strictEqual(installKind('darwin', { bundle: '/Applications/Loupe.app', exists: () => true }), 'bundle');
+  // Read-only copies fall back to telling the user how to update.
+  assert.strictEqual(installKind('darwin', { exists: (p) => p === '/opt/homebrew/Caskroom/loupe' }), 'homebrew');
+  assert.strictEqual(installKind('darwin', { exists: (p) => p === '/usr/local/Caskroom/loupe' }), 'homebrew');
+  assert.strictEqual(installKind('darwin', { exists: () => false }), 'download');
+  assert.deepStrictEqual(updateAsset('win32', 'x64'), { manifest: 'latest.yml', file: 'Loupe-Setup-x64.exe' });
+  assert.deepStrictEqual(updateAsset('darwin', 'arm64'), { manifest: 'latest-mac.yml', file: 'Loupe-arm64.dmg' });
+  assert.deepStrictEqual(updateAsset('darwin', 'x64'), { manifest: 'latest-mac.yml', file: 'Loupe-x64.dmg' });
   assert.deepStrictEqual(installerArgs({ relaunch: true }), ['/S', '--updated', '--force-run']);
   assert.deepStrictEqual(installerArgs({ relaunch: false }), ['/S', '--updated']);
 });
 
-test('automatic checks: only with the setting on, and at most once a day', () => {
-  const now = 1_800_000_000_000;
-  assert.strictEqual(shouldAutoCheck({ checkForUpdates: true, lastUpdateCheck: 0 }, now), true);
-  assert.strictEqual(shouldAutoCheck({ checkForUpdates: false, lastUpdateCheck: 0 }, now), false);
-  assert.strictEqual(shouldAutoCheck({ checkForUpdates: true, lastUpdateCheck: now - 60_000 }, now), false);
-  assert.strictEqual(shouldAutoCheck({ checkForUpdates: true, lastUpdateCheck: now - CHECK_INTERVAL_MS }, now), true);
-  // Saved while the clock was set years ahead: still checks.
-  assert.strictEqual(shouldAutoCheck({ checkForUpdates: true, lastUpdateCheck: now + 3 * CHECK_INTERVAL_MS }, now), true);
+test('the Mac app is replaceable only where Loupe can move it', () => {
+  const exec = '/Applications/Loupe.app/Contents/MacOS/Loupe';
+  assert.strictEqual(replaceableBundle(exec, { access: () => {} }), '/Applications/Loupe.app');
+  assert.strictEqual(replaceableBundle(exec, { access: () => { throw new Error('EACCES'); } }), null);
+  assert.strictEqual(replaceableBundle('/private/var/folders/x/AppTranslocation/y/d/Loupe.app/Contents/MacOS/Loupe', { access: () => {} }), null);
+  // Run from source: Electron's own binary, not a Loupe.app.
+  assert.strictEqual(replaceableBundle('/repo/node_modules/electron/dist/electron', { access: () => {} }), null);
 });
 
-function harness({ platform = 'darwin', exists = () => false, routes, settings = {}, version = '0.2.0' }) {
+test('automatic checks: whenever the setting is on -- each launch, not once a day', () => {
+  assert.strictEqual(shouldAutoCheck({ checkForUpdates: true, lastUpdateCheck: 0 }), true);
+  assert.strictEqual(shouldAutoCheck({ checkForUpdates: true, lastUpdateCheck: Date.now() - 60_000 }), true);
+  assert.strictEqual(shouldAutoCheck({ checkForUpdates: false, lastUpdateCheck: 0 }), false);
+});
+
+function harness({
+  platform = 'darwin', arch = 'arm64', exists = () => false, bundle = null, runCommand, routes, settings = {}, version = '0.2.0'
+}) {
   let s = normalizeSettings({ ...DEFAULT_SETTINGS, ...settings });
   const states = [];
   const spawned = [];
   const fetchImpl = fakeFetch(routes);
   const updater = createUpdater({
-    currentVersion: version, platform, fetchImpl, downloadDir: tmpDir(),
+    currentVersion: version, platform, arch, bundle, runCommand, pid: 4242, fetchImpl, downloadDir: tmpDir(),
     getSettings: () => s,
     patchSettings: (p) => { s = normalizeSettings({ ...s, ...p }); },
     now: () => 1_800_000_000_000, exists,
     spawn: (file, args, opts) => { spawned.push({ file, args, opts }); return { unref() {} }; },
-    onChange: (st) => states.push(st.status)
+    onChange: (st) => { if (states.at(-1) !== st.status) states.push(st.status); }
   });
   return { updater, states, spawned, fetchImpl, settings: () => s };
 }
@@ -236,32 +268,23 @@ test('macOS, installed with Homebrew: a newer release is "available" with the br
 test('up to date, and a failed check, are both plain states', async () => {
   const current = harness({ routes: { [RELEASES_API]: release('0.2.0') } });
   assert.strictEqual((await current.updater.check()).status, 'current');
-  assert.strictEqual(current.updater.shouldNotify(), false);
 
   const offline = harness({ routes: {} });
   const st = await offline.updater.check();
   assert.strictEqual(st.status, 'error');
   assert.match(st.error, /internet connection/);
-  // A failed check doesn't count as the day's check.
+  // A failed check isn't recorded as a check.
   assert.strictEqual(offline.settings().lastUpdateCheck, 0);
 });
 
-test('the user hears about each new version once', async () => {
-  const h = harness({ routes: { [RELEASES_API]: release() } });
-  await h.updater.check();
-  assert.strictEqual(h.updater.shouldNotify(), true);
-  h.updater.markNotified();
-  assert.strictEqual(h.settings().lastNotifiedVersion, '0.3.0');
-  assert.strictEqual(h.updater.shouldNotify(), false);
-});
-
-test('autoCheck respects the setting and the daily limit; concurrent checks share one request', async () => {
+test('autoCheck respects the setting; concurrent checks share one request', async () => {
   const off = harness({ routes: { [RELEASES_API]: release() }, settings: { checkForUpdates: false } });
   assert.strictEqual(await off.updater.autoCheck(), null);
   assert.strictEqual(off.fetchImpl.calls.length, 0);
 
-  const recent = harness({ routes: { [RELEASES_API]: release() }, settings: { lastUpdateCheck: 1_800_000_000_000 - 1000 } });
-  assert.strictEqual(await recent.updater.autoCheck(), null);
+  // Checked a minute ago, in an earlier launch: opening Loupe checks again.
+  const recent = harness({ routes: { [RELEASES_API]: release() }, settings: { lastUpdateCheck: 1_800_000_000_000 - 60_000 } });
+  assert.strictEqual((await recent.updater.autoCheck()).status, 'available');
 
   const h = harness({ routes: { [RELEASES_API]: release() } });
   const [a, b] = await Promise.all([h.updater.check(), h.updater.check()]);
@@ -269,7 +292,7 @@ test('autoCheck respects the setting and the daily limit; concurrent checks shar
   assert.strictEqual(h.fetchImpl.calls.length, 1);
 });
 
-test('Windows: downloads, verifies, and "Restart to update" runs the installer silently', async () => {
+test('Windows: downloads, verifies, and "Update now" runs the installer silently', async () => {
   const exe = crypto.randomBytes(50000);
   const yml = formatLatestYml({ version: '0.3.0', file: 'Loupe-Setup-x64.exe', sha512: sha512(exe), size: exe.length, releaseDate: 'x' });
   const h = harness({ platform: 'win32', routes: { [RELEASES_API]: release(), [YML_URL]: yml, [EXE_URL]: exe } });
@@ -350,4 +373,144 @@ test('Windows: an installer download that stalls is discarded', async () => {
     /stopped/
   );
   assert.deepStrictEqual(fs.readdirSync(dir), []);
+});
+
+// ---- macOS: the app replaces itself -------------------------------------------
+
+// Stands in for hdiutil, ditto, codesign and plutil: "mounting" the DMG
+// exposes a Loupe.app whose Info.plist says `appVersion`.
+function fakeMacTools({ appVersion = '0.3.0', codesignFails = false } = {}) {
+  const calls = [];
+  const runCommand = async (file, args) => {
+    calls.push([path.basename(file), ...args]);
+    if (file.endsWith('ditto')) {
+      fs.mkdirSync(path.join(args[1], 'Contents'), { recursive: true });
+      fs.writeFileSync(path.join(args[1], 'Contents', 'Info.plist'), 'plist');
+    }
+    if (file.endsWith('codesign') && codesignFails) throw new Error('a sealed resource is missing or invalid');
+    if (file.endsWith('plutil')) return { stdout: `${appVersion}\n` };
+    return { stdout: '' };
+  };
+  runCommand.calls = calls;
+  return runCommand;
+}
+
+function macRoutes(dmg) {
+  const yml = formatLatestYml({
+    version: '0.3.0', releaseDate: 'x',
+    files: [
+      { file: 'Loupe-arm64.dmg', sha512: sha512(dmg), size: dmg.length },
+      { file: 'Loupe-x64.dmg', sha512: sha512(Buffer.from('intel')), size: 5 }
+    ]
+  });
+  return { [RELEASES_API]: release(), [MAC_YML_URL]: yml, [DMG_URL]: dmg };
+}
+
+test('macOS: downloads the DMG, verifies it, stages its app, and Update now swaps it in', async () => {
+  const dmg = crypto.randomBytes(40000);
+  const runCommand = fakeMacTools();
+  const h = harness({ bundle: '/Applications/Loupe.app', runCommand, routes: macRoutes(dmg) });
+  const st = await h.updater.check();
+  assert.strictEqual(st.kind, 'bundle');
+  assert.strictEqual(st.status, 'ready');
+  assert.deepStrictEqual(h.states, ['checking', 'downloading', 'ready']);
+  assert.strictEqual(st.progress, null);
+
+  const tools = runCommand.calls.map((c) => c[0]);
+  assert.deepStrictEqual(tools, ['hdiutil', 'ditto', 'hdiutil', 'codesign', 'plutil']);
+  assert.match(runCommand.calls[0][2], /Loupe-0\.3\.0-arm64\.dmg$/);
+  assert.ok(runCommand.calls[0].includes('-readonly'));
+  assert.strictEqual(runCommand.calls[2][1], 'detach');
+
+  assert.strictEqual(h.updater.install({ relaunch: true }), true);
+  assert.strictEqual(h.spawned.length, 1);
+  const { file, args, opts } = h.spawned[0];
+  assert.strictEqual(file, '/bin/sh');
+  assert.deepStrictEqual(args.slice(0, 3), ['-c', MAC_SWAP_SCRIPT, 'loupe-update']);
+  assert.strictEqual(args[3], '4242');
+  assert.match(args[4], /Loupe\.app$/);
+  assert.deepStrictEqual(args.slice(5), ['/Applications/Loupe.app', '1', BUNDLE_ID]);
+  assert.strictEqual(opts.detached, true);
+  // Only once.
+  assert.strictEqual(h.updater.install({ relaunch: false }), false);
+});
+
+test('macOS: an app that fails its signature or version check is never installed', async () => {
+  const dmg = crypto.randomBytes(1000);
+  for (const [tools, text] of [
+    [fakeMacTools({ codesignFails: true }), /sealed resource/],
+    [fakeMacTools({ appVersion: '0.2.9' }), /version 0\.2\.9, not 0\.3\.0/]
+  ]) {
+    const h = harness({ bundle: '/Applications/Loupe.app', runCommand: tools, routes: macRoutes(dmg) });
+    const st = await h.updater.check();
+    assert.strictEqual(st.status, 'error');
+    assert.match(st.error, text);
+    assert.strictEqual(h.updater.install({ relaunch: true }), false);
+  }
+});
+
+test('macOS: a release without latest-mac.yml offers the release page instead', async () => {
+  const bare = release();
+  bare.assets = bare.assets.filter((a) => a.name !== 'latest-mac.yml');
+  const h = harness({ bundle: '/Applications/Loupe.app', runCommand: fakeMacTools(), routes: { [RELEASES_API]: bare } });
+  const st = await h.updater.check();
+  assert.strictEqual(st.status, 'error');
+  assert.strictEqual(st.latest.version, '0.3.0');
+  assert.match(st.error, /no latest-mac\.yml|no Loupe-arm64\.dmg/);
+});
+
+test('download progress is reported while the update downloads', async () => {
+  const dmg = crypto.randomBytes(300000);
+  const seen = [];
+  const updater = createUpdater({
+    currentVersion: '0.2.0', platform: 'darwin', arch: 'arm64', bundle: '/Applications/Loupe.app',
+    runCommand: fakeMacTools(), fetchImpl: fakeFetch(macRoutes(dmg)), downloadDir: tmpDir(),
+    getSettings: () => normalizeSettings({}), patchSettings: () => {}, spawn: () => ({}),
+    onChange: (s) => { if (s.status === 'downloading') seen.push(s.progress); }
+  });
+  await updater.check();
+  assert.strictEqual(seen[0], 0);
+  assert.strictEqual(seen.at(-1), 1);
+  assert.ok(seen.every((p, i) => i === 0 || p >= seen[i - 1]));
+});
+
+test('Update now while it is still downloading is remembered; after a failed download it tries again', async () => {
+  const dmg = crypto.randomBytes(1000);
+  const h = harness({ bundle: '/Applications/Loupe.app', runCommand: fakeMacTools(), routes: macRoutes(dmg) });
+  const checking = h.updater.check();
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(h.updater.requestInstall(), true);
+  assert.strictEqual(h.updater.state().pending, true);
+  assert.strictEqual((await checking).status, 'ready');
+  assert.strictEqual(h.updater.state().pending, true);
+
+  // Can't install itself: nothing to remember.
+  const dl = harness({ routes: { [RELEASES_API]: release() } });
+  await dl.updater.check();
+  assert.strictEqual(dl.updater.requestInstall(), false);
+});
+
+// The real script, on real folders: a process that has already exited, an
+// "installed" app and a staged one. codesign finds no ad-hoc signature on
+// these, so no permissions are reset; relaunch 0, so nothing is opened.
+test('the Mac swap script replaces the app, and puts the old one back if it can\'t', { skip: process.platform === 'win32' }, () => {
+  const dir = tmpDir();
+  const app = path.join(dir, 'Loupe.app');
+  const staged = path.join(dir, 'stage', 'Loupe.app');
+  fs.mkdirSync(app, { recursive: true });
+  fs.writeFileSync(path.join(app, 'which'), 'old');
+  fs.mkdirSync(staged, { recursive: true });
+  fs.writeFileSync(path.join(staged, 'which'), 'new');
+  const gone = spawnSync(process.execPath, ['-e', '0']).pid;
+
+  let r = spawnSync('/bin/sh', ['-c', MAC_SWAP_SCRIPT, 'loupe-update', String(gone), staged, app, '0', 'test.invalid']);
+  assert.strictEqual(r.status, 0, String(r.stderr));
+  assert.strictEqual(fs.readFileSync(path.join(app, 'which'), 'utf8'), 'new');
+  assert.ok(!fs.existsSync(staged));
+  assert.ok(!fs.existsSync(path.join(dir, '.Loupe-old.app')));
+
+  // The staged copy is missing: the installed app stays as it was.
+  r = spawnSync('/bin/sh', ['-c', MAC_SWAP_SCRIPT, 'loupe-update', String(gone), staged, app, '0', 'test.invalid']);
+  assert.strictEqual(r.status, 0);
+  assert.strictEqual(fs.readFileSync(path.join(app, 'which'), 'utf8'), 'new');
 });

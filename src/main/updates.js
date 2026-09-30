@@ -10,18 +10,25 @@ const { pipeline } = require('node:stream/promises');
 // touches the network, the disk or a process is passed in), so the whole
 // flow runs under node --test with a fake fetch.
 //
-// macOS: the app is not signed with a Developer ID, so it cannot replace
-// itself; we say a new version exists and how to get it -- the brew command
-// for a Homebrew install, the release page otherwise.
-// Windows: the NSIS installer can update in place. We download it, check its
-// sha512 against latest.yml (published next to it by the release workflow,
-// packaging/latest-yml.js) and only then offer "Restart to update".
+// Both platforms update in place, and nothing runs until its sha512 matches
+// the manifest the release workflow publishes next to it
+// (packaging/latest-yml.js):
+// Windows: the NSIS installer, checked against latest.yml, runs as Loupe quits.
+// macOS: the DMG for this Mac, checked against latest-mac.yml. Its app is
+// copied out and verified (codesign, version), then swapped in for this one
+// by a small script once Loupe has quit (MAC_SWAP_SCRIPT). Where the app
+// can't be replaced -- a read-only or translocated copy -- Loupe says a new
+// version exists and how to get it instead: the brew command for a Homebrew
+// install, the release page otherwise.
 
 const REPO = 'akshatgg/loupe';
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`;
 const WINDOWS_INSTALLER = 'Loupe-Setup-x64.exe';
+const MAC_DMGS = { arm64: 'Loupe-arm64.dmg', x64: 'Loupe-x64.dmg' };
+const BUNDLE_ID = 'tech.markai.loupe';
 const BREW_COMMAND = 'brew upgrade --cask loupe';
+// Loupe checks each time it opens, and again this often while it stays open.
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const CASKROOMS = ['/opt/homebrew/Caskroom/loupe', '/usr/local/Caskroom/loupe'];
 // A request that gets no answer (a captive portal, a network that drops
@@ -158,15 +165,16 @@ function parseLatestYml(text) {
   return out;
 }
 
-function formatLatestYml({ version, file, sha512, size, releaseDate }) {
+// One file (Windows' installer), or `files` for several (the two Mac DMGs);
+// path/sha512 name the first, as electron-builder's own manifests do.
+function formatLatestYml({ version, file, sha512, size, files, releaseDate }) {
+  const list = files ?? [{ file, sha512, size }];
   return [
     `version: ${version}`,
     'files:',
-    `  - url: ${file}`,
-    `    sha512: ${sha512}`,
-    `    size: ${size}`,
-    `path: ${file}`,
-    `sha512: ${sha512}`,
+    ...list.flatMap((f) => [`  - url: ${f.file}`, `    sha512: ${f.sha512}`, `    size: ${f.size}`]),
+    `path: ${list[0].file}`,
+    `sha512: ${list[0].sha512}`,
     `releaseDate: '${releaseDate}'`,
     ''
   ].join('\n');
@@ -178,44 +186,64 @@ async function sha512OfFile(file) {
   return hash.digest('base64');
 }
 
-// Downloads the Windows installer for `release` into `dir` and returns its
-// path -- only if its sha512 matches latest.yml. A mismatch deletes the file
-// and throws: a corrupted or tampered installer is never offered.
-async function downloadVerifiedInstaller({
-  release, fetchImpl, dir, timeoutMs = REQUEST_TIMEOUT_MS, stallMs = DOWNLOAD_STALL_MS
+// What this platform downloads to update itself, and the manifest that
+// carries its checksum.
+function updateAsset(platform, arch) {
+  if (platform === 'win32') return { manifest: 'latest.yml', file: WINDOWS_INSTALLER };
+  return { manifest: 'latest-mac.yml', file: MAC_DMGS[arch] ?? MAC_DMGS.arm64 };
+}
+
+// The versioned name a download is kept under: Loupe-Setup-x64.exe for 0.3.0
+// is Loupe-Setup-0.3.0-x64.exe.
+const versionedName = (file, version) => file.replace(/-([^-]+)$/, `-${version}-$1`);
+
+// Downloads `asset` of `release` into `dir` and returns its path -- only if
+// its sha512 matches the release's manifest. A mismatch deletes the file and
+// throws: a corrupted or tampered download is never offered. onProgress gets
+// the fraction received so far.
+async function downloadVerified({
+  release, fetchImpl, dir, asset, timeoutMs = REQUEST_TIMEOUT_MS, stallMs = DOWNLOAD_STALL_MS,
+  onProgress = () => {}
 }) {
-  const ymlAsset = release.assets.find((a) => a.name === 'latest.yml');
-  const exeAsset = release.assets.find((a) => a.name === WINDOWS_INSTALLER);
-  if (!ymlAsset || !exeAsset) throw new Error('This release has no Windows installer to update from');
+  const ymlAsset = release.assets.find((a) => a.name === asset.manifest);
+  const fileAsset = release.assets.find((a) => a.name === asset.file);
+  if (!ymlAsset || !fileAsset) throw new Error(`This release has no ${asset.file} to update from`);
 
   const ymlRes = await fetchWithTimeout(fetchImpl, ymlAsset.url, { headers: { 'User-Agent': 'Loupe' } }, timeoutMs);
-  if (!ymlRes.ok) throw new Error(`Could not download latest.yml (${ymlRes.status})`);
+  if (!ymlRes.ok) throw new Error(`Could not download ${asset.manifest} (${ymlRes.status})`);
   const manifest = parseLatestYml(await ymlRes.text());
   if (manifest.version !== release.version) {
-    throw new Error(`latest.yml is for ${manifest.version}, not ${release.version}`);
+    throw new Error(`${asset.manifest} is for ${manifest.version}, not ${release.version}`);
   }
-  const entry = manifest.files.find((f) => f.url === WINDOWS_INSTALLER)
-    ?? (manifest.path === WINDOWS_INSTALLER ? { sha512: manifest.sha512 } : null);
-  if (!entry?.sha512) throw new Error('latest.yml has no checksum for the installer');
+  const entry = manifest.files.find((f) => f.url === asset.file)
+    ?? (manifest.path === asset.file ? { sha512: manifest.sha512 } : null);
+  if (!entry?.sha512) throw new Error(`${asset.manifest} has no checksum for ${asset.file}`);
 
   fs.mkdirSync(dir, { recursive: true });
-  const target = path.join(dir, `Loupe-Setup-${release.version}-x64.exe`);
+  const target = path.join(dir, versionedName(asset.file, release.version));
   // Already downloaded (a previous launch)? Reuse it if it still verifies.
-  if (fs.existsSync(target) && await sha512OfFile(target) === entry.sha512) return removeOthers(dir, target);
+  if (fs.existsSync(target) && await sha512OfFile(target) === entry.sha512) return removeOthers(dir, target, asset.file);
 
   const partial = `${target}.partial`;
-  const exeRes = await fetchWithTimeout(fetchImpl, exeAsset.url, { headers: { 'User-Agent': 'Loupe' } }, timeoutMs);
-  if (!exeRes.ok || !exeRes.body) throw new Error(`Could not download the installer (${exeRes.status})`);
+  const res = await fetchWithTimeout(fetchImpl, fileAsset.url, { headers: { 'User-Agent': 'Loupe' } }, timeoutMs);
+  if (!res.ok || !res.body) throw new Error(`Could not download the update (${res.status})`);
+  const total = Number(res.headers?.get?.('content-length')) || entry.size || fileAsset.size || 0;
   const hash = crypto.createHash('sha512');
+  let received = 0;
   let stall = null;
   try {
-    const body = Readable.fromWeb(exeRes.body);
+    const body = Readable.fromWeb(res.body);
     const watch = () => {
       clearTimeout(stall);
       stall = setTimeout(() => body.destroy(new TimeoutError('The download stopped')), stallMs);
     };
     watch();
-    body.on('data', (chunk) => { watch(); hash.update(chunk); });
+    body.on('data', (chunk) => {
+      watch();
+      hash.update(chunk);
+      received += chunk.length;
+      if (total > 0) onProgress(Math.min(1, received / total));
+    });
     await pipeline(body, fs.createWriteStream(partial));
   } catch (err) {
     fs.rmSync(partial, { force: true });
@@ -225,64 +253,157 @@ async function downloadVerifiedInstaller({
   }
   if (hash.digest('base64') !== entry.sha512) {
     fs.rmSync(partial, { force: true });
-    throw new Error('The downloaded installer did not match its checksum, so it was discarded');
+    throw new Error('The downloaded update did not match its checksum, so it was discarded');
   }
   fs.renameSync(partial, target);
-  return removeOthers(dir, target);
+  return removeOthers(dir, target, asset.file);
 }
 
-// Installers of older versions (each one about 100 MB) would otherwise pile
+// The Windows installer for `release` (downloadVerified above).
+function downloadVerifiedInstaller(opts) {
+  return downloadVerified({ ...opts, asset: updateAsset('win32') });
+}
+
+// Downloads of older versions (each one about 100 MB) would otherwise pile
 // up in the temp folder, one per update, since nothing else removes them.
 // Only files this code names are touched, whatever folder it was given.
-function removeOthers(dir, keep) {
+function removeOthers(dir, keep, file) {
+  const escape = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const [, stem, tail] = /^(.*)-([^-]+)$/.exec(file);
+  const old = new RegExp(`^${escape(stem)}-[^/\\\\]+-${escape(tail)}(\\.partial)?$`);
   for (const name of fs.readdirSync(dir)) {
     const full = path.join(dir, name);
-    if (full !== keep && /^Loupe-Setup-[^/\\]+-x64\.exe(\.partial)?$/.test(name)) fs.rmSync(full, { force: true });
+    if (full !== keep && old.test(name)) fs.rmSync(full, { force: true });
   }
   return keep;
 }
 
 // ---- install kinds ----------------------------------------------------------
 
-function installKind(platform, exists = fs.existsSync) {
+// The app bundle this Loupe runs from (…/Loupe.app/Contents/MacOS/Loupe),
+// when it can be replaced: Loupe must be able to move it and write next to
+// it. A copy run from its DMG, or translocated by Gatekeeper, is read-only.
+function replaceableBundle(execPath, { access = fs.accessSync } = {}) {
+  const bundle = path.resolve(execPath, '..', '..', '..');
+  if (!bundle.endsWith('.app') || bundle.includes('/AppTranslocation/')) return null;
+  try {
+    access(path.dirname(bundle), fs.constants.W_OK);
+    access(bundle, fs.constants.W_OK);
+  } catch {
+    return null;
+  }
+  return bundle;
+}
+
+// installer: Windows, the NSIS installer. bundle: macOS, the app replaced in
+// place. homebrew / download: macOS where the app can't be replaced -- the
+// brew command, or the release page.
+function installKind(platform, { exists = fs.existsSync, bundle = null } = {}) {
   if (platform === 'win32') return 'installer';
+  if (platform === 'darwin' && bundle) return 'bundle';
   if (platform === 'darwin' && CASKROOMS.some((p) => exists(p))) return 'homebrew';
   return 'download';
 }
 
+const installsItself = (kind) => kind === 'installer' || kind === 'bundle';
+
 // /S: silent. --updated: tells electron-builder's NSIS script this is an
 // update (it closes the running app and keeps user data). --force-run: start
-// Loupe again once installed -- "Restart to update". The quit-time install
-// leaves that off: the user was quitting.
+// Loupe again once installed -- "Update now". The quit-time install leaves
+// that off: the user was quitting.
 function installerArgs({ relaunch }) {
   return relaunch ? ['/S', '--updated', '--force-run'] : ['/S', '--updated'];
 }
 
-// A last check "in the future" (the clock was wrong, then corrected) counts
-// as due; otherwise checks would stop until the clock caught up, maybe years.
-function shouldAutoCheck(settings, now) {
-  const since = now - settings.lastUpdateCheck;
-  return settings.checkForUpdates === true
-    && !(settings.lastUpdateCheck > 0 && since >= 0 && since < CHECK_INTERVAL_MS);
+// macOS: copies the app out of the verified DMG into `dir` and checks it
+// before anything is replaced -- its signature seals every file, and it must
+// be the version the release says. `run(file, args)` runs a command and
+// resolves to { stdout }. Resolves to the staged app's path.
+async function stageMacApp({ dmg, dir, version, run }) {
+  const staged = path.join(dir, 'Loupe.app');
+  fs.rmSync(staged, { recursive: true, force: true });
+  const mount = fs.mkdtempSync(path.join(dir, 'mount-'));
+  await run('/usr/bin/hdiutil', ['attach', dmg, '-nobrowse', '-readonly', '-noautoopen', '-mountpoint', mount]);
+  try {
+    await run('/usr/bin/ditto', [path.join(mount, 'Loupe.app'), staged]);
+  } finally {
+    await run('/usr/bin/hdiutil', ['detach', mount, '-force']).catch(() => {});
+    try { fs.rmdirSync(mount); } catch { /* still mounted: the OS removes it */ }
+  }
+  try {
+    await run('/usr/bin/codesign', ['--verify', '--deep', '--strict', staged]);
+    const { stdout } = await run('/usr/bin/plutil', [
+      '-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', path.join(staged, 'Contents', 'Info.plist')
+    ]);
+    const found = String(stdout).trim();
+    if (found !== version) throw new Error(`The downloaded app is version ${found}, not ${version}`);
+  } catch (err) {
+    fs.rmSync(staged, { recursive: true, force: true });
+    throw err;
+  }
+  return staged;
+}
+
+// macOS: run detached as Loupe quits -- `sh -c MAC_SWAP_SCRIPT loupe-update
+// <pid> <staged app> <installed app> <relaunch 1|0> <bundle id>`. Waits for
+// Loupe to exit (a minute at most, then gives up and changes nothing),
+// moves the old app aside, moves the new one in, and puts the old one back
+// if that fails. Loupe opens again either way when asked to.
+// An ad-hoc signed app is a different app to macOS after every update, so
+// its privacy switches (Screen Recording, Accessibility, …) would still show
+// on in System Settings while no longer applying to it. Those stale entries
+// are cleared, so the new copy asks again instead of failing silently. A
+// Developer ID signed app keeps its permissions and is left alone.
+const MAC_SWAP_SCRIPT = [
+  'pid=$1; new=$2; app=$3; relaunch=$4; id=$5',
+  'old="$(dirname "$app")/.Loupe-old.app"',
+  'i=0',
+  'while kill -0 "$pid" 2>/dev/null; do',
+  '  i=$((i+1)); [ "$i" -gt 300 ] && exit 1',
+  '  sleep 0.2',
+  'done',
+  'rm -rf "$old"',
+  'swapped=0',
+  'if mv "$app" "$old"; then',
+  '  if mv "$new" "$app"; then rm -rf "$old"; swapped=1; else rm -rf "$app"; mv "$old" "$app"; fi',
+  'fi',
+  'if [ "$swapped" = 1 ] && /usr/bin/codesign -dv "$app" 2>&1 | grep -q "Signature=adhoc"; then',
+  '  /usr/bin/tccutil reset All "$id" >/dev/null 2>&1',
+  'fi',
+  '[ "$relaunch" = 1 ] && /usr/bin/open "$app"',
+  'exit 0'
+].join('\n');
+
+// Checks run when the setting allows. (Launch always checks then; while
+// Loupe stays open, once every CHECK_INTERVAL_MS.)
+function shouldAutoCheck(settings) {
+  return settings.checkForUpdates === true;
 }
 
 // ---- the updater ------------------------------------------------------------
 
-// State (what the Settings window's Updates section shows):
-//   status: 'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'error'
-//   kind:   'homebrew' | 'download' | 'installer'
-//   latest: { version, name, notes, url, publishedAt } | null
-//   error:  string | null     checkedAt: ms | null
-// On macOS 'available' is final; on Windows it moves on to 'downloading' and
-// then 'ready' (installer verified) or 'error'.
+// State (what the Settings window's Updates section and the Update now
+// buttons show):
+//   status:   'idle' | 'checking' | 'current' | 'available' | 'downloading' | 'ready' | 'error'
+//   kind:     'installer' | 'bundle' | 'homebrew' | 'download'
+//   latest:   { version, name, notes, url, publishedAt } | null
+//   progress: 0..1 while downloading, else null
+//   pending:  the user asked to update; it installs as soon as it is ready
+//   error:    string | null     checkedAt: ms | null
+// Where Loupe installs itself (installer, bundle) a newer release moves on
+// through 'downloading' to 'ready' (verified, ready to install) or 'error';
+// otherwise 'available' is final.
 function createUpdater({
-  currentVersion, platform = process.platform, fetchImpl, downloadDir,
-  getSettings, patchSettings, now = Date.now, exists = fs.existsSync,
-  spawn, onChange = () => {}, timeoutMs = REQUEST_TIMEOUT_MS
+  currentVersion, platform = process.platform, arch = process.arch, fetchImpl, downloadDir,
+  getSettings, patchSettings, now = Date.now, exists = fs.existsSync, bundle = null,
+  pid = process.pid, spawn, runCommand, onChange = () => {}, timeoutMs = REQUEST_TIMEOUT_MS
 }) {
-  const kind = installKind(platform, exists);
-  let state = { status: 'idle', kind, currentVersion, latest: null, error: null, checkedAt: null };
-  let installerPath = null;
+  const kind = installKind(platform, { exists, bundle });
+  let state = {
+    status: 'idle', kind, currentVersion, latest: null, progress: null, pending: false, error: null, checkedAt: null
+  };
+  let readyPath = null;
+  let readyVersion = null;
   let running = null;
   let installed = false;
 
@@ -297,7 +418,9 @@ function createUpdater({
     try {
       release = await fetchLatestRelease(fetchImpl, { timeoutMs });
     } catch (err) {
-      set({ status: 'error', error: friendlyError(err), checkedAt: now(), latest: null });
+      // An update already downloaded stays ready: only the check failed.
+      if (readyPath) set({ status: 'ready', checkedAt: now() });
+      else set({ status: 'error', error: friendlyError(err), checkedAt: now(), latest: null });
       return state;
     }
     patchSettings({ lastUpdateCheck: now() });
@@ -306,19 +429,33 @@ function createUpdater({
       set({ status: 'current', latest, checkedAt: now() });
       return state;
     }
-    if (kind !== 'installer') {
+    if (!installsItself(kind)) {
       set({ status: 'available', latest, checkedAt: now() });
       return state;
     }
-    set({ status: 'downloading', latest, checkedAt: now() });
+    if (readyPath && readyVersion === release.version) {
+      set({ status: 'ready', latest, checkedAt: now() });
+      return state;
+    }
+    readyPath = null;
+    set({ status: 'downloading', latest, progress: 0, checkedAt: now() });
     try {
-      installerPath = await downloadVerifiedInstaller({
-        release: { ...release, assets }, fetchImpl, dir: downloadDir, timeoutMs
+      const file = await downloadVerified({
+        release: { ...release, assets }, fetchImpl, dir: downloadDir, timeoutMs,
+        asset: updateAsset(platform, arch),
+        onProgress: (fraction) => {
+          const p = Math.floor(fraction * 100) / 100;
+          if (p !== state.progress) set({ progress: p });
+        }
       });
-      set({ status: 'ready' });
+      readyPath = kind === 'bundle'
+        ? await stageMacApp({ dmg: file, dir: downloadDir, version: release.version, run: runCommand })
+        : file;
+      readyVersion = release.version;
+      set({ status: 'ready', progress: null });
     } catch (err) {
-      installerPath = null;
-      set({ status: 'error', error: friendlyError(err) });
+      readyPath = null;
+      set({ status: 'error', progress: null, pending: false, error: friendlyError(err) });
     }
     return state;
   }
@@ -329,38 +466,39 @@ function createUpdater({
     return running;
   }
 
-  // Launch-time check: only if the setting allows it and the last one was
-  // over a day ago. Resolves to the state, or null when it didn't check.
+  // Checks if the setting allows. Resolves to the state, or null when it
+  // didn't check.
   async function autoCheck() {
-    if (!shouldAutoCheck(getSettings(), now())) return null;
+    if (!shouldAutoCheck(getSettings())) return null;
     return check();
   }
 
-  // Whether this version is news to the user -- the automatic check tells
-  // them once per version, not on every launch.
-  function shouldNotify() {
-    const s = getSettings();
-    return Boolean(state.latest) && (state.status === 'available' || state.status === 'ready')
-      && s.lastNotifiedVersion !== state.latest.version;
+  // "Update now" before the download has finished: remembered, so it
+  // installs the moment it is ready. After a failed download it tries again.
+  function requestInstall() {
+    if (!installsItself(kind) || !state.latest) return false;
+    set({ pending: true });
+    if (state.status === 'error') check();
+    return true;
   }
 
-  function markNotified() {
-    if (state.latest) patchSettings({ lastNotifiedVersion: state.latest.version });
-  }
-
-  // Windows only: start the verified installer detached. The caller quits the
-  // app right after, which is what lets the installer replace it.
+  // Starts the verified update detached. The caller quits the app right
+  // after, which is what lets it replace Loupe.
   function install({ relaunch }) {
-    if (kind !== 'installer' || state.status !== 'ready' || !installerPath || installed) return false;
-    const child = spawn(installerPath, installerArgs({ relaunch }), { detached: true, stdio: 'ignore' });
+    if (!installsItself(kind) || state.status !== 'ready' || !readyPath || installed) return false;
+    const child = kind === 'installer'
+      ? spawn(readyPath, installerArgs({ relaunch }), { detached: true, stdio: 'ignore' })
+      : spawn('/bin/sh', ['-c', MAC_SWAP_SCRIPT, 'loupe-update', String(pid), readyPath, bundle, relaunch ? '1' : '0', BUNDLE_ID],
+        { detached: true, stdio: 'ignore' });
     child.unref?.();
     installed = true;
     return true;
   }
 
   return {
-    check, autoCheck, shouldNotify, markNotified, install,
+    check, autoCheck, requestInstall, install,
     state: () => state,
+    installsItself: () => installsItself(kind),
     brewCommand: BREW_COMMAND
   };
 }
@@ -384,8 +522,8 @@ function friendlyError(err) {
 }
 
 module.exports = {
-  RELEASES_API, RELEASES_PAGE, WINDOWS_INSTALLER, BREW_COMMAND, CHECK_INTERVAL_MS, CASKROOMS,
-  parseVersion, compareVersions, fetchLatestRelease, parseLatestYml, formatLatestYml,
-  sha512OfFile, downloadVerifiedInstaller, installKind, installerArgs, shouldAutoCheck,
-  createUpdater, fetchWithTimeout, friendlyError, REQUEST_TIMEOUT_MS
+  RELEASES_API, RELEASES_PAGE, WINDOWS_INSTALLER, MAC_DMGS, BUNDLE_ID, BREW_COMMAND, CHECK_INTERVAL_MS, CASKROOMS,
+  MAC_SWAP_SCRIPT, parseVersion, compareVersions, fetchLatestRelease, parseLatestYml, formatLatestYml,
+  sha512OfFile, updateAsset, downloadVerified, downloadVerifiedInstaller, stageMacApp, replaceableBundle,
+  installKind, installerArgs, shouldAutoCheck, createUpdater, fetchWithTimeout, friendlyError, REQUEST_TIMEOUT_MS
 };

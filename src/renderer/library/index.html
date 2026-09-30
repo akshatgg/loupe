@@ -4,6 +4,7 @@
 <title>Recordings</title>
 <link rel="stylesheet" href="../shared/shell.css">
 <link rel="stylesheet" href="library.css">
+<link rel="stylesheet" href="../shared/update-button.css">
 <body>
   <header class="top">
     <div class="heading">
@@ -25,6 +26,7 @@
       <button class="btn primary" id="newRecording" type="button">
         <span class="recdot" aria-hidden="true"></span>New recording
       </button>
+      <button class="update-now" id="updateNow" type="button" hidden>Update now</button>
     </div>
   </header>
 
@@ -73,5 +75,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
+  <script src="../shared/update-button.js"></script>
   <script type="module" src="library.js"></script>
 </body>

@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const { execFile } = require('node:child_process');
 const { performance } = require('node:perf_hooks');
 const { createPermissions } = require('./permissions');
+const { BUNDLE_ID } = require('./updates');
 const { createRecorder, CAPTURE_STOP_MS } = require('./recorder');
 const { spawnHelper, stopHelper } = require('./helpers');
 const { validateRegion, clampRegionToBounds } = require('./region');
@@ -574,6 +575,20 @@ ipcMain.handle('permissions:status', () => ({
 
 ipcMain.handle('permissions:open', (_e, pane) => permissions.openPane(pane));
 
+// macOS ties a privacy switch to one exact build of an ad-hoc signed app, so
+// after a reinstall or an update Screen Recording can show as on in System
+// Settings and still be refused. The picker's Reset clears Loupe's entries
+// and opens Loupe again, and macOS asks afresh.
+ipcMain.handle('permissions:reset', async () => {
+  if (process.platform !== 'darwin' || barWindow) return false;
+  for (const service of ['ScreenCapture', 'Accessibility']) {
+    await new Promise((resolve) => { execFile('/usr/bin/tccutil', ['reset', service, BUNDLE_ID], () => resolve()); });
+  }
+  app.relaunch();
+  app.quit();
+  return true;
+});
+
 // Settings (settings:get/set included), the Library and Settings windows,
 // presets, menus, updates and crash reports: see app-shell.js.
 const appShell = createAppShell({
@@ -587,6 +602,8 @@ const appShell = createAppShell({
     return null;
   },
   beforeEditorChange: () => flushProject(),
+  // A finished update download waits rather than restart Loupe mid-recording.
+  isBusy: () => Boolean(barWindow) || exporter.busy(),
   editorRenamed: (dir, title) => {
     projects.retitle(dir, title);
     sendToEditor('project:renamed', title);

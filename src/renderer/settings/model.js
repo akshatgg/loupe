@@ -66,12 +66,14 @@ export function updateView(state) {
         showBrew: state.kind === 'homebrew',
         showDownload: state.kind === 'download'
       };
-    case 'downloading':
-      return { ...base, title: `Loupe ${latest} is available`, text: 'Downloading the update…', busy: true, badge: true };
+    case 'downloading': {
+      const pct = Math.round((state.progress ?? 0) * 100);
+      return { ...base, title: `Loupe ${latest} is available`, text: `Downloading the update… ${pct}%`, busy: true, badge: true };
+    }
     case 'ready':
       return {
         ...base, title: `Loupe ${latest} is ready to install`,
-        text: 'Restart Loupe to update now, or it will install the next time you quit.',
+        text: 'Update now to install it and open Loupe again, or it will install the next time you quit.',
         showActions: true, showInstall: true, badge: true
       };
     case 'error':
@@ -86,7 +88,7 @@ export function updateView(state) {
       }
       return { ...base, text: `Couldn’t check for updates. ${state.error ?? ''}`.trim(), error: true };
     default:
-      return { ...base, text: 'Loupe checks for new versions once a day.' };
+      return { ...base, text: 'Loupe checks for new versions each time it opens.' };
   }
 }
 

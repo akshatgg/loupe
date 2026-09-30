@@ -26,6 +26,18 @@ async function refreshPermissions() {
     banner.hidden = false;
     banner.textContent = 'Loupe needs Screen Recording permission to capture your screen. ';
     addPaneButton(banner, 'Open Settings', 'screenRecording');
+    // Already on in System Settings? After a reinstall or an update macOS can
+    // keep the switch for the old copy of Loupe; Reset makes it ask again.
+    if (window.loupe.platform === 'darwin') {
+      const hint = document.createElement('span');
+      hint.className = 'hint';
+      hint.textContent = ' Already switched on? ';
+      const reset = document.createElement('button');
+      reset.textContent = 'Reset and ask again';
+      reset.title = 'Clears Loupe’s Screen Recording and Accessibility entries and opens Loupe again, so macOS asks for them afresh';
+      reset.onclick = () => { reset.disabled = true; window.loupe.resetPermissions(); };
+      banner.append(hint, reset);
+    }
   } else if (!p.accessibility) {
     banner.hidden = false;
     banner.textContent = 'Zoom is off: Loupe needs Accessibility permission to read the scroll wheel. Recording still works. ';
@@ -478,4 +490,5 @@ window.loupe.getRecordingSettings().then(async (s) => {
 });
 
 window.addEventListener('focus', refreshPermissions);
+window.loupeUpdateButton.mount(document.getElementById('updateNow'));
 load();

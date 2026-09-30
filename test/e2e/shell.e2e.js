@@ -81,10 +81,7 @@ fs.writeFileSync(path.join(USER_DATA, 'settings.json'), JSON.stringify({
     { id: 'p_docs', name: 'Docs screenshots', style: { background: { type: 'color', value: '#f1f3f4' }, padding: 0.04 } },
     { id: 'p_plain', name: 'Plain', style: { background: { type: 'none' } } }
   ],
-  defaultPresetId: 'p_launch',
-  // The launch check runs, but this version was already announced, so no
-  // dialog interrupts the test.
-  lastNotifiedVersion: '99.0.0'
+  defaultPresetId: 'p_launch'
 }, null, 2));
 
 // ---- stand-ins for everything that would leave the test ---------------------
@@ -97,6 +94,8 @@ shell.trashItem = async (p) => { record.trash.push(p); fs.rmSync(p, { recursive:
 dialog.showMessageBox = async (...args) => {
   const opts = args.find((a) => a && typeof a === 'object' && 'message' in a);
   record.dialogs.push(opts.message);
+  // The launch-time update dialog is answered "Later".
+  if (/ is available$/.test(opts.message)) return { response: opts.cancelId };
   return { response: 0 };
 };
 dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [EMPTY_FOLDER] });
@@ -179,6 +178,17 @@ async function run() {
 
   // -- Library ----------------------------------------------------------------
   let library;
+  await check('opening Loupe with a newer version out asks to update, and shows Update now', async () => {
+    await waitFor('the update dialog', () => record.dialogs.includes('Loupe 99.0.0 is available'));
+    await waitFor('Update now', () => js(picker, 'return !document.getElementById("updateNow").hidden'));
+    assert.strictEqual(await js(picker, 'return document.getElementById("updateNow").textContent'), 'Update now');
+    await shot(picker, '00-picker-update-now');
+    // Run from source Loupe can't replace itself: Update now opens the release page.
+    await js(picker, 'document.getElementById("updateNow").click()');
+    await waitFor('release page', () => record.external.includes(RELEASE.html_url));
+    record.external.length = 0;
+  });
+
   await check('the picker\'s Recordings button opens the Library', async () => {
     await waitFor('the Recordings button', () => js(picker, 'return Boolean(document.getElementById("recordings"))'));
     await js(picker, 'document.getElementById("recordings").click()');

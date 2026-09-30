@@ -87,7 +87,7 @@ test('device menus: the computer\'s default first, aliases skipped, a missing ch
 
 test('the Updates section says the right thing in every state', () => {
   const base = { currentVersion: '0.2.0', kind: 'homebrew', latest: null };
-  assert.match(updateView({ ...base, status: 'idle' }).text, /once a day/);
+  assert.match(updateView({ ...base, status: 'idle' }).text, /each time it opens/);
   assert.strictEqual(updateView({ ...base, status: 'checking' }).busy, true);
   assert.match(updateView({ ...base, status: 'current', checkedAt: Date.now() }).text, /newest version\. Checked at/);
 
@@ -100,6 +100,7 @@ test('the Updates section says the right thing in every state', () => {
 
   const win = { ...base, kind: 'installer', latest };
   assert.strictEqual(updateView({ ...win, status: 'downloading' }).busy, true);
+  assert.match(updateView({ ...win, status: 'downloading', progress: 0.42 }).text, /Downloading the update… 42%/);
   const ready = updateView({ ...win, status: 'ready' });
   assert.strictEqual(ready.showInstall, true);
   assert.match(ready.text, /next time you quit/);
@@ -112,6 +113,30 @@ test('the Updates section says the right thing in every state', () => {
   assert.strictEqual(badDownload.title, 'Loupe 0.3.0 is available');
   assert.strictEqual(badDownload.showDownload, true);
   assert.match(badDownload.text, /couldn.t be downloaded/);
+});
+
+test('Update now: shown only while a newer Loupe exists', () => {
+  const { view } = require('../src/renderer/shared/update-button.js');
+  const latest = { version: '0.3.0' };
+  const base = { currentVersion: '0.2.0', kind: 'bundle' };
+  for (const status of ['idle', 'checking', 'current']) {
+    assert.strictEqual(view({ ...base, status, latest: status === 'current' ? { version: '0.2.0' } : null }).hidden, true, status);
+  }
+  assert.strictEqual(view({ ...base, status: 'error', error: 'offline', latest: null }).hidden, true);
+  assert.strictEqual(view(null).hidden, true);
+
+  for (const status of ['available', 'downloading', 'ready', 'error']) {
+    const v = view({ ...base, status, latest });
+    assert.strictEqual(v.hidden, false, status);
+    assert.strictEqual(v.label, 'Update now');
+    assert.strictEqual(v.busy, false);
+    assert.strictEqual(v.title, 'Loupe 0.3.0 is available — you have 0.2.0');
+  }
+  // Clicked while it downloads: shows how far along it is.
+  const updating = view({ ...base, status: 'downloading', latest, pending: true, progress: 0.375 });
+  assert.deepStrictEqual([updating.label, updating.busy], ['Updating… 38%', true]);
+  // A retry after a failed download.
+  assert.strictEqual(view({ ...base, status: 'checking', latest, pending: true }).label, 'Updating… 0%');
 });
 
 test('preset swatches only ever use plain colours', () => {

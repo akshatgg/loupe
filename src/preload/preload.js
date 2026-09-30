@@ -7,6 +7,14 @@ contextBridge.exposeInMainWorld('loupe', {
   listSources: () => ipcRenderer.invoke('sources:list'),
   permissions: () => ipcRenderer.invoke('permissions:status'),
   openPane: (pane) => ipcRenderer.invoke('permissions:open', pane),
+  // Update now (src/main/ipc/updates.js): the updater state, and installing.
+  updates: {
+    state: () => ipcRenderer.invoke('updates:state'),
+    install: () => ipcRenderer.invoke('updates:install'),
+    onChanged: (cb) => ipcRenderer.on('updates:changed', (_e, s) => cb(s))
+  },
+  // macOS: clears Loupe's privacy entries and opens Loupe again (main.js).
+  resetPermissions: () => ipcRenderer.invoke('permissions:reset'),
   // Picker: saved preferences (currently how zoom is triggered).
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
