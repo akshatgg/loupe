@@ -184,6 +184,8 @@ async function run() {
     assert.strictEqual(await js(picker, 'return document.getElementById("updateNow").textContent'), 'Update now');
     await shot(picker, '00-picker-update-now');
     // Run from source Loupe can't replace itself: Update now opens the release page.
+    // Hidden really hides it -- as it is whenever Loupe is up to date.
+    assert.strictEqual(await js(picker, 'const b = document.getElementById("updateNow"); b.hidden = true; const d = getComputedStyle(b).display; b.hidden = false; return d'), 'none');
     await js(picker, 'document.getElementById("updateNow").click()');
     await waitFor('release page', () => record.external.includes(RELEASE.html_url));
     record.external.length = 0;
