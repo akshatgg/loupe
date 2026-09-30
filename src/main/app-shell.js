@@ -2,9 +2,11 @@
 
 const os = require('node:os');
 const path = require('node:path');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
 const { createSettingsStore } = require('./settings-store');
 const { startDiagnostics } = require('./diagnostics');
-const { createUpdater } = require('./updates');
+const { createUpdater, replaceableBundle } = require('./updates');
 const { buildMenuTemplate, appShortcuts } = require('./menu');
 const { recordingsRoot } = require('./platform');
 const { createLibrary, registerLibraryIpc, usableFolder } = require('./ipc/library');
@@ -13,6 +15,8 @@ const { registerPresetsIpc } = require('./ipc/presets');
 const { registerUpdatesIpc } = require('./ipc/updates');
 const { registerAboutIpc } = require('./ipc/about');
 const { createWindowState } = require('./window-state');
+
+const execFileAsync = promisify(execFile);
 
 // Everything around recording and editing: the Library and Settings windows,
 // style presets, the menus, update checks and crash reports
@@ -41,7 +45,7 @@ const WINDOW_BG = '#2a2b2e';
 
 function createAppShell({
   electron, openEditorWindow, showPicker, getEditorWindow, getEditorDir, openBlocked,
-  beforeEditorChange, editorRenamed
+  beforeEditorChange, editorRenamed, isBusy = () => false
 }) {
   const { app, ipcMain, BrowserWindow } = electron;
   const preload = path.join(__dirname, '..', 'preload', 'shell.js');
@@ -80,10 +84,16 @@ function createAppShell({
         // Electron's fetch goes through the system's proxy settings; Node's doesn't.
         fetchImpl: (...args) => (electron.net?.fetch ?? fetch)(...args),
         downloadDir: path.join(app.getPath('temp'), 'loupe-update'),
+        // macOS: the Loupe.app to replace, when it can be (updates.js).
+        bundle: process.platform === 'darwin' && app.isPackaged ? replaceableBundle(process.execPath) : null,
         getSettings: settings.get,
         patchSettings: (patch) => settings.patch(patch, { trusted: true }),
         spawn: (...args) => require('node:child_process').spawn(...args),
-        onChange: (state) => broadcast('updates:changed', state)
+        runCommand: (file, args) => execFileAsync(file, args),
+        onChange: (state) => {
+          broadcast('updates:changed', state);
+          updatesIpc?.stateChanged(state);
+        }
       });
     }
     return updater;
@@ -216,7 +226,7 @@ function createAppShell({
       if (next.recordingsFolder !== before.recordingsFolder) recordingsChanged();
     });
 
-    updatesIpc = registerUpdatesIpc({ ipcMain, electron, getUpdater });
+    updatesIpc = registerUpdatesIpc({ ipcMain, electron, getUpdater, isBusy });
     const about = registerAboutIpc({ ipcMain, electron, logDir });
 
     ipcMain.handle('shell:openLibrary', () => { openLibrary(); });

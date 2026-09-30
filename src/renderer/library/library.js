@@ -498,4 +498,5 @@ document.addEventListener('drop', (e) => {
 
 api.onChanged(refresh);
 window.addEventListener('focus', refresh);
+window.loupeUpdateButton.mount($('updateNow'));
 refresh();

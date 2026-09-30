@@ -156,10 +156,24 @@ jobs:
             hdiutil detach "$mnt" >/dev/null
           done
 
+      # The Mac update manifest: both DMGs' sha512 and size. Update now
+      # downloads it with the DMG and won't install one that doesn't match.
+      - name: Write latest-mac.yml
+        run: >-
+          node packaging/latest-yml.js --version "${{ needs.prepare.outputs.version }}"
+          --installer dist/Loupe-arm64.dmg --installer dist/Loupe-x64.dmg --out dist/latest-mac.yml
+
+      # Update now, end to end with the DMG just built: download, checksum,
+      # copy the app out, swap it in once the old one quits, open it again.
+      - name: Smoke-test Update now
+        run: node packaging/smoke-update.js --version "${{ needs.prepare.outputs.version }}" --dir dist
+
       - uses: actions/upload-artifact@v4
         with:
           name: macos
-          path: dist/*.dmg
+          path: |
+            dist/*.dmg
+            dist/latest-mac.yml
           if-no-files-found: error
 
   windows:
@@ -223,6 +237,11 @@ jobs:
           if ($uninstaller) { Start-Process $uninstaller.FullName -ArgumentList "/S" -Wait }
           Write-Host "installer verified"
 
+      # Update now, end to end with the installer just built: download,
+      # checksum, then a silent update of an installed Loupe that opens it again.
+      - name: Smoke-test Update now
+        run: node packaging/smoke-update.js --version "${{ needs.prepare.outputs.version }}" --dir dist
+
       - uses: actions/upload-artifact@v4
         with:
           name: windows
@@ -251,6 +270,7 @@ jobs:
           test "$count" -eq 2 || { echo "::error::expected 2 DMGs, found $count"; exit 1; }
           test -f artifacts/windows/Loupe-Setup-x64.exe || { echo "::error::the Windows installer is missing"; exit 1; }
           test -f artifacts/windows/latest.yml || { echo "::error::latest.yml (the Windows update manifest) is missing"; exit 1; }
+          test -f artifacts/macos/latest-mac.yml || { echo "::error::latest-mac.yml (the Mac update manifest) is missing"; exit 1; }
 
       # A manual run chose the version, so write it back to the repository and
       # create the tag. Pushes made with GITHUB_TOKEN do not trigger workflows,
@@ -279,6 +299,7 @@ jobs:
             artifacts/**/*.dmg
             artifacts/windows/Loupe-Setup-x64.exe
             artifacts/windows/latest.yml
+            artifacts/macos/latest-mac.yml
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |

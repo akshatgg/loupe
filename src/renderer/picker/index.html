@@ -3,13 +3,17 @@
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' file: data: blob:; media-src 'self' blob: mediastream:">
 <title>New recording</title>
 <link rel="stylesheet" href="picker.css">
+<link rel="stylesheet" href="../shared/update-button.css">
 <body>
   <header>
     <div>
       <h1>Choose what to record</h1>
       <p class="sub" id="zoomHelp">Hold <kbd>⌥</kbd> and scroll while recording to zoom in.</p>
     </div>
-    <button id="importVideo" type="button" class="ghost" title="Open an MP4 or MOV video to edit">Import video</button>
+    <div class="actions">
+      <button id="importVideo" type="button" class="ghost" title="Open an MP4 or MOV video to edit">Import video</button>
+      <button id="updateNow" type="button" class="update-now" hidden>Update now</button>
+    </div>
   </header>
 
   <nav id="tabs" role="tablist"></nav>
@@ -90,5 +94,6 @@
   </footer>
 
   <script src="../shared/zoom-shortcuts.js"></script>
+  <script src="../shared/update-button.js"></script>
   <script src="picker.js"></script>
 </body>
