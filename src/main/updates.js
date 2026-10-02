@@ -29,7 +29,7 @@ const MAC_DMGS = { arm64: 'Loupe-arm64.dmg', x64: 'Loupe-x64.dmg' };
 const BUNDLE_ID = 'tech.markai.loupe';
 const BREW_COMMAND = 'brew upgrade --cask loupe';
 // Loupe checks each time it opens, and again this often while it stays open.
-const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const CASKROOMS = ['/opt/homebrew/Caskroom/loupe', '/usr/local/Caskroom/loupe'];
 // A request that gets no answer (a captive portal, a network that drops
 // packets) would otherwise leave "Checking for updates…" spinning forever,
@@ -420,13 +420,14 @@ function createUpdater({
     } catch (err) {
       // An update already downloaded stays ready: only the check failed.
       if (readyPath) set({ status: 'ready', checkedAt: now() });
-      else set({ status: 'error', error: friendlyError(err), checkedAt: now(), latest: null });
+      else set({ status: 'error', error: friendlyError(err), checkedAt: now(), latest: null, pending: false });
       return state;
     }
     patchSettings({ lastUpdateCheck: now() });
     const { assets, ...latest } = release;
     if (compareVersions(release.version, currentVersion) <= 0) {
-      set({ status: 'current', latest, checkedAt: now() });
+      // Nothing newer: an Update now waiting on this check is done.
+      set({ status: 'current', latest, checkedAt: now(), pending: false });
       return state;
     }
     if (!installsItself(kind)) {
@@ -473,12 +474,14 @@ function createUpdater({
     return check();
   }
 
-  // "Update now" before the download has finished: remembered, so it
-  // installs the moment it is ready. After a failed download it tries again.
+  // "Update now" before an update is ready: remembered, so it installs the
+  // moment one is. Unless an update is already on its way (checking, downloading) or ready,
+  // it checks again first: a release published since the last check -- Loupe
+  // may have been open for hours -- is found, downloaded and installed.
   function requestInstall() {
-    if (!installsItself(kind) || !state.latest) return false;
+    if (!installsItself(kind)) return false;
     set({ pending: true });
-    if (state.status === 'error') check();
+    if (!['checking', 'downloading', 'ready'].includes(state.status)) check();
     return true;
   }
 
