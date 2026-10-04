@@ -1,5 +1,7 @@
 'use strict';
 module.exports = [
+  // Hidden folders hold tools' own files, not this project's code.
+  { ignores: ['.*/**'] },
   {
     files: ['**/*.js'],
     ignores: ['src/renderer/**', 'web/**', 'src/core/**', 'test/e2e/lab.js', 'test/e2e/visuals-lab.js', 'test/e2e/export-lab.js'],
