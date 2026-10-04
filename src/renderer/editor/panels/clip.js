@@ -12,7 +12,7 @@ import { h, icon, toggle, section, slider, segmented } from '../ui.js';
 import * as P from '../../../core/project.js';
 import { clipTransform, clipColor, COLOR_FILTERS } from '../../../core/look.js';
 import { formatTime, parseTime } from '../timeline-math.js';
-import { valueAt, keyframeAt, neighbours } from '../../../core/keyframes.js';
+import { valueAt, keyframeAt, neighbours, KEYFRAME_EASES } from '../../../core/keyframes.js';
 
 const FILTER_LABELS = {
   none: 'None', bw: 'B&W', sepia: 'Sepia', vivid: 'Vivid', warm: 'Warm', cool: 'Cool', faded: 'Faded', dramatic: 'Dramatic'
@@ -51,7 +51,8 @@ export default {
           base: (prop) => clipTransform(s.clip)[prop],
           setBase: (prop, v) => P.setClipLook(store.project, s.clip.id, { transform: { [prop]: v } }),
           setKf: (prop, t, v) => (p) => P.setClipKeyframe(p, s.clip.id, prop, t, v),
-          removeKf: (prop, t) => (p) => P.removeClipKeyframe(p, s.clip.id, prop, t)
+          removeKf: (prop, t) => (p) => P.removeClipKeyframe(p, s.clip.id, prop, t),
+          setEase: (prop, t, ease) => (p) => P.setClipKeyframeEase(p, s.clip.id, prop, t, ease)
         };
       }
       if (sel?.kind === 'overlay') {
@@ -65,7 +66,8 @@ export default {
           base: (prop) => o[prop],
           setBase: (prop, v) => P.updateOverlay(store.project, o.id, { [prop]: v }),
           setKf: (prop, k, v) => (p) => P.setOverlayKeyframe(p, o.id, prop, k, v),
-          removeKf: (prop, k) => (p) => P.removeOverlayKeyframe(p, o.id, prop, k)
+          removeKf: (prop, k) => (p) => P.removeOverlayKeyframe(p, o.id, prop, k),
+          setEase: (prop, k, ease) => (p) => P.setOverlayKeyframeEase(p, o.id, prop, k, ease)
         };
       }
       return null;
@@ -254,6 +256,34 @@ export default {
     }, icon('trash', { size: 14 }), 'Delete overlay');
     const overlaySection = section(null, oTitle, oInfo, oX, oY, oScale, oRotate, oOpacity, keyNav, oFadeIn, oFadeOut, oTimes, oDelete);
 
+    // ---- how the keyframe at the playhead is arrived at (Advanced)
+    const EASE_LABELS = { smooth: 'Smoothly', linear: 'At a steady pace', 'ease-in': 'Slow, then fast', 'ease-out': 'Fast, then slow', hold: 'All at once (hold)' };
+    // The properties with a keyframe at the playhead.
+    const keysHere = (it) => (it && it.local !== null
+      ? Object.entries(it.keyframes).filter(([, list]) => keyframeAt(list, it.local)).map(([prop, list]) => ({ prop, k: keyframeAt(list, it.local) }))
+      : []);
+    function easeRow(id) {
+      const select = h('select', { class: 'select', id, 'aria-label': 'How it gets to this keyframe' },
+        KEYFRAME_EASES.map((e) => h('option', { value: e }, EASE_LABELS[e])));
+      select.addEventListener('change', () => {
+        const it = item();
+        const here = keysHere(it);
+        if (!here.length) return;
+        // Every property keyed at this moment, as one undo step.
+        store.apply((p) => here.reduce((q, { prop, k }) => it.setEase(prop, k.t, select.value)(q), p));
+      });
+      const row = h('label', { class: 'field ease-row', hidden: true },
+        h('span', { class: 'label' }, 'Gets to this keyframe'), select);
+      row.refresh = (it) => {
+        const here = keysHere(it);
+        row.hidden = !here.length;
+        if (here.length && document.activeElement !== select) select.value = here[0].k.ease ?? 'smooth';
+      };
+      return row;
+    }
+    const overlayEase = easeRow('overlayKeyEase');
+    const clipEase = easeRow('clipKeyEase');
+
     // ---- speed: the whole clip at once (⌥-drag on the timeline for a part)
     const SPEEDS = [0.25, 0.5, 1, 1.5, 2, 3, 4, 8];
     const speedChips = h('div', { class: 'chips', id: 'clipSpeeds' }, SPEEDS.map((rate) => h('button', {
@@ -264,12 +294,44 @@ export default {
       }
     }, rate === 1 ? 'Normal' : `${rate}×`)));
     const speedHint = h('p', { class: 'hint' });
-    const speedSection = section('Speed', speedChips, speedHint);
+    // How the clip's speed changes begin and end: at once, or eased.
+    const RAMPS = [
+      { value: 'usual', label: 'Usual', title: 'A short ease in and out' },
+      { value: 'sudden', label: 'At once', title: 'Changes speed in an instant' },
+      { value: 'in', label: 'Ease in', title: 'Builds up to the speed' },
+      { value: 'out', label: 'Ease out', title: 'Settles back from the speed' },
+      { value: 'both', label: 'Ease both', title: 'Builds up, then settles back' }
+    ];
+    const rampOf = (seg) => (seg.rampIn === undefined && seg.rampOut === undefined ? 'usual'
+      : !seg.rampIn && !seg.rampOut ? 'sudden' : seg.rampIn && !seg.rampOut ? 'in' : !seg.rampIn && seg.rampOut ? 'out' : 'both');
+    let rampSeconds = 0.8;
+    const setRamp = (kind, gesture = null) => {
+      const s = selected();
+      if (!s) return;
+      const shape = kind === 'usual' ? {} : {
+        rampIn: kind === 'in' || kind === 'both' ? rampSeconds : 0,
+        rampOut: kind === 'out' || kind === 'both' ? rampSeconds : 0
+      };
+      store.apply((p) => P.setSpeedRamp(p, { source: s.clip.source, start: s.clip.start, end: s.clip.end, ...shape }), { gesture });
+    };
+    const ramp = segmented({ label: 'Speeding up and slowing down', options: RAMPS, value: 'usual', onChange: (v) => setRamp(v) });
+    ramp.classList.add('wrap');
+    ramp.id = 'clipRamp';
+    const rampLength = slider({
+      label: 'Takes', min: 0.1, max: P.SPEED_RAMP_MAX, step: 0.05, value: rampSeconds, format: (v) => `${v.toFixed(2).replace(/0$/, '')} s`,
+      onInput: (v) => { rampSeconds = v; setRamp(rampKind, 'clip:ramp'); }, onChange: () => store.endGesture()
+    });
+    rampLength.querySelector('input').id = 'clipRampSeconds';
+    let rampKind = 'usual';
+    const rampBox = h('div', { class: 'ramp-box', hidden: true }, ramp, rampLength);
+    const speedSection = section('Speed', speedChips, speedHint, rampBox);
 
     const settings = section(null, title, length, reverse, holdRow);
     const tools = section(null, freezeBtn,
       h('p', { class: 'hint' }, 'Holds the frame at the playhead for 2 seconds, splitting the clip there.'));
     container.append(empty, overlaySection, settings, speedSection, place, colourSection, tools);
+    keyNav.after(overlayEase);
+    clipKeyNav.after(clipEase);
 
     function update() {
       const s = selected();
@@ -290,7 +352,18 @@ export default {
         speedHint.textContent = rate === null
           ? 'Parts of this clip play at different speeds. Pick one to set the whole clip.'
           : 'For just a part, hold ⌥ (Alt) and drag across it on the timeline.';
+        // Shaping shows once there is a speed change to shape.
+        rampBox.hidden = !inside.length;
+        if (inside.length) {
+          rampKind = rampOf(inside[0]);
+          ramp.set(rampKind);
+          const eased = rampKind === 'in' || rampKind === 'both' ? inside[0].rampIn : rampKind === 'out' ? inside[0].rampOut : null;
+          rampLength.hidden = eased === null;
+          if (eased !== null) { rampSeconds = eased; rampLength.set(eased); }
+        }
       }
+      overlayEase.refresh(it);
+      clipEase.refresh(it);
       if (o) {
         oTitle.textContent = o.name || 'Overlay';
         oInfo.textContent = `${o.kind === 'video' ? 'A video' : 'A picture'} on row V${o.lane + 2}, ${formatTime(o.start, { fraction: true })} to ${formatTime(o.start + o.length, { fraction: true })}`;

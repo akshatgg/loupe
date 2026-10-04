@@ -52,6 +52,13 @@ export default {
       onChange: (v) => { change({ follow: v === 'follow' }); done(); }
     });
     mode.classList.add('stacked');
+    const pace = segmented({
+      label: 'Moves in and out',
+      options: [{ value: 'gentle', label: 'Gently' }, { value: 'smooth', label: 'Smoothly' }, { value: 'snappy', label: 'Quickly' }],
+      value: 'smooth',
+      onChange: (v) => { change({ ease: v }); done(); }
+    });
+    pace.id = 'zoomPace';
     const canvas = h('canvas', { class: 'spot-picker', title: 'Drag to choose where to zoom' });
     const spotHint = h('p', { class: 'hint' }, 'Drag on the picture to choose the spot.');
     const spot = h('div', { class: 'field spot' }, canvas, spotHint);
@@ -63,6 +70,7 @@ export default {
       section(null, heading, when),
       section(null, level, presets),
       section(null, mode, spot),
+      section(null, pace),
       section(null, remove));
 
     container.append(empty, detail);
@@ -153,6 +161,7 @@ export default {
         : 'This part of the recording is cut from the video.';
       level.set(z.level);
       mode.set(z.follow ? 'follow' : 'fixed');
+      pace.set(z.ease ?? 'smooth');
       spot.hidden = z.follow;
       drawPicker();
     }

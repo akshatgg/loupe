@@ -759,3 +759,7 @@ kbd {
 }
 .ctx-menu { bottom: auto; left: 0; transform: none; min-width: 190px; }
 .chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.ease-row { margin-top: 10px; }
+.ease-row[hidden], .ramp-box[hidden] { display: none; }
+.ramp-box { margin-top: 12px; display: grid; gap: 10px; }
+.segmented.wrap, .field.wrap .segmented { flex-wrap: wrap; }

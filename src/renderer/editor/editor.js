@@ -7,6 +7,7 @@
 // writes the latest shortly after.
 
 import * as P from '../../core/project.js';
+import { copyItems, pasteItems, itemsEnd } from '../../core/clipboard.js';
 import { createStore } from './store.js';
 import { createPlayer } from './player.js';
 import { createTimeline } from './timeline-view.js';
@@ -272,6 +273,20 @@ async function start() {
   $('exportBtn').title = `Export (${mod}E)`;
 
   let toolbar = null;
+  let clipboard = null;
+  // Pastes `clip` at output time `t`, as one undo step, and selects what landed.
+  function pasteAt(clip, t, said) {
+    if (!clip) { toast('Copy something first.'); return; }
+    let landed = null;
+    const next = store.apply((p) => {
+      const out = pasteItems(p, clip, t);
+      landed = out.items;
+      return out.project;
+    });
+    if (!next) return;
+    store.selectMany(landed);
+    toast(landed.length === 1 ? said : `${said} ${landed.length} items`);
+  }
   function deleteSelection() {
     // A marked In..Out part goes first, closing the gap (an editor's extract).
     const { in: a, out: b } = timeline.marks;
@@ -365,6 +380,31 @@ async function start() {
       document.getElementById('recordVoiceover')?.click();
     },
     selectAll: () => timeline.selectAll(),
+    // Copy, cut, paste and duplicate what's selected. The copy is kept in
+    // this window (not the system clipboard), and pasted at the playhead.
+    copy: () => {
+      const got = copyItems(store.project, store.selected);
+      if (!got) { toast('Select something to copy first.'); return false; }
+      clipboard = got;
+      toast(got.entries.length === 1 ? 'Copied' : `Copied ${got.entries.length} items`);
+      return true;
+    },
+    cutSelection: () => {
+      const got = copyItems(store.project, store.selected);
+      if (!got) { toast('Select something to cut first.'); return; }
+      const items = store.selected.filter((it) => it.kind !== 'speed');
+      if (store.apply((p) => P.removeItems(p, items, { leaveGap: !closeGaps() }))) {
+        clipboard = got;
+        store.select(null);
+        toast(got.entries.length === 1 ? 'Cut' : `Cut ${got.entries.length} items`);
+      }
+    },
+    paste: () => pasteAt(clipboard, player.time, 'Pasted'),
+    duplicate: () => {
+      const got = copyItems(store.project, store.selected);
+      if (!got) { toast('Select something to duplicate first.'); return; }
+      pasteAt(got, itemsEnd(store.project, store.selected), 'Duplicated');
+    },
     delete: deleteSelection,
     timelineZoomIn: () => timeline.zoomIn(),
     timelineZoomOut: () => timeline.zoomOut(),
@@ -423,8 +463,23 @@ async function start() {
     // A slider or segmented button keeps its own arrow keys.
     if (/Frame|1s/.test(command) && e.target.matches?.('input[type="range"]')) return;
     e.preventDefault();
+    if (['copy', 'cutSelection', 'paste'].includes(command)) lastKeyCommand = performance.now();
     actions[command]();
   });
+
+  // Edit > Copy, Cut and Paste from the app menu arrive as the page's own
+  // clipboard events; outside a text field they mean the timeline's.
+  let lastKeyCommand = 0;
+  for (const [event, command] of [['copy', 'copy'], ['cut', 'cutSelection'], ['paste', 'paste']]) {
+    document.addEventListener(event, (e) => {
+      if (e.target.closest?.('input, textarea, [contenteditable="true"]')) return;
+      if (exportDialog.isOpen || addRecording.isOpen || cheat.open) return;
+      e.preventDefault();
+      // The key already did it (a keydown the page handled).
+      if (performance.now() - lastKeyCommand < 250) return;
+      actions[command]();
+    });
+  }
 
   // Edit > Undo/Redo and Help > Keyboard shortcuts from the app menu, sent
   // here while the editor is in front. In a text field undo means typing.

@@ -79,7 +79,13 @@ async function run() {
   const editor = await waitFor('the editor', () => pageOf('editor'), 30000);
   await waitFor('the editor to load', () => editor.webContents.executeJavaScript('document.body.dataset.ready === "true"'), 30000);
   editor.webContents.setBackgroundThrottling(false);
-  const js = (code) => editor.webContents.executeJavaScript(code);
+  // What the page itself complains about, beside the test's own output.
+  editor.webContents.on('console-message', (event) => {
+    if (event.level === 'error') console.log(`# page error: ${event.message}`);
+  });
+  const js = (code) => editor.webContents.executeJavaScript(code).catch((err) => {
+    throw new Error(`${err.message}\n  in page script: ${String(code).slice(0, 160)}`);
+  });
   const send = (e) => editor.webContents.sendInputEvent(e);
   const shot = async (name) => {
     await sleep(250);
@@ -377,6 +383,131 @@ async function run() {
     await clickOn('#autoZoomRemove');
     assert.deepStrictEqual((await project()).zooms.map((z) => z.id), [mine.id], 'the one made mine stays');
     await js('window.__editor.store.apply((p) => ({ ...p, zooms: [] }))');
+    await key('Escape');
+  });
+
+  await check('copy and paste a zoom at the playhead, duplicate it, cut it and paste it elsewhere', async () => {
+    await js('window.__editor.store.apply((p) => ({ ...p, zooms: [] }))');
+    await js('window.__editor.store.apply((p) => window.__editor.editor.core.addZoom(p, { start: 0.5, end: 1.1, level: 3 }))');
+    const first = (await project()).zooms[0];
+    await clickOn(`.zoom[data-id="${first.id}"]`);
+    await key('c', [MOD]);
+    assert.match(await js('document.getElementById("toast").textContent'), /Copied/);
+    await seek(2.5);
+    await key('v', [MOD]);
+    let zooms = (await project()).zooms;
+    assert.strictEqual(zooms.length, 2);
+    near(zooms[1].start, 2.5, 0.02, 'pasted at the playhead');
+    near(zooms[1].end - zooms[1].start, 0.6, 0.02, 'the same length');
+    assert.strictEqual(zooms[1].level, 3);
+    assert.deepStrictEqual((await selected()).map((x) => x.id), [zooms[1].id], 'what was pasted is selected');
+    // Duplicate: a copy right after it.
+    await key('d', [MOD]);
+    zooms = (await project()).zooms;
+    assert.strictEqual(zooms.length, 3);
+    near(zooms[2].start, 3.1, 0.02, 'right after the one duplicated');
+    // Cut takes it away; paste puts it down somewhere else.
+    await key('x', [MOD]);
+    assert.strictEqual((await project()).zooms.length, 2);
+    await seek(4.6);
+    await key('v', [MOD]);
+    zooms = (await project()).zooms;
+    assert.strictEqual(zooms.length, 3);
+    near(zooms[2].start, 4.6, 0.02, 'the cut zoom, pasted');
+    // Over another zoom there is no room: nothing changes, and it says why.
+    await seek(0.7);
+    await key('v', [MOD]);
+    assert.strictEqual((await project()).zooms.length, 3);
+    assert.match(await js('document.getElementById("toast").textContent'), /overlap/);
+    await shot('12-pasted');
+  });
+
+  await check('dragging one of several selected zooms moves them all, as one undo step; a clip is copied with its look', async () => {
+    const before = (await project()).zooms;
+    await key('Escape');
+    await clickOn(`.zoom[data-id="${before[0].id}"]`);
+    await clickOn(`.zoom[data-id="${before[1].id}"]`, { modifiers: [MOD] });
+    const from = await centre(`.zoom[data-id="${before[1].id}"]`);
+    const dx = (await tx(1)) - (await tx(0.6));
+    await drag(from.x, from.y, from.x + dx, from.y);
+    const after = (await project()).zooms;
+    near(after.find((z) => z.id === before[0].id).start - before[0].start, 0.4, 0.05, 'the first moved');
+    near(after.find((z) => z.id === before[1].id).start - before[1].start, 0.4, 0.05, 'and the second, by the same');
+    near(after.find((z) => z.id === before[2].id).start, before[2].start, 1e-9, 'the unselected one stayed');
+    assert.strictEqual((await selected()).length, 2, 'both still selected');
+    await key('z', [MOD]);
+    near((await project()).zooms.find((z) => z.id === before[0].id).start, before[0].start, 1e-9, 'one undo puts both back');
+    // A clip, with a colour change, pasted at the end: the video grows by its length.
+    await js('window.__editor.store.apply((p) => ({ ...p, zooms: [] }))');
+    const clip0 = (await project()).clips[0];
+    await js(`window.__editor.store.apply((p) => window.__editor.editor.core.setClipLook(p, ${JSON.stringify(clip0.id)}, { color: { filter: 'bw' } }))`);
+    await key('Escape');
+    await clickOn(`.clip[data-id="${clip0.id}"] .clip-label`);
+    await key('c', [MOD]);
+    const length = await js('window.__editor.store.tl.duration');
+    await js(`window.__editor.player.seek(${length})`);
+    await key('v', [MOD]);
+    const p = await project();
+    assert.strictEqual(p.clips.at(-1).color.filter, 'bw');
+    assert.ok((await js('window.__editor.store.tl.duration')) > length + 1, 'the video is longer by the clip');
+    await key('z', [MOD]);
+    await key('z', [MOD]);
+  });
+
+  await check('a zoom moves in quickly or gently; a keyframe is arrived at all at once; a speed change starts at once', async () => {
+    await js('window.__editor.store.apply((p) => window.__editor.editor.core.addZoom(p, { start: 2.2, end: 3.8, level: 3, follow: false, x: 20, y: 15 }))');
+    const z = (await project()).zooms[0];
+    await key('Escape');
+    await clickOn(`.zoom[data-id="${z.id}"]`);
+    const zoomAt = async (t) => { await seek(t); await sleep(120); return js('window.__editor.player.state.camera.zoom'); };
+    const smooth = await zoomAt(2.33);
+    await clickOn('#zoomPace .seg-btn[data-value=snappy]');
+    assert.strictEqual((await project()).zooms[0].ease, 'snappy');
+    const snappy = await zoomAt(2.33);
+    await clickOn('#zoomPace .seg-btn[data-value=gentle]');
+    const gentle = await zoomAt(2.33);
+    assert.ok(snappy > smooth + 0.1 && gentle < smooth - 0.1, `snappy ${snappy}, smooth ${smooth}, gentle ${gentle}`);
+    await js('window.__editor.store.apply((p) => ({ ...p, zooms: [] }))');
+
+    // Keyframes on the clip's size at 0.5 s and 1.5 s; "All at once" holds the first until the second.
+    const clip = (await project()).clips[0];
+    await clickOn(`.clip[data-id="${clip.id}"] .clip-label`);
+    await js(`window.__editor.store.apply((p) => { const C = window.__editor.editor.core;
+      return C.setClipKeyframe(C.setClipKeyframe(p, ${JSON.stringify(clip.id)}, 'scale', 0.5, 1), ${JSON.stringify(clip.id)}, 'scale', 1.5, 0.5); })`);
+    await seek(1.5);
+    await sleep(150);
+    assert.strictEqual(await js('document.getElementById("clipKeyEase").closest(".ease-row").hidden'), false, 'on a keyframe: how it is arrived at');
+    assert.strictEqual(await js('document.getElementById("clipKeyEase").value'), 'smooth');
+    await js(`(() => { const s = document.getElementById('clipKeyEase'); s.value = 'hold'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    assert.strictEqual((await project()).clips[0].keyframes.scale[1].ease, 'hold');
+    await seek(1);
+    await sleep(150);
+    assert.strictEqual(await js('document.getElementById("clipKeyEase").closest(".ease-row").hidden'), true, 'between keyframes: nothing to shape');
+    const held = await exportFile();
+    assert.ok(meanDiff(tinyFrame(held, 1.2), tinyFrame(reference, 1.2)) < 3, 'held at full size until the keyframe, in the export');
+    assert.ok(meanDiff(tinyFrame(held, 1.8), tinyFrame(reference, 1.8)) > 5, 'then half size');
+    await js(`window.__editor.store.apply((p) => window.__editor.editor.core.setClipLook({ ...p, clips: p.clips.map((c) => { const { keyframes, ...rest } = c; return rest; }) }, ${JSON.stringify(clip.id)}, { transform: null }))`);
+
+    // The whole clip at 2x; "At once" drops the eases, so it takes exactly half as long.
+    const was = await js('window.__editor.store.tl.duration');
+    assert.strictEqual(await js('document.querySelector(".ramp-box").hidden'), true, 'no speed change: nothing to shape');
+    await js('document.querySelector("#clipSpeeds [data-rate=\\"2\\"]").click()');
+    assert.strictEqual(await js('document.querySelector(".ramp-box").hidden'), false);
+    const usual = await js('window.__editor.store.tl.duration');
+    await clickOn('#clipRamp .seg-btn[data-value=sudden]');
+    const sudden = await js('window.__editor.store.tl.duration');
+    const sp = (await project()).speed[0];
+    assert.strictEqual(sp.rampIn, 0);
+    assert.strictEqual(sp.rampOut, 0);
+    const clipLen = clip.end - clip.start;
+    near(was - sudden, clipLen / 2, 1e-6, 'exactly half the clip\u2019s time saved');
+    assert.ok(usual > sudden, 'the usual eases took a little longer');
+    await clickOn('#clipRamp .seg-btn[data-value=both]');
+    assert.ok((await project()).speed[0].rampIn > 0.5, 'eased in and out');
+    assert.strictEqual(await js('document.getElementById("clipRampSeconds").closest(".field").hidden'), false, 'with a length to set');
+    near(lengthOf(await exportFile()), await js('window.__editor.store.tl.duration'), 0.1, 'the export is as long as the timeline says');
+    await shot('13-speed-ramp');
+    await js('document.querySelector("#clipSpeeds [data-rate=\\"1\\"]").click()');
     await key('Escape');
   });
 

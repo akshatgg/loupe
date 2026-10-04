@@ -22,6 +22,10 @@ export function commandFor(e, platform) {
     if (key === 'y' && !mac) return 'redo';
     if (key === 'e') return 'export';
     if (key === 'a') return e.shiftKey ? null : 'selectAll';
+    if (!e.shiftKey && key === 'c') return 'copy';
+    if (!e.shiftKey && key === 'x') return 'cutSelection';
+    if (!e.shiftKey && key === 'v') return 'paste';
+    if (!e.shiftKey && key === 'd') return 'duplicate';
     if (key === '=' || key === '+') return 'timelineZoomIn';
     if (key === '-' || key === '_') return 'timelineZoomOut';
     if (key === '0') return 'timelineFit';
@@ -80,6 +84,8 @@ export function cheatSheet(platform) {
       { keys: ['T'], what: 'Add text at the playhead' },
       { keys: ['B'], what: 'Add a blur at the playhead' },
       { keys: [plus(mod, 'A')], what: 'Select everything on the timeline' },
+      { keys: [plus(mod, 'C'), plus(mod, 'X'), plus(mod, 'V')], what: 'Copy, cut, and paste at the playhead' },
+      { keys: [plus(mod, 'D')], what: 'Duplicate what’s selected, right after it' },
       { keys: [mac ? '⌘-click' : 'Ctrl+click', mac ? '⇧-click' : 'Shift+click'], what: 'Select several things' },
       { keys: [mac ? '⌫' : 'Delete'], what: 'Delete what’s selected' },
       { keys: [plus(mod, 'Z')], what: 'Undo' },

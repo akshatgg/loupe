@@ -10,13 +10,15 @@
 
 import { buildTimeline } from './timeline.js';
 import { COLOR_FILTERS } from './look.js';
-import { setKeyframe, removeKeyframe } from './keyframes.js';
+import { setKeyframe, removeKeyframe, setKeyframeEase, KEYFRAME_EASES } from './keyframes.js';
+import { ZOOM_EASES } from './camera.js';
 import { autoZoomRanges } from './auto-zoom.js';
 import { clipLength, clipEnd, freeLane, audioName, laneOf, splitPoints, MAX_LANES, MIN_AUDIO_SECONDS } from './audio/clips.js';
 
 export const VERSION = 2;
 export const SPEED_MIN = 0.25;
 export const SPEED_MAX = 8;
+export const SPEED_RAMP_MAX = 2;
 export const ZOOM_LEVEL_MIN = 1;
 export const ZOOM_LEVEL_MAX = 8;
 // Shorter than this and a clip, zoom or speed stretch can't be grabbed in
@@ -451,6 +453,9 @@ function validateSpeedSegment(s, sources) {
   num(s.end, 'Speed end', 0);
   num(s.rate, 'Speed', SPEED_MIN, SPEED_MAX);
   if (s.end <= s.start) fail('A speed stretch ends before it starts');
+  // Seconds to reach the speed and to leave it (timeline.js); none = the usual.
+  if (s.rampIn !== undefined) num(s.rampIn, 'Speed ramp in', 0, SPEED_RAMP_MAX);
+  if (s.rampOut !== undefined) num(s.rampOut, 'Speed ramp out', 0, SPEED_RAMP_MAX);
   return s;
 }
 
@@ -471,6 +476,8 @@ function validateZoom(z, sources) {
   if (z.disabled !== undefined) bool(z.disabled, 'Zoom disabled');
   // Made by Loupe from the clicks, not by hand.
   if (z.auto !== undefined) bool(z.auto, 'Zoom auto');
+  // How quickly it moves in and out (camera.js); none = smooth.
+  if (z.ease !== undefined) oneOf(z.ease, ZOOM_EASES, 'Zoom easing');
   if (z.keyframes !== undefined) {
     if (!Array.isArray(z.keyframes)) fail('Zoom keyframes must be a list');
     for (const k of z.keyframes) { num(k?.t, 'Zoom keyframe time'); num(k?.zoom, 'Zoom keyframe level', 0.01, 100); }
@@ -1040,7 +1047,7 @@ export function addZoom(project, { source = 'main', start, end, level = 2, follo
   return withZooms(project, zooms);
 }
 
-const ZOOM_PATCH_KEYS = ['start', 'end', 'level', 'follow', 'x', 'y', 'disabled', 'auto'];
+const ZOOM_PATCH_KEYS = ['start', 'end', 'level', 'follow', 'x', 'y', 'disabled', 'auto', 'ease'];
 
 export function updateZoom(project, zoomId, patch) {
   const i = project.zooms.findIndex((z) => z.id === zoomId);
@@ -1137,10 +1144,33 @@ export function paintSpeed(project, { source = 'main', start, end, rate } = {}) 
   for (const s of mine) {
     if (s.end - s.start < MIN_RANGE_SECONDS - EPS) continue;
     const prev = merged.at(-1);
-    if (prev && prev.rate === s.rate && s.start - prev.end <= 1e-6) prev.end = s.end;
+    if (prev && prev.rate === s.rate && prev.rampIn === s.rampIn && prev.rampOut === s.rampOut &&
+        s.start - prev.end <= 1e-6) prev.end = s.end;
     else merged.push(s);
   }
   return { ...project, speed: [...others, ...merged] };
+}
+
+// How the speed stretches inside a source range reach and leave their
+// speed: { rampIn, rampOut } in seconds, 0 for at once; undefined puts that
+// one back to the usual short ease.
+export function setSpeedRamp(project, { source = 'main', start, end, rampIn, rampOut } = {}) {
+  if (!project.sources[source]) fail(`Speed uses unknown recording ${JSON.stringify(source)}`);
+  num(start, 'Speed start');
+  num(end, 'Speed end');
+  if (rampIn !== undefined) num(rampIn, 'Speed ramp in', 0, SPEED_RAMP_MAX);
+  if (rampOut !== undefined) num(rampOut, 'Speed ramp out', 0, SPEED_RAMP_MAX);
+  let touched = false;
+  const speed = project.speed.map((s) => {
+    if (s.source !== source || s.end <= start + 1e-6 || s.start >= end - 1e-6) return s;
+    touched = true;
+    const next = { ...s };
+    if (rampIn === undefined) delete next.rampIn; else next.rampIn = rampIn;
+    if (rampOut === undefined) delete next.rampOut; else next.rampOut = rampOut;
+    return next;
+  });
+  if (!touched) fail('There is no speed change there to shape');
+  return { ...project, speed };
 }
 
 // ---------------------------------------------------------------- annotations
@@ -1231,7 +1261,7 @@ function validateKeyframes(kf, allowed) {
       if (!isObj(k)) fail('A keyframe is not an object');
       num(k.t, 'Keyframe time', 0);
       num(k.v, 'Keyframe value', -360, 360);
-      if (k.ease !== undefined) oneOf(k.ease, ['linear'], 'Keyframe easing');
+      if (k.ease !== undefined) oneOf(k.ease, KEYFRAME_EASES, 'Keyframe easing');
       if (k.t < last) fail('Keyframes must be in time order');
       last = k.t;
     }
@@ -1325,6 +1355,14 @@ export function setOverlayKeyframe(project, id, prop, t, v) {
   return updateOverlay(project, id, { keyframes: { ...o.keyframes, [prop]: setKeyframe(o.keyframes[prop], clamp(t, 0, o.length), v) } });
 }
 
+// How an overlay's property arrives at its keyframe at `t` (KEYFRAME_EASES).
+export function setOverlayKeyframeEase(project, id, prop, t, ease) {
+  oneOf(ease, KEYFRAME_EASES, 'Keyframe easing');
+  const o = project.overlays[overlayAt(project, id)];
+  if (!o.keyframes[prop]?.length) fail('There is no keyframe there');
+  return updateOverlay(project, id, { keyframes: { ...o.keyframes, [prop]: setKeyframeEase(o.keyframes[prop], t, ease) } });
+}
+
 export function removeOverlayKeyframe(project, id, prop, t) {
   const o = project.overlays[overlayAt(project, id)];
   const list = removeKeyframe(o.keyframes[prop], t);
@@ -1342,6 +1380,17 @@ export function setClipKeyframe(project, clipId, prop, t, v) {
   if (t < clip.start - 1e-6 || t > clip.end + 1e-6) fail('Put the playhead inside the clip to set a keyframe');
   const clips = project.clips.slice();
   clips[i] = { ...clip, keyframes: { ...(clip.keyframes ?? {}), [prop]: setKeyframe(clip.keyframes?.[prop], t, v) } };
+  validateClip(clips[i], project.sources);
+  return { ...project, clips };
+}
+
+export function setClipKeyframeEase(project, clipId, prop, t, ease) {
+  oneOf(ease, KEYFRAME_EASES, 'Keyframe easing');
+  const i = clipIndex(project, clipId);
+  const clip = project.clips[i];
+  if (!clip.keyframes?.[prop]?.length) fail('There is no keyframe there');
+  const clips = project.clips.slice();
+  clips[i] = { ...clip, keyframes: { ...clip.keyframes, [prop]: setKeyframeEase(clip.keyframes[prop], t, ease) } };
   validateClip(clips[i], project.sources);
   return { ...project, clips };
 }

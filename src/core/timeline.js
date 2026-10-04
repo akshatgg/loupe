@@ -40,7 +40,7 @@ function rampTable(length, rate, up) {
 // 0..duration, each either a constant rate or a ramp, with its output span.
 export function buildSpeedMap(segments, duration) {
   const sorted = segments
-    .map((s) => ({ start: Math.max(0, s.start), end: Math.min(duration, s.end), rate: s.rate }))
+    .map((s) => ({ start: Math.max(0, s.start), end: Math.min(duration, s.end), rate: s.rate, rampIn: s.rampIn, rampOut: s.rampOut }))
     .filter((s) => s.end - s.start > EPS)
     .sort((a, b) => a.start - b.start);
   const pieces = [];
@@ -59,11 +59,21 @@ export function buildSpeedMap(segments, duration) {
     const start = Math.max(seg.start, at);
     if (seg.end - start <= EPS) continue;
     push({ a: at, b: start, rate: 1 });
-    const ramp = Math.min(RAMP_SECONDS, (seg.end - start) / 2);
-    if (ramp > 0 && seg.rate !== 1) {
-      push({ a: start, b: start + ramp, rate: seg.rate, table: rampTable(ramp, seg.rate, true) });
-      push({ a: start + ramp, b: seg.end - ramp, rate: seg.rate });
-      push({ a: seg.end - ramp, b: seg.end, rate: seg.rate, table: rampTable(ramp, seg.rate, false) });
+    // How long the stretch takes to reach its speed and to leave it: its own
+    // `rampIn` / `rampOut` seconds (0 = at once), RAMP_SECONDS when it has
+    // none, and together never more than the stretch.
+    const len = seg.end - start;
+    let rampIn = Math.max(0, seg.rampIn ?? RAMP_SECONDS);
+    let rampOut = Math.max(0, seg.rampOut ?? RAMP_SECONDS);
+    if (rampIn + rampOut > len) {
+      const k = len / (rampIn + rampOut);
+      rampIn *= k;
+      rampOut *= k;
+    }
+    if (seg.rate !== 1 && (rampIn > 0 || rampOut > 0)) {
+      if (rampIn > 0) push({ a: start, b: start + rampIn, rate: seg.rate, table: rampTable(rampIn, seg.rate, true) });
+      push({ a: start + rampIn, b: seg.end - rampOut, rate: seg.rate });
+      if (rampOut > 0) push({ a: seg.end - rampOut, b: seg.end, rate: seg.rate, table: rampTable(rampOut, seg.rate, false) });
     } else {
       push({ a: start, b: seg.end, rate: seg.rate });
     }

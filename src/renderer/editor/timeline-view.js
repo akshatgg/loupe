@@ -19,6 +19,7 @@
 // and other zooms.
 
 import * as P from '../../core/project.js';
+import { moveItems } from '../../core/clipboard.js';
 import { h, icon } from './ui.js';
 import { createAudioLane } from './timeline-audio.js';
 import { createMusicLanes } from './timeline-music.js';
@@ -766,6 +767,35 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     });
   }
 
+  // Everything selected, slid along the timeline by the same amount. The
+  // edit is made from the project as it was when the drag began; a place
+  // they can't all go keeps them where they last could.
+  function groupDrag(e, pressed) {
+    const p0 = store.project;
+    const items = store.selected.slice();
+    const o0 = timeAt(e.clientX, { clampToVideo: false });
+    let refused = null;
+    beginDrag(e, {
+      move(ev) {
+        const delta = timeAt(ev.clientX, { clampToVideo: false }) - o0;
+        let next;
+        try {
+          next = moveItems(p0, items, delta);
+          refused = null;
+        } catch (err) {
+          refused = err;
+          return;
+        }
+        store.apply(() => next, { gesture: 'group-move' });
+      },
+      end() {
+        if (refused) editor.toast(String(refused.message));
+      },
+      // A click without a drag: just the one pressed.
+      click: () => editor.select(pressed)
+    });
+  }
+
   // ---- a zoom's right-click menu
 
   function openZoomMenu(id, clientX, clientY) {
@@ -818,6 +848,15 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
         visuals.closeMenu();
         closeMenu();
         store.select(item, { toggle: true });
+        return;
+      }
+    }
+    // A press on one of several selected things drags them all together.
+    if (!e.altKey && store.selected.length > 1 && !e.target.closest('.handle, .fade-knob, .tl-join')) {
+      const item = itemOf(e.target);
+      if (item && item.kind !== 'clip' && hasItem(store.selected, item)) {
+        visuals.closeMenu();
+        groupDrag(e, item);
         return;
       }
     }
