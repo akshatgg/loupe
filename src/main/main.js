@@ -16,6 +16,7 @@ const { inputTapArgs } = require('./settings');
 const { createAppShell } = require('./app-shell');
 const { createExportRunner, registerExportIpc, recentExports } = require('./ipc/export');
 const { createExportedFiles } = require('./exported-file');
+const { createTrackRunner, registerTrackIpc } = require('./ipc/track');
 const { createProjectStore, registerProjectIpc } = require('./ipc/project');
 const { registerShareIpc } = require('./ipc/share');
 const { registerFileActionsIpc } = require('./ipc/fileActions');
@@ -1043,6 +1044,16 @@ registerExportIpc({
   beforeStart: () => projects.flush(),
   onExported: (file) => exportedFiles.remember(file)
 });
+// A hidden area that follows what's under it: the recording's frames are
+// matched in a hidden window of their own (ipc/track.js).
+const tracker = createTrackRunner({
+  BrowserWindow,
+  preload: path.join(__dirname, '..', 'preload', 'tracker.js'),
+  page: path.join(__dirname, '..', 'renderer', 'exporter', 'track.html')
+});
+registerTrackIpc({
+  ipcMain: editorIpc, runner: tracker, projectDir: () => openEditorDir(), beforeStart: () => projects.flush()
+});
 // Add recording: another recording from the Library, played after this one.
 registerAppendRecordingIpc({
   ipcMain: editorIpc, library: appShell.library, store: projects, projectDir: () => openEditorDir(), dialog, BrowserWindow
@@ -1099,6 +1110,7 @@ function openEditorWindow(dir) {
     // Closing the editor mid-export stops the export: nobody is left to see
     // it finish, and its partial file is removed (ipc/export.js).
     if (exporter.busy()) exporter.cancel();
+    tracker.cancel();
   });
   return editorWindow;
 }

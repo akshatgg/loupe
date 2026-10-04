@@ -5,6 +5,8 @@
 //  - arrow, box, blur: x/y/w/h/x2/y2 are fractions of the RECORDING's picture
 //    (0..1 of its width and height), drawn through the camera. A zoom moves
 //    and grows them with the screen, so a hidden password stays hidden.
+//    A blur with a `path` ([{ t, x, y }], core/track.js) follows what it
+//    hides: its top-left corner is taken from the path at that moment.
 //  - text: x/y is the centre of the text as fractions of the content area,
 //    which a zoom doesn't move (a caption-like label).
 //  - title: a full-frame card over everything (background colour `color`),
@@ -18,6 +20,7 @@
 // output, everything else is clipped to the rounded content area here.
 
 import { roundedRectPath } from './frame.js';
+import { positionAt } from '../track.js';
 
 export const name = 'annotations';
 
@@ -107,8 +110,10 @@ export function annotationGeometry(ctx, state, a) {
       }
     };
   }
-  const p1 = recordingPoint(state, a.x, a.y);
-  const p2 = recordingPoint(state, a.x + a.w, a.y + a.h);
+  // A hidden area that follows what's under it is where its path puts it now.
+  const at = a.type === 'blur' && a.path?.length ? positionAt(a.path, state.t) : a;
+  const p1 = recordingPoint(state, at.x, at.y);
+  const p2 = recordingPoint(state, at.x + a.w, at.y + a.h);
   return {
     box: { x: Math.min(p1.x, p2.x), y: Math.min(p1.y, p2.y), w: Math.abs(p2.x - p1.x), h: Math.abs(p2.y - p1.y) }
   };

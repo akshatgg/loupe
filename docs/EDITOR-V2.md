@@ -130,6 +130,10 @@ item is attached to.
                                  // text: x,y = centre, 0..1 of the content area; arrow/box/blur:
                                  // 0..1 of the recording's picture (they follow zooms); title:
                                  // full frame, `color` is its background
+                                 // a blur may also carry `follow: true` and `path: [{ t, x, y }]`
+                                 // (source seconds; its top-left corner, 0..1 of the recording's
+                                 // picture; in time order, at most 600 points): it is drawn where
+                                 // the path puts it at that moment ("A blur that follows", below)
   transitions: [{ after: clipId, type: "fade"|"crossfade"|"dip", duration: 0.5 }],
   audio: {
     mic:    { volume: 1, muted: false, cleanUp: true, level: true },
@@ -633,6 +637,33 @@ Design: `docs/superpowers/specs/2026-10-04-editor-redesign-design.md`.
   (Notes track in lanes, transition buttons on clip joins);
   `annotation-math.js`; `visuals.css`. Wallpapers: `src/assets/wallpapers`,
   made by `electron packaging/make-wallpapers.js`.
+- A blur that follows what's under it ("Follow what's under it" on a
+  selected blur, `panels/annotations.js`): `core/track.js` (pure) matches the
+  picture under the box from frame to frame -- block matching on brightness,
+  within 48 px a frame of pictures scaled to at most 960 px, the remembered
+  picture refreshed a little with each good match, a score under
+  `LOST_SCORE` meaning it is gone -- and thins the positions to keyframes
+  (`simplifyPath`). The frames come from the exporter's decoder in a hidden
+  window of its own (`renderer/exporter/track.html` + `tracker.js`, preload
+  `preload/tracker.js`), run by `main/ipc/track.js`: `track:start({ id })`
+  builds the job from project.json on disk (after flushing the pending save)
+  and resolves with `{ path, lostAt, start, rect }` or `{ cancelled: true }`;
+  `track:progress` is `{ frame, total }`; `track:cancel` closes the window.
+  Main checks the request and what the page sends back. Nothing is written
+  until the editor stores the path with one `updateAnnotation(id, { follow:
+  true, path })` -- one undo step -- so cancelling or a failure leaves the
+  project as it was. When the match is lost for half a second the path stops
+  there and the panel says at what moment; the box holds its last place.
+  `annotationGeometry` puts a blur at `positionAt(path, state.t)` (straight
+  lines between keyframes, held before the first and after the last), so the
+  preview, the selection frame and the export agree. Dragging or resizing a
+  followed box on the preview shifts every point of the path by as much
+  (`shiftPath`); "Stop following" removes `follow` and `path`. The path is
+  in recording time: after moving the blur along the timeline, follow again.
+  Checks: `test/core-track.test.mjs`, `test/ipc-track.test.js`,
+  `npm run test:e2e:tracking` (a generated recording of a block moving at a
+  known speed: the path, exported pixels, Cancel, undo, a block that
+  vanishes).
 - Checks: `npm run test:e2e:visuals` (export pixels for each feature, then
   the editor driven with the real mouse).
 
