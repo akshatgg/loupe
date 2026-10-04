@@ -302,8 +302,20 @@ function applyLook(ctx, state) {
   state.look = { filter: cssFilter(color), tint: tintOf(color), crop, lut: color.lut, lutMix: color.lutMix };
 }
 
+// What still shows over a gap (a deleted clip's place, left black): things
+// placed on the video's own time, not the recording's.
+const OVER_A_GAP = new Set([overlays, transitions]);
+
 function drawLayers(ctx, options) {
   const state = frameState(options);
+  if (state.project.clips[state.clipIndex]?.gap) {
+    ctx.save();
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, state.size.width, state.size.height);
+    ctx.restore();
+    for (const { layer } of LAYERS) if (OVER_A_GAP.has(layer)) layer.draw(ctx, state);
+    return state;
+  }
   let clipped = false;
   for (const { layer, clip } of LAYERS) {
     if (clip && !clipped) {

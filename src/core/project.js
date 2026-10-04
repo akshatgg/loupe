@@ -402,6 +402,11 @@ function validateClip(clip, sources) {
   if (clip.hold !== undefined) num(clip.hold, 'Freeze frame length', EPS, MAX_HOLD);
   if (clip.reverse !== undefined) bool(clip.reverse, `Clip ${clip.id} reverse`);
   if (clip.hold !== undefined && clip.reverse) fail('A freeze frame can\u2019t be reversed');
+  // A gap left where a clip was deleted: black for its `hold` seconds.
+  if (clip.gap !== undefined) {
+    bool(clip.gap, `Clip ${clip.id} gap`);
+    if (clip.gap && !(clip.hold > 0)) fail('A gap needs a length');
+  }
   if (clip.transform !== undefined) validateTransform(clip.transform);
   if (clip.keyframes !== undefined) validateKeyframes(clip.keyframes, CLIP_ANIMATABLE);
   if (clip.color !== undefined) validateColor(clip.color);
@@ -461,6 +466,10 @@ function validateZoom(z, sources) {
   num(z.x, 'Zoom x');
   num(z.y, 'Zoom y');
   bool(z.recorded, 'Zoom recorded');
+  // Switched off: kept on the timeline, without effect on the picture.
+  if (z.disabled !== undefined) bool(z.disabled, 'Zoom disabled');
+  // Made by Loupe from the clicks, not by hand.
+  if (z.auto !== undefined) bool(z.auto, 'Zoom auto');
   if (z.keyframes !== undefined) {
     if (!Array.isArray(z.keyframes)) fail('Zoom keyframes must be a list');
     for (const k of z.keyframes) { num(k?.t, 'Zoom keyframe time'); num(k?.zoom, 'Zoom keyframe level', 0.01, 100); }
@@ -934,10 +943,53 @@ export function moveClip(project, from, to) {
   return { ...project, clips };
 }
 
-export function deleteClip(project, clipId) {
+export const isGap = (clip) => Boolean(clip?.gap) && clip.hold > 0;
+
+// Removes a clip, the later ones closing up -- or with `leaveGap`, leaving
+// black for as long as it played, so nothing after it moves.
+export function deleteClip(project, clipId, { leaveGap = false } = {}) {
   const i = clipIndex(project, clipId);
+  if (leaveGap) {
+    const clip = project.clips[i];
+    if (isGap(clip)) return project;
+    const b = buildTimeline(project).clipBounds()[i];
+    const hold = b.outEnd - b.outStart;
+    if (hold < MIN_CLIP_SECONDS) fail('That clip is too short to leave a gap');
+    const clips = project.clips.slice();
+    clips[i] = { id: clip.id, source: clip.source, start: clip.start, end: clip.start, hold, gap: true };
+    // A gap is the only thing a video can't be made of.
+    if (clips.every(isGap)) fail('A video needs at least one clip');
+    return withClips(project, clips);
+  }
   if (project.clips.length === 1) fail('A video needs at least one clip');
   return withClips(project, project.clips.filter((_, k) => k !== i));
+}
+
+// Removes everything in `items` (the editor's selection: { kind, id }, or a
+// speed stretch { kind: 'speed', source, start, end }) as one edit.
+export function removeItems(project, items, { leaveGap = false } = {}) {
+  if (!Array.isArray(items) || !items.length) fail('Select something to delete first');
+  let p = project;
+  const clips = [];
+  for (const it of items) {
+    switch (it?.kind) {
+      case 'clip': clips.push(it.id); break;
+      case 'zoom': p = removeZoom(p, it.id); break;
+      case 'annotation': p = removeAnnotation(p, it.id); break;
+      case 'caption':
+        if (!p.captions.segments.some((c) => c.id === it.id)) fail(`No caption ${JSON.stringify(it.id)}`);
+        p = setCaptions(p, { segments: p.captions.segments.filter((c) => c.id !== it.id) });
+        break;
+      case 'audio': p = removeAudioClip(p, it.id); break;
+      case 'overlay': p = removeOverlay(p, it.id); break;
+      case 'marker': p = removeMarker(p, it.id); break;
+      case 'speed': p = paintSpeed(p, { source: it.source, start: it.start, end: it.end, rate: 1 }); break;
+      default: fail(`Can\u2019t delete ${JSON.stringify(it?.kind)}`);
+    }
+  }
+  if (!leaveGap && clips.length >= p.clips.length) fail('A video needs at least one clip. Drag its edges to trim it instead.');
+  for (const id of clips) p = deleteClip(p, id, { leaveGap });
+  return p;
 }
 
 // Adds another recording to the end of the video. `sourceKey` must be new.
@@ -986,7 +1038,7 @@ export function addZoom(project, { source = 'main', start, end, level = 2, follo
   return withZooms(project, zooms);
 }
 
-const ZOOM_PATCH_KEYS = ['start', 'end', 'level', 'follow', 'x', 'y'];
+const ZOOM_PATCH_KEYS = ['start', 'end', 'level', 'follow', 'x', 'y', 'disabled', 'auto'];
 
 export function updateZoom(project, zoomId, patch) {
   const i = project.zooms.findIndex((z) => z.id === zoomId);

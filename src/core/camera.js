@@ -188,7 +188,9 @@ function activeZoomIndex(sorted, n, sampleRate) {
 //  - aspect: the output's width / height, or null for the source's shape.
 // With the source's shape, no fixed zooms and a migrated project's zooms,
 // this is exactly src/main/camera.js's solveCamera.
-export function solveCamera({ zooms = [], cursorTrack = [], duration, width, height, aspect = null, sampleRate = SAMPLE_RATE }) {
+export function solveCamera({ zooms: allZooms = [], cursorTrack = [], duration, width, height, aspect = null, sampleRate = SAMPLE_RATE }) {
+  // A zoom that is switched off stays in the project and moves nothing.
+  const zooms = allZooms.some((z) => z.disabled) ? allZooms.filter((z) => !z.disabled) : allZooms;
   const bounds = { width, height, aspect };
   const zoom = easeZoom(zoomTargets(zooms, duration), duration, sampleRate);
   const cursor = resampleCursor(cursorTrack, duration, sampleRate);

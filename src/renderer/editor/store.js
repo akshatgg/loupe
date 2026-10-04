@@ -1,5 +1,5 @@
 // The editor's state: the project with its undo history, the timeline built
-// from it, and what's selected. Every edit goes through apply(), which runs a
+// from it, and what's selected (a list: selection.js). Every edit goes through apply(), which runs a
 // pure core edit (src/core/project.js), records it for undo and hands the new
 // project to `save`. A refused edit (the core throws plain-worded Errors)
 // changes nothing and is reported through `onError`.
@@ -9,11 +9,12 @@
 
 import * as H from '../../core/history.js';
 import { buildTimeline } from '../../core/timeline.js';
+import { aliveItems, hasItem, toggleItem } from './selection.js';
 
 export function createStore(project, { save = () => {}, onError = () => {} } = {}) {
   let history = H.createHistory(project);
   let tl = buildTimeline(project);
-  let selection = null;
+  let selected = [];
   const listeners = new Set();
 
   const emit = (what) => {
@@ -22,19 +23,7 @@ export function createStore(project, { save = () => {}, onError = () => {} } = {
 
   // A selection pointing at something undo (or an edit) removed is dropped.
   function checkSelection() {
-    if (!selection) return;
-    const p = history.present;
-    const alive = selection.kind === 'clip' ? p.clips.some((c) => c.id === selection.id)
-      : selection.kind === 'zoom' ? p.zooms.some((z) => z.id === selection.id)
-        : selection.kind === 'speed' ? p.speed.some((s) => s.source === selection.source &&
-          s.start === selection.start && s.end === selection.end)
-          : selection.kind === 'annotation' ? p.annotations.some((a) => a.id === selection.id)
-          : selection.kind === 'caption' ? p.captions.segments.some((c) => c.id === selection.id)
-          : selection.kind === 'audio' ? p.audio.clips.some((c) => c.id === selection.id)
-          : selection.kind === 'marker' ? p.markers.some((m) => m.id === selection.id)
-          : selection.kind === 'overlay' ? (p.overlays ?? []).some((o) => o.id === selection.id)
-            : false;
-    if (!alive) selection = null;
+    selected = aliveItems(history.present, selected);
   }
 
   function replace(next) {
@@ -51,7 +40,11 @@ export function createStore(project, { save = () => {}, onError = () => {} } = {
   return {
     get project() { return history.present; },
     get tl() { return tl; },
-    get selection() { return selection; },
+    // Everything selected (selection.js items); never null.
+    get selected() { return selected; },
+    // The selected item when there is exactly one, else null: what a panel
+    // that edits one thing asks for.
+    get selection() { return selected.length === 1 ? selected[0] : null; },
     get canUndo() { return H.canUndo(history); },
     get canRedo() { return H.canRedo(history); },
 
@@ -76,8 +69,19 @@ export function createStore(project, { save = () => {}, onError = () => {} } = {
     redo() {
       if (H.canRedo(history)) replace(H.redo(history));
     },
-    select(sel) {
-      selection = sel;
+    // select(item) selects just that; { add } keeps what was selected as
+    // well (⇧-click); { toggle } adds it or takes it out (⌘-click). null clears.
+    select(sel, { add = false, toggle = false } = {}) {
+      if (!sel) selected = [];
+      else if (toggle) selected = toggleItem(selected, sel);
+      else if (add) selected = hasItem(selected, sel) ? selected : [...selected, sel];
+      else selected = [sel];
+      checkSelection();
+      emit('selection');
+    },
+    selectMany(list) {
+      selected = [];
+      for (const it of list ?? []) if (!hasItem(selected, it)) selected.push(it);
       checkSelection();
       emit('selection');
     },
