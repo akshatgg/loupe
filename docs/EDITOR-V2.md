@@ -547,6 +547,29 @@ and the whole app recording with every addition on).
 - Check: `npm run test:e2e:captions` also runs `captions-editor.e2e.js`
   (say → recording → editor → export with burned captions + .srt).
 
+### The editor's layout (redesign, 2026-10)
+
+Design: `docs/superpowers/specs/2026-10-04-editor-redesign-design.md`.
+
+- `store.selected` is a list (`selection.js`: `sameItem`, `hasItem`,
+  `toggleItem`, `aliveItems`); `store.selection` is the item when exactly one
+  is selected. `core/project.js` `removeItems` deletes a mix as one edit.
+- `inspector.js` owns the right side: `VIDEO_TABS` (Look, Cursor, Camera,
+  Captions, Audio) with nothing selected, the selected thing's panel
+  otherwise (`panelFor`), `multi` for several. `#sidebar[data-panel]` and
+  `[data-mode=video|item]` say what shows. `editor.showPanel(id)` still shows
+  any panel by id until the selection next changes.
+- `toolbar.js` builds the tools (Split, Zoom, Text menu, Blur, Voice, Add
+  menu, Cut, Delete) and the Transcript / Snap / Close gaps switches
+  (remembered in localStorage). Close gaps off: `deleteClip(..., { leaveGap })`
+  leaves a freeze-frame clip marked `gap`, which `compose.js` draws black.
+- Timeline rows: Overlays, Clips, Zoom, Sound, Audio, Text, Captions; empty
+  Overlay, Audio and Text rows are hidden. Speed is a badge on the clip
+  (Alt-drag, or the Clip inspector's Speed buttons). A zoom's right-click
+  menu switches it off (`zooms[].disabled`, ignored by `solveCamera`).
+- `transcript-panel.js`: the transcript beside the preview (read-only).
+- Checks: `npm run test:e2e:redesign`.
+
 ### Visuals (wired)
 
 - Layers: `layers/annotations.js` (unclipped in `LAYERS` so title cards

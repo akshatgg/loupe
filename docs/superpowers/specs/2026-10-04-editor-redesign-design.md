@@ -126,8 +126,8 @@ the per-item inspector.
 
 ### 4.2 Transcript (left)
 
-Folded by default; a button at the left edge of the toolbar opens it. Its
-width is remembered. With no transcript yet it shows one button, "Write the
+Folded by default; the toolbar's Transcript switch opens it, and whether it
+is open is remembered. With no transcript yet it shows one button, "Write the
 transcript", which runs the existing on-device transcription. Its editing
 behaviour is §8.2; in sub-project 1 it shows the transcript read-only, and
 clicking a word moves the playhead there.
@@ -140,8 +140,7 @@ voiceover; type a line to be spoken — §8.4), **Add** (menu: another
 recording, a video file, audio, a picture or video overlay), **Delete**.
 Right: **Snap** and **Close gaps** toggles, then the timeline zoom buttons.
 
-- **Snap** (on by default): today's snapping, now switchable. Holding ⌘ /
-  Ctrl while dragging turns it the other way for that drag.
+- **Snap** (on by default): today's snapping, now switchable.
 - **Close gaps** (on by default): today's behaviour — deleting a clip pulls
   later clips left. Off: the deleted clip leaves a gap of black for its
   length: a freeze-frame clip marked `gap: true`, drawn black. Freeze
