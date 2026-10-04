@@ -28,6 +28,7 @@ import * as transitions from './layers/transitions.js';
 import * as overlays from './layers/overlays.js';
 import { clipTransform, clipColor, cssFilter, tintOf, isPlain, transformMatrix } from './look.js';
 import { valueAt } from './keyframes.js';
+import { earlierTimes, viewShift, MIN_SHIFT_PX } from './motion-blur.js';
 
 export const REFERENCE_HEIGHT = 1080;
 
@@ -328,8 +329,82 @@ function drawLayers(ctx, options) {
       ctx.restore();
       clipped = false;
     }
-    layer.draw(ctx, state);
+    if (layer === frame || layer === cursor) drawMoving(ctx, options, state, layer);
+    else layer.draw(ctx, state);
   }
   if (clipped) ctx.restore();
   return state;
+}
+
+// Spare canvases for motion blur: one earlier moment at a time is drawn
+// there, then laid over the picture part-transparent.
+const blurCanvases = new WeakMap();
+const spriteCanvases = new WeakMap();
+function spriteCanvas(ctx, { width, height }) {
+  if (typeof globalThis.OffscreenCanvas !== 'function') return null;
+  let c = spriteCanvases.get(ctx);
+  if (!c || c.canvas.width !== width || c.canvas.height !== height) {
+    const canvas = new globalThis.OffscreenCanvas(width, height);
+    c = { canvas, ctx: canvas.getContext('2d') };
+    spriteCanvases.set(ctx, c);
+  }
+  return c;
+}
+
+// The frame states of the moments just before this one that motion blur
+// averages in (motion-blur.js), nearest first: only moments of the same
+// clip, showing the same decoded frame. Worked out once per frame.
+function earlierStates(options, state) {
+  if (state.earlier) return state.earlier;
+  const amount = state.project.style.motionBlur ?? 0;
+  const out = [];
+  for (const t of earlierTimes(state.outT, amount)) {
+    const at = state.tl.toSource(t);
+    if (!at || at.clipIndex !== state.clipIndex) break;
+    const s = frameState({ ...options, outT: t });
+    s.look = state.look;
+    s.frame = state.frame;
+    out.push(s);
+  }
+  state.earlier = out;
+  return out;
+}
+
+// The recording or the cursor, smeared along its movement when it moved
+// enough over the last moments to show; otherwise drawn plainly.
+function drawMoving(ctx, options, state, layer) {
+  const earlier = earlierStates(options, state);
+  if (!earlier.length || !ctx.canvas) { layer.draw(ctx, state); return; }
+  const last = earlier.at(-1);
+  if (layer === frame) {
+    const spare = viewShift(state, last) >= MIN_SHIFT_PX ? spareCanvas(blurCanvases, ctx, state.size) : null;
+    layer.draw(ctx, state);
+    if (!spare) return;
+    // A running average: the k-th earlier moment at 1/(k+1) over the rest.
+    earlier.forEach((s, k) => {
+      layer.draw(spare.ctx, s);
+      ctx.save();
+      ctx.globalAlpha = 1 / (k + 2);
+      ctx.drawImage(spare.canvas, 0, 0);
+      ctx.restore();
+    });
+    return;
+  }
+  // The cursor (with its highlight and click ripples): each moment drawn on
+  // its own, see-through, and laid down at an equal share.
+  if (state.project.style.motionBlurCursor === false) { layer.draw(ctx, state); return; }
+  const a = cursor.cursorPoint(state);
+  const b = cursor.cursorPoint(last);
+  const moved = a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
+  const sprite = moved >= MIN_SHIFT_PX ? spriteCanvas(ctx, state.size) : null;
+  if (!sprite) { layer.draw(ctx, state); return; }
+  const all = [state, ...earlier];
+  for (const s of all) {
+    sprite.ctx.clearRect(0, 0, state.size.width, state.size.height);
+    layer.draw(sprite.ctx, s);
+    ctx.save();
+    ctx.globalAlpha = 1 / all.length;
+    ctx.drawImage(sprite.canvas, 0, 0);
+    ctx.restore();
+  }
 }

@@ -570,6 +570,35 @@ async function run() {
     await js('window.__editor.store.apply((p) => ({ ...p, captions: { ...p.captions, segments: [] } }))');
   });
 
+  await check('motion blur: the Look tab\u2019s slider smears the view while it glides into a zoom, and leaves a still view alone', async () => {
+    await key('Escape');
+    await js('window.__editor.store.apply((p) => window.__editor.editor.core.addZoom({ ...p, zooms: [] }, { start: 2.2, end: 4.5, level: 3, follow: false, x: 20, y: 15 }))');
+    await key('Escape');
+    await clickOn('#tabs .tab[data-panel=style]');
+    const setBlur = (v) => js(`(() => { const s = document.getElementById('motionBlur'); s.scrollIntoView(); s.value = '${v}';
+      s.dispatchEvent(new Event('input', { bubbles: true })); s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await setBlur(0);
+    assert.strictEqual((await project()).style.motionBlur, 0);
+    const sharp = await exportFile();
+    await setBlur(1);
+    assert.strictEqual((await project()).style.motionBlur, 1);
+    await shot('16-motion-blur');
+    const blurred = await exportFile();
+    // Gliding in (just after the zoom starts) the frames differ; settled in the zoom, and before it, they don't.
+    // Compared at full detail: a smear is small next to the whole picture.
+    const frame = (file, at) => execFileSync('ffmpeg', ['-v', 'error', '-ss', String(at), '-i', file, '-frames:v', '1',
+      '-vf', 'scale=160:90,format=gray', '-f', 'rawvideo', '-'], { maxBuffer: 1 << 22 });
+    const moving = meanDiff(frame(blurred, 2.3), frame(sharp, 2.3));
+    const settled = meanDiff(frame(blurred, 4), frame(sharp, 4));
+    const before = meanDiff(frame(blurred, 1), frame(sharp, 1));
+    console.log(`    blur against none: gliding ${moving.toFixed(2)}, settled ${settled.toFixed(2)}, before the zoom ${before.toFixed(2)}`);
+    assert.ok(moving > 2, `the glide is smeared: ${moving}`);
+    assert.ok(settled < 1 && before < 1, `a still view is untouched: ${settled}, ${before}`);
+    assert.ok(moving > 4 * Math.max(settled, before, 0.1), 'and clearly more than encoder noise');
+    await setBlur(0);
+    await js('window.__editor.store.apply((p) => ({ ...p, zooms: [] }))');
+  });
+
   await check('Snap off: a zoom dragged near the playhead no longer jumps to it', async () => {
     await seek(2);
     const y = zoomY;

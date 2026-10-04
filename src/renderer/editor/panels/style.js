@@ -3,7 +3,7 @@
 // badges are next door (cursor.js). Every control is one undo step; a slider
 // dragged back and forth is one step too.
 
-import { h, slider, segmented, section } from '../ui.js';
+import { h, slider, toggle, segmented, section } from '../ui.js';
 import { setStyle } from '../../../core/project.js';
 import { presetsSection, picturesRow } from './style-extras.js';
 
@@ -91,6 +91,19 @@ export default {
       label: 'Shadow', min: 0, max: 1, step: 0.01, value: style().shadow,
       format: (v) => `${Math.round(v * 100)}%`, onInput: (v) => edit({ shadow: v }, 'style:shadow'), onChange: done
     });
+    // ---- motion blur: the view gliding into a zoom, and the cursor
+    const blur = slider({
+      label: 'Motion blur', min: 0, max: 1, step: 0.01, value: style().motionBlur,
+      format: (v) => (v === 0 ? 'Off' : `${Math.round(v * 100)}%`),
+      onInput: (v) => edit({ motionBlur: v }, 'style:motion-blur'), onChange: done
+    });
+    blur.querySelector('input').id = 'motionBlur';
+    blur.title = 'Smooths zooms and the cursor as they move, the way a camera would. Things that stay still stay sharp.';
+    const blurCursor = toggle({
+      label: 'Blur the cursor too', checked: style().motionBlurCursor,
+      onChange: (v) => { edit({ motionBlurCursor: v }); done(); }
+    });
+    blurCursor.input.id = 'motionBlurCursor';
     const aspect = segmented({
       label: null,
       options: ASPECT_LABELS.map((a) => ({ value: a.value, label: a.label, icon: aspectIcon(a.w, a.h), title: a.value === 'source' ? 'The shape of your recording' : `${a.label} video` })),
@@ -103,6 +116,7 @@ export default {
       presets.el,
       section('Background', h('div', { class: 'swatches' }, none, ...grads, ...cols, custom), pictures.el),
       section('Frame', padding, radius, shadow),
+      section('Movement', blur, blurCursor),
       section('Shape', aspect)
     );
 
@@ -115,6 +129,9 @@ export default {
       padding.set(s.padding);
       radius.set(s.radius);
       shadow.set(s.shadow);
+      blur.set(s.motionBlur);
+      blurCursor.set(s.motionBlurCursor);
+      blurCursor.classList.toggle('disabled', s.motionBlur === 0);
       aspect.set(s.aspect);
       pictures.update();
     }

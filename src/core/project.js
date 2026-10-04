@@ -21,6 +21,7 @@ export const VERSION = 2;
 export const SPEED_MIN = 0.25;
 export const SPEED_MAX = 8;
 export const SPEED_RAMP_MAX = 2;
+export const NEW_MOTION_BLUR = 0.3;
 export const ZOOM_LEVEL_MIN = 1;
 export const ZOOM_LEVEL_MAX = 8;
 // Shorter than this and a clip, zoom or speed stretch can't be grabbed in
@@ -111,6 +112,11 @@ export function defaultStyle() {
     padding: 0.06,
     radius: 12,
     shadow: 0.5,
+    // How much movement Loupe makes (the view, the cursor) is smeared
+    // (motion-blur.js). 0 here, so a project from before it looks as it did;
+    // a new recording starts with NEW_MOTION_BLUR.
+    motionBlur: 0,
+    motionBlurCursor: true,
     aspect: 'source',
     cursor: { show: true, size: 1, hideWhenIdle: false, smooth: true, highlight: 'none', clicks: true },
     keystrokes: { show: false, position: 'bottom' },
@@ -179,7 +185,8 @@ export function createProject({ main, title, createdAt = null, style } = {}) {
     clips: clipsAround(source, 'main', []),
     speed: [],
     zooms: [],
-    style: style ? mergeStyle(defaultStyle(), style) : defaultStyle(),
+    // A new video gets a little motion blur unless its style says otherwise.
+    style: { ...mergeStyle(defaultStyle(), style ?? {}), ...(isNum(style?.motionBlur) ? {} : { motionBlur: NEW_MOTION_BLUR }) },
     annotations: [],
     markers: [],
     overlays: [],
@@ -538,6 +545,8 @@ function validateStyle(style) {
   num(style.padding, 'Padding', 0, 0.4);
   num(style.radius, 'Corner radius', 0, 200);
   num(style.shadow, 'Shadow', 0, 1);
+  num(style.motionBlur, 'Motion blur', 0, 1);
+  bool(style.motionBlurCursor, 'Motion blur on the cursor');
   oneOf(style.aspect, ASPECTS, 'Aspect ratio');
   const c = style.cursor;
   if (!isObj(c)) fail('Cursor style must be an object');

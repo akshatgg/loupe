@@ -171,7 +171,8 @@ test('the recorder starts the project from the default preset style it is given,
       assert.deepStrictEqual(saved.style.background, style.background);
       assert.strictEqual(saved.style.radius, defaultStyle().radius);
     } else {
-      assert.deepStrictEqual(saved.style, defaultStyle());
+      // The defaults, with the little motion blur a new video starts with.
+      assert.deepStrictEqual(saved.style, { ...defaultStyle(), motionBlur: require('../src/core/project.js').NEW_MOTION_BLUR });
     }
   }
 });
