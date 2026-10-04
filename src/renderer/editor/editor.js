@@ -17,6 +17,7 @@ import { VIDEO_TABS, panelById } from './panels/index.js';
 import { createInspector } from './inspector.js';
 import { createToolbar } from './toolbar.js';
 import { createTranscriptPanel } from './transcript-panel.js';
+import { createAutoZoomNote } from './auto-zoom-note.js';
 import { installMusicDrop, addAudioFiles, splitSelectedAudio } from './panels/audio.js';
 import { h, icon } from './ui.js';
 import { clipLayout, newZoomRange, formatTime } from './timeline-math.js';
@@ -242,6 +243,7 @@ async function start() {
   const markerDialog = createMarkerDialog({ store, core: P, editor });
   editor.editMarker = (id) => markerDialog.show(id);
   const firstRun = createFirstRunHint({ parent: $('stage') });
+  const zoomNote = createAutoZoomNote({ parent: $('stage'), store, toast });
   const overlay = createAnnotationOverlay({ canvas: $('preview'), stage: $('stage'), store, player, editor });
   // A click on the empty space around the preview lets go of what's selected,
   // as a click on an empty part of the picture does.
@@ -342,6 +344,17 @@ async function start() {
       else toast(store.project.markers.length ? 'No more markers after the playhead' : 'No markers yet: press M to add one');
     },
     addZoom: () => editor.addZoomAtPlayhead(),
+    // Zooms where the person clicked (core/auto-zoom.js), replacing the
+    // automatic ones there were; zooms made by hand stay.
+    canAutoZoom: () => P.hasClicks(store.project),
+    autoZoomCount: () => P.autoZoomCount(store.project),
+    autoZoom: (strength) => {
+      const next = store.apply((p) => P.applyAutoZooms(p, { strength }));
+      if (!next) return;
+      const n = P.autoZoomCount(next);
+      toast(n ? `${n} ${n === 1 ? 'zoom' : 'zooms'} where you clicked` : 'No clicks to zoom on with that setting');
+    },
+    removeAutoZooms: () => { if (store.apply((p) => P.removeAutoZooms(p))) toast('Automatic zooms removed'); },
     addText: () => editor.addAnnotation('text'),
     addBlur: () => editor.addAnnotation('blur'),
     addAnnotation: (type) => editor.addAnnotation(type),
@@ -495,7 +508,7 @@ async function start() {
 
   // For the end-to-end tests (test/e2e/editor.js), which drive this page.
   window.__editor = {
-    store, player, timeline, exportDialog, cheat, editor, actions, saver, overlay, addRecording, cutDialog, thumbnails, firstRun, inspector, toolbar, transcript,
+    store, player, timeline, exportDialog, cheat, editor, actions, saver, overlay, addRecording, cutDialog, thumbnails, firstRun, inspector, toolbar, transcript, zoomNote,
     meter: meterState
   };
   document.body.dataset.ready = 'true';

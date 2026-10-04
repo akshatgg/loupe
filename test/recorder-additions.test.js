@@ -272,3 +272,26 @@ test('the microphone chosen in Settings is passed to capture by name, only with 
   assert.ok(!off.argsFor.capture.includes('--mic-name'));
   off.cleanup();
 });
+
+test('toProjectV2 with autoZoom zooms on the clicks and leaves the note; without it, neither', () => {
+  const { toProjectV2: v2 } = require('../src/main/recording-v2');
+  const recording = {
+    zoomKeyframes: [],
+    sources: { main: {
+      dir: '.', kind: 'display', id: '1', title: 'Display', width: 1920, height: 1080, originX: 0, originY: 0,
+      video: 'raw.mov', duration: 20, fps: 60, mic: false, systemAudio: null, webcam: null, cursor: 'cursor.bin', keys: null,
+      clicks: [{ t: 5, x: 10, y: 10, button: 'left' }, { t: 12, x: 500, y: 300, button: 'left' }], pauses: []
+    } }
+  };
+  const plain = v2(recording, { createdAt: 1 });
+  assert.strictEqual(plain.zooms.length, 0);
+  assert.strictEqual('autoZoomNote' in plain, false);
+  const zoomed = v2(recording, { createdAt: 1, autoZoom: true });
+  assert.strictEqual(zoomed.zooms.length, 2);
+  assert.ok(zoomed.zooms.every((z) => z.auto === true));
+  assert.strictEqual(zoomed.autoZoomNote, true);
+  // No clicks: no zooms and no note to answer.
+  const quiet = v2({ ...recording, sources: { main: { ...recording.sources.main, clicks: [] } } }, { createdAt: 1, autoZoom: true });
+  assert.strictEqual(quiet.zooms.length, 0);
+  assert.strictEqual('autoZoomNote' in quiet, false);
+});

@@ -314,7 +314,7 @@ importButton.onclick = async () => {
 // Saved as soon as they change (main.js, recording-settings.js) and read by
 // main when recording starts, so nothing here has to be passed along.
 
-const recordingSwitches = ['systemAudio', 'recordKeys', 'countdown'];
+const recordingSwitches = ['systemAudio', 'recordKeys', 'autoZoom', 'countdown'];
 const cameraSwitch = document.getElementById('camera');
 const cameraSelect = document.getElementById('cameraDevice');
 const cameraNote = document.getElementById('cameraNote');

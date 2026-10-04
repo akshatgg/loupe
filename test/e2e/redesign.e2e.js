@@ -325,8 +325,62 @@ async function run() {
     assert.strictEqual(await js('document.getElementById("transcriptBtn").getAttribute("aria-pressed")'), 'false');
   });
 
+  await check('Zoom on my clicks: the Zoom menu makes automatic zooms from the clicks, shown as Auto, in the export; the note answers them', async () => {
+    await js('window.__editor.store.apply((p) => ({ ...p, annotations: [], zooms: [], captions: { ...p.captions, segments: [] } }))');
+    // An imported video has no clicks: the menu offers only "Add a zoom here".
+    await clickOn('#zoomBtn');
+    assert.strictEqual(await js('!!document.getElementById("zoomHere").offsetParent'), true);
+    assert.strictEqual(await js('!!document.getElementById("autoZoomModerate").offsetParent'), false, 'nothing to zoom on yet');
+    await key('Escape');
+    // The clicks a recording would carry: two close together, one alone, in a corner.
+    await js(`window.__editor.store.apply((p) => { const k = Object.keys(p.sources)[0]; return { ...p, sources: { ...p.sources,
+      [k]: { ...p.sources[k], clicks: [{ t: 1, x: 12, y: 10, button: 'left' }, { t: 1.6, x: 14, y: 12, button: 'left' }, { t: 4.4, x: 150, y: 80, button: 'left' }] } } }; })`);
+    await clickOn('#zoomBtn');
+    await shot('10-zoom-menu');
+    await clickOn('#autoZoomModerate');
+    let zooms = (await project()).zooms;
+    assert.strictEqual(zooms.length, 2);
+    assert.ok(zooms.every((z) => z.auto && z.follow && z.level === 2), JSON.stringify(zooms));
+    near(zooms[0].start, 0.6, 1e-6, 'starts a little before the first click');
+    near(zooms[0].end, 2.8, 1e-6, 'holds a little after the last of the pair');
+    // (A zoom that runs over a join between clips is drawn in two pieces.)
+    const marks = await js('[...document.querySelectorAll(".zoom")].map((e) => [e.dataset.id, e.querySelector(".zoom-auto")?.textContent])');
+    assert.strictEqual(new Set(marks.map((m) => m[0])).size, 2);
+    assert.ok(marks.every((m) => m[1] === 'Auto'), JSON.stringify(marks));
+    assert.match(await js('document.getElementById("toast").textContent'), /2 zooms where you clicked/);
+    const zoomed = await exportFile();
+    assert.ok(meanDiff(tinyFrame(zoomed, 2), tinyFrame(reference, 2)) > 5, 'zoomed in at the clicks in the export');
+    assert.ok(meanDiff(tinyFrame(zoomed, 3.6), tinyFrame(reference, 3.6)) < 3, 'and not between them');
+    // A new recording carries the note; Fewer keeps only the pair's zoom, gentler.
+    await js('window.__editor.store.apply((p) => window.__editor.editor.core.setAutoZoomNote(p, true))');
+    assert.strictEqual(await js('document.getElementById("zoomNoteText").textContent'), 'Loupe added 2 zooms where you clicked.');
+    await shot('11-zoom-note');
+    await clickOn('#zoomNoteFewer');
+    zooms = (await project()).zooms;
+    assert.strictEqual(zooms.length, 1);
+    assert.strictEqual(zooms[0].level, 1.5);
+    assert.strictEqual(await js('document.querySelector(".zoom-note")'), null, 'answered: the note goes');
+    // Undo brings back the two zooms and the question; Remove all takes them.
+    await key('z', [MOD]);
+    assert.strictEqual((await project()).zooms.length, 2);
+    assert.strictEqual(await js('!!document.querySelector(".zoom-note")'), true);
+    await clickOn('#zoomNoteRemove');
+    assert.strictEqual((await project()).zooms.length, 0);
+    assert.strictEqual(await js('document.querySelector(".zoom-note")'), null);
+    // A zoom made mine survives the zooms being remade.
+    await clickOn('#zoomBtn');
+    await clickOn('#autoZoomModerate');
+    const mine = (await project()).zooms[0];
+    await clickOn(`.zoom[data-id="${mine.id}"]`, { button: 'right' });
+    await clickOn('#zoomManual');
+    await clickOn('#zoomBtn');
+    await clickOn('#autoZoomRemove');
+    assert.deepStrictEqual((await project()).zooms.map((z) => z.id), [mine.id], 'the one made mine stays');
+    await js('window.__editor.store.apply((p) => ({ ...p, zooms: [] }))');
+    await key('Escape');
+  });
+
   await check('Snap off: a zoom dragged near the playhead no longer jumps to it', async () => {
-    await js('window.__editor.store.apply((p) => ({ ...p, annotations: [], captions: { ...p.captions, segments: [] } }))');
     await seek(2);
     const y = zoomY;
     const startX = (await tx(2)) + 5;

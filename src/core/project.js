@@ -11,6 +11,7 @@
 import { buildTimeline } from './timeline.js';
 import { COLOR_FILTERS } from './look.js';
 import { setKeyframe, removeKeyframe } from './keyframes.js';
+import { autoZoomRanges } from './auto-zoom.js';
 import { clipLength, clipEnd, freeLane, audioName, laneOf, splitPoints, MAX_LANES, MIN_AUDIO_SECONDS } from './audio/clips.js';
 
 export const VERSION = 2;
@@ -719,6 +720,7 @@ export function validateProject(p) {
     captions: p.captions ? mergeCaptions(p.captions) : defaultCaptions(),
     export: p.export ? { ...defaultExport(), ...p.export } : defaultExport()
   };
+  if (out.autoZoomNote !== undefined && out.autoZoomNote !== true) delete out.autoZoomNote;
   if (!Array.isArray(p.clips) || p.clips.length === 0) fail('The project has no clips');
   p.clips.forEach((c) => validateClip(c, sources));
   if (new Set(p.clips.map((c) => c.id)).size !== p.clips.length) fail('Two clips have the same id');
@@ -1065,6 +1067,52 @@ export function updateZoom(project, zoomId, patch) {
 export function removeZoom(project, zoomId) {
   if (!project.zooms.some((z) => z.id === zoomId)) fail(`No zoom ${JSON.stringify(zoomId)}`);
   return { ...project, zooms: project.zooms.filter((z) => z.id !== zoomId) };
+}
+
+// ---- zooms made from clicks (auto-zoom.js)
+
+// Whether any recording in the project has clicks to zoom on.
+export function hasClicks(project) {
+  return Object.values(project.sources).some((s) => s.clicks?.length > 0);
+}
+
+// Replaces the automatic zooms with ones made from the clicks, at `strength`
+// (subtle, moderate, intense). Zooms made by hand are left alone and keep
+// their place: no automatic zoom is put over one.
+export function applyAutoZooms(project, { strength = 'moderate' } = {}) {
+  const kept = project.zooms.filter((z) => !z.auto);
+  const made = [];
+  for (const [key, meta] of Object.entries(project.sources)) {
+    const taken = kept.filter((z) => z.source === key);
+    for (const r of autoZoomRanges(meta.clicks, meta.duration, { strength, taken })) {
+      made.push(validateZoom({
+        id: nextId('z', [...kept, ...made]), source: key, start: r.start, end: r.end, level: r.level,
+        follow: true, x: meta.width / 2, y: meta.height / 2, recorded: false, auto: true
+      }, project.sources));
+    }
+  }
+  const zooms = [...kept, ...made].sort((a, b) => (a.source === b.source ? a.start - b.start : 0));
+  const next = withZooms(project, zooms);
+  delete next.autoZoomNote;
+  return next;
+}
+
+// How many zooms are automatic.
+export const autoZoomCount = (project) => project.zooms.filter((z) => z.auto).length;
+
+export function removeAutoZooms(project) {
+  const next = { ...project, zooms: project.zooms.filter((z) => !z.auto) };
+  delete next.autoZoomNote;
+  return next;
+}
+
+// The one-time note a new recording carries ("Loupe added 6 zooms where you
+// clicked"): set when the recorder made them, gone once it is answered.
+export function setAutoZoomNote(project, on) {
+  const next = { ...project };
+  if (on) next.autoZoomNote = true;
+  else delete next.autoZoomNote;
+  return next;
 }
 
 // ---------------------------------------------------------------- speed

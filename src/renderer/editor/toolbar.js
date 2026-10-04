@@ -30,13 +30,14 @@ export function writeSwitch(storage, key, on) {
 
 export { KEYS as SWITCH_KEYS };
 
-// A button that opens a small menu above it. items: [{ id, icon, label, hint?, run }]
+// A button that opens a small menu above it. items: [{ id, icon, label,
+// hint?, run, when? }]; { label: null, when? } is a rule between groups.
 function menuButton({ id, iconName, label, title, items, menus }) {
   const menu = h('div', { class: 'tool-menu', role: 'menu', hidden: true, 'aria-label': label },
-    items.map((it) => h('button', {
+    items.map((it) => (it.label === null ? h('span', { class: 'menu-rule', role: 'separator' }) : h('button', {
       type: 'button', role: 'menuitem', id: it.id, class: 'tool-menu-item', title: it.hint,
       onclick: () => { close(); it.run(); }
-    }, icon(it.icon, { size: 17 }), h('span', {}, it.label))));
+    }, icon(it.icon, { size: 17 }), h('span', {}, it.label)))));
   const button = h('button', {
     type: 'button', class: 'tool', id, title, 'aria-haspopup': 'menu', 'aria-expanded': 'false',
     onclick: () => (menu.hidden ? open() : close())
@@ -44,6 +45,8 @@ function menuButton({ id, iconName, label, title, items, menus }) {
   const wrap = h('div', { class: 'tool-wrap' }, button, menu);
   function open() {
     for (const m of menus) m.close();
+    // An item with `when` shows only while that holds (asked each time).
+    items.forEach((it, i) => { if (it.when) menu.children[i].hidden = !it.when(); });
     menu.hidden = false;
     button.setAttribute('aria-expanded', 'true');
     menu.querySelector('button')?.focus();
@@ -107,6 +110,19 @@ export function createToolbar({ tools, options, actions, storage = globalThis.lo
       { id: 'addBox', icon: 'box', label: 'Box', hint: 'Frame something', run: () => actions.addAnnotation('box') }
     ]
   });
+  // Zooms made from the clicks, for a recording that has any.
+  const clicks = () => actions.canAutoZoom();
+  const zoom = menuButton({
+    id: 'zoomBtn', iconName: 'zoomAdd', label: 'Zoom', title: 'Add a zoom at the playhead, or zoom in wherever you clicked', menus,
+    items: [
+      { id: 'zoomHere', icon: 'zoomAdd', label: 'Add a zoom here', hint: 'At the playhead (Z)', run: () => actions.addZoom() },
+      { label: null, when: clicks },
+      { id: 'autoZoomSubtle', icon: 'cursor', label: 'Zoom on my clicks: a few', hint: 'Gentle zooms, only where you clicked more than once', when: clicks, run: () => actions.autoZoom('subtle') },
+      { id: 'autoZoomModerate', icon: 'cursor', label: 'Zoom on my clicks', hint: 'A zoom wherever you clicked', when: clicks, run: () => actions.autoZoom('moderate') },
+      { id: 'autoZoomIntense', icon: 'cursor', label: 'Zoom on my clicks: closer', hint: 'A zoom wherever you clicked, closer in', when: clicks, run: () => actions.autoZoom('intense') },
+      { id: 'autoZoomRemove', icon: 'trash', label: 'Remove the automatic zooms', hint: 'Zooms you made yourself stay', when: () => actions.autoZoomCount() > 0, run: () => actions.removeAutoZooms() }
+    ]
+  });
   const add = menuButton({
     id: 'addBtn', iconName: 'plus', label: 'Add', title: 'Add another recording, sound, or a picture or video over the video', menus,
     items: [
@@ -117,7 +133,7 @@ export function createToolbar({ tools, options, actions, storage = globalThis.lo
   });
   tools.replaceChildren(
     tool('splitBtn', 'split', 'Split', 'Split at the playhead (S)', () => actions.split()),
-    tool('zoomBtn', 'zoomAdd', 'Zoom', 'Add a zoom at the playhead (Z)', () => actions.addZoom()),
+    zoom.el,
     text.el,
     tool('blurBtn', 'blur', 'Blur', 'Hide something at the playhead (B)', () => actions.addBlur()),
     tool('voiceBtn', 'mic', 'Voice', 'Record a voiceover at the playhead', () => actions.recordVoiceover()),

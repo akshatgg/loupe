@@ -489,7 +489,7 @@ async function stopRecording() {
   const failedCapture = captureFailed;
   captureFailed = false;
   try {
-    const result = await recorder.stop({ webcam, style: newProjectStyle() });
+    const result = await recorder.stop({ webcam, style: newProjectStyle(), autoZoom: appShell.settings.get().autoZoom !== false });
     if (result?.failed) {
       // Capture never had a frame: no empty recording is left behind.
       discardFailedRecording(result.dir);
