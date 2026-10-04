@@ -139,6 +139,10 @@ item is attached to.
                                  // songs and sound files on the audio rows; `points` is the
                                  // volume over time, `source` (with file null) the video's
                                  // own sound detached from clips marked `detached: true`
+                                 // mic, system and each clip may also carry (all optional,
+                                 // absent in older projects): pan (-1..1), eq { low, mid, high }
+                                 // (dB, -12..12), compressor { on, threshold, ratio, attack,
+                                 // release, makeup } -- see "Finer audio tools"
     lanes:  [{ muted, solo, locked }],                   // per audio row
                                  // rows (core/audio/clips.js); files copied into music/.
                                  // A project's old `music: {...}` opens as clip a1 (repeating)
@@ -369,6 +373,21 @@ takes the same result.
   parts with a speed change). A level meter (-60..0 dBFS per side) sits by
   the time while playing (`audio-preview.js levels()`).
   Checks: `test/e2e/audio-clips.e2e.js` (12 cases, export and preview measured).
+- Finer audio tools (`core/audio/tone.js`): the selected audio clip, the
+  Microphone and Computer sound each end with a folded "Advanced" part
+  (`advancedTone` in `panels/audio.js`; open or folded is remembered in
+  localStorage, `loupe.audio.advanced.<clip|mic|system>`): "Left or right"
+  (pan, equal power), Low / Middle / High tones (shelves at 200 Hz and 4 kHz,
+  a wide bell at 1 kHz, ±12 dB), "Even out loud and quiet parts" (a
+  compressor: level, amount, and how much to turn it all up afterwards) and
+  Reset. With everything at its default the samples are passed through
+  untouched, so an older project sounds bit for bit as it did. The mix was
+  already two-channel; pan only turns a one-channel sound into two. A clip's
+  tools run before its fades (`music.js audioClipTrack`); the microphone's
+  and computer sound's run in the mix on each stretch laid along the timeline
+  (`mix.js` `track.tone`), after clean-up and levelling. The preview uses the
+  same renderer, so it sounds the same.
+  Checks: `test/core-audio-tone.test.mjs`, `test/e2e/audio-tools.e2e.js`.
 - `timeline-audio.js`: the "Sound" strip under the clips (recording waveform
   per clip in output time, voiceover takes as draggable blue blocks, a purple
   line when there is music).
