@@ -13,6 +13,8 @@ import * as P from '../../../core/project.js';
 import { clipTransform, clipColor, COLOR_FILTERS } from '../../../core/look.js';
 import { formatTime, parseTime } from '../timeline-math.js';
 import { valueAt, keyframeAt, neighbours } from '../../../core/keyframes.js';
+import { advanced } from '../disclosure.js';
+import { overlayEffects } from '../../../core/overlay-effects.js';
 
 const FILTER_LABELS = {
   none: 'None', bw: 'B&W', sepia: 'Sepia', vivid: 'Vivid', warm: 'Warm', cool: 'Cool', faded: 'Faded', dramatic: 'Dramatic'
@@ -252,7 +254,40 @@ export default {
       type: 'button', class: 'btn small danger-quiet', id: 'deleteOverlay',
       onclick: () => { const it = item(); if (it) { store.apply((p) => P.removeOverlay(p, it.id)); editor.select(null); } }
     }, icon('trash', { size: 14 }), 'Delete overlay');
-    const overlaySection = section(null, oTitle, oInfo, oX, oY, oScale, oRotate, oOpacity, keyNav, oFadeIn, oFadeOut, oTimes, oDelete);
+    // Advanced: how it mixes with the video, a shape it is cut to, a green screen.
+    const fxNow = () => overlayEffects(item()?.overlay);
+    const chooser = (id, label, title, options, onPick) => {
+      const select = h('select', { id, class: 'select', 'aria-label': label, title },
+        options.map(([value, text]) => h('option', { value }, text)));
+      select.addEventListener('change', () => onPick(select.value));
+      return h('label', { class: 'field chooser' }, h('span', { class: 'label' }, label), select);
+    };
+    const oSlider = (id, label, title, patchOf) => {
+      const row = slider({ label, min: 0, max: 1, step: 0.01, value: 0, format: percent, onInput: (v) => overlayEdit(patchOf(v), id), onChange: () => store.endGesture() });
+      row.querySelector('input').id = id;
+      row.title = title;
+      return row;
+    };
+    const oBlend = chooser('overlayBlend', 'Mix with the video', 'Blend mode',
+      [['normal', 'Normal'], ['multiply', 'Darken (multiply)'], ['screen', 'Lighten (screen)'], ['overlay', 'Overlay'], ['soft-light', 'Soft light'], ['add', 'Glow (add)']],
+      (v) => overlayEdit({ blend: v }));
+    const oMask = chooser('overlayMask', 'Cut to a shape', 'Mask',
+      [['none', 'None'], ['rectangle', 'Rectangle'], ['ellipse', 'Oval']],
+      (v) => overlayEdit({ mask: { ...fxNow().mask, shape: v } }));
+    const oMaskFeather = oSlider('overlayMaskFeather', 'Soften the shape’s edge', 'Feather', (v) => ({ mask: { ...fxNow().mask, feather: v } }));
+    const oKeyOn = toggle({
+      label: 'Green screen', hint: 'Makes one colour see-through, so the video shows where it was.',
+      onChange: (on) => overlayEdit({ key: { ...fxNow().key, on } })
+    });
+    oKeyOn.input.id = 'overlayKeyOn';
+    const oKeyColor = h('input', { type: 'color', id: 'overlayKeyColor', value: '#00ff00', 'aria-label': 'Colour to remove' });
+    oKeyColor.addEventListener('input', () => overlayEdit({ key: { ...fxNow().key, color: oKeyColor.value } }, 'overlayKeyColor'));
+    oKeyColor.addEventListener('change', () => store.endGesture());
+    const oKeyColorRow = h('label', { class: 'field chooser', title: 'Key colour' }, h('span', { class: 'label' }, 'Colour to remove'), oKeyColor);
+    const oKeyTolerance = oSlider('overlayKeyTolerance', 'How much to remove', 'Tolerance: how far from that colour still goes', (v) => ({ key: { ...fxNow().key, tolerance: v } }));
+    const oKeySoftness = oSlider('overlayKeySoftness', 'Soften the cut-out’s edge', 'Softness', (v) => ({ key: { ...fxNow().key, softness: v } }));
+    const overlayAdvanced = advanced('overlay', { id: 'overlayAdvanced' }, oBlend, oMask, oMaskFeather, oKeyOn, oKeyColorRow, oKeyTolerance, oKeySoftness);
+    const overlaySection = section(null, oTitle, oInfo, oX, oY, oScale, oRotate, oOpacity, keyNav, oFadeIn, oFadeOut, oTimes, overlayAdvanced, oDelete);
 
     // ---- speed: the whole clip at once (⌥-drag on the timeline for a part)
     const SPEEDS = [0.25, 0.5, 1, 1.5, 2, 3, 4, 8];
@@ -299,6 +334,16 @@ export default {
         oFadeOut.set(o.fadeOut);
         if (document.activeElement !== oStart.input) oStart.input.value = formatTime(o.start, { fraction: true });
         if (document.activeElement !== oLength.input) oLength.input.value = formatTime(o.length, { fraction: true });
+        const fx = overlayEffects(o);
+        oBlend.querySelector('select').value = fx.blend;
+        oMask.querySelector('select').value = fx.mask.shape;
+        oMaskFeather.hidden = fx.mask.shape === 'none';
+        oMaskFeather.set(fx.mask.feather);
+        oKeyOn.set(fx.key.on);
+        if (document.activeElement !== oKeyColor) oKeyColor.value = fx.key.color;
+        for (const row of [oKeyColorRow, oKeyTolerance, oKeySoftness]) row.hidden = !fx.key.on;
+        oKeyTolerance.set(fx.key.tolerance);
+        oKeySoftness.set(fx.key.softness);
       }
       if (!s) return;
       const t = clipTransform(s.clip);

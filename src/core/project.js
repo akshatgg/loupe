@@ -10,6 +10,7 @@
 
 import { buildTimeline } from './timeline.js';
 import { COLOR_FILTERS } from './look.js';
+import { OVERLAY_BLENDS, MASK_SHAPES, defaultMask, defaultKey } from './overlay-effects.js';
 import { setKeyframe, removeKeyframe } from './keyframes.js';
 import { clipLength, clipEnd, freeLane, audioName, laneOf, splitPoints, MAX_LANES, MIN_AUDIO_SECONDS } from './audio/clips.js';
 
@@ -1195,8 +1196,30 @@ export function defaultOverlay() {
     name: '', start: 0, from: 0, length: DEFAULT_PICTURE_SECONDS, fileDuration: null, lane: 0,
     x: 0.3, y: 0.3, scale: 0.35, rotate: 0, opacity: 1, fadeIn: 0, fadeOut: 0, keyframes: {},
     // A video file's own quarter turn (a phone video), as video-probe.js reads it.
-    mediaRotation: 0
+    mediaRotation: 0,
+    // Effects (overlay-effects.js): how it mixes with the video, a shape it
+    // is cut to, a green screen.
+    blend: 'normal', mask: defaultMask(), key: defaultKey()
   };
+}
+
+// An overlay's effects; every one optional (a project from before them).
+function validateOverlayEffects(o) {
+  if (o.blend !== undefined) oneOf(o.blend, OVERLAY_BLENDS, 'Blend');
+  if (o.mask !== undefined) {
+    if (!isObj(o.mask)) fail('An overlay\u2019s mask must be an object');
+    if (o.mask.shape !== undefined) oneOf(o.mask.shape, MASK_SHAPES, 'Mask shape');
+    if (o.mask.feather !== undefined) num(o.mask.feather, 'Mask edge softness', 0, 1);
+  }
+  if (o.key !== undefined) {
+    if (!isObj(o.key)) fail('An overlay\u2019s green screen must be an object');
+    if (o.key.on !== undefined) bool(o.key.on, 'Green screen on');
+    if (o.key.color !== undefined && (typeof o.key.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(o.key.color))) {
+      fail(`Green screen colour must be a colour like #00ff00, got ${JSON.stringify(o.key.color)}`);
+    }
+    if (o.key.tolerance !== undefined) num(o.key.tolerance, 'Green screen tolerance', 0, 1);
+    if (o.key.softness !== undefined) num(o.key.softness, 'Green screen softness', 0, 1);
+  }
 }
 
 function validateOverlay(o) {
@@ -1220,6 +1243,7 @@ function validateOverlay(o) {
   num(o.fadeOut, 'Overlay fade out', 0);
   validateKeyframes(o.keyframes, OVERLAY_ANIMATABLE);
   if (![0, 90, 180, 270].includes(o.mediaRotation)) fail('An overlay\u2019s turn must be 0, 90, 180 or 270');
+  validateOverlayEffects(o);
 }
 
 function overlayAt(project, id) {

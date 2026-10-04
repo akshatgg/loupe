@@ -270,6 +270,12 @@ flushes a pending save first; closing the editor and quitting flush too.
   `ipc/media.js`): pictures and videos on rows V2, V3... above the clips
   (the Overlay button), a picture-in-picture until moved, trimmed and moved
   like clips, placed, faded and keyframed in the Clip panel.
+  Advanced (folded; `disclosure.js`, open/closed kept in localStorage):
+  `blend` (normal, multiply, screen, overlay, soft-light, add), `mask`
+  ({ shape: none | rectangle | ellipse, feather }) and `key` (a green
+  screen: { on, color, tolerance, softness }, measured in chroma) --
+  `core/overlay-effects.js` is the reference maths, `layers/key-gl.js` the
+  shader (no GPU: drawn unkeyed). All optional; without them, as before.
   Checks: `test/e2e/clip-effects.e2e.js`, `test/e2e/overlays.e2e.js`.
 - `cut-dialog.js` ("Cut", X): From/To times (`timeline-math.js` `parseTime`,
   `cutRanges`) -> "Remove this part" or "Keep only this part", core

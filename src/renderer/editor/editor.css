@@ -701,6 +701,23 @@ kbd {
 .filter-grid .segmented { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .filter-grid .seg-btn { justify-content: center; }
 
+/* ---- a folded "Advanced" part of an inspector (disclosure.js) */
+.advanced { margin: 12px 0; border-top: 1px solid var(--line); padding-top: 10px; }
+.advanced > summary {
+  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; border-radius: 5px;
+  font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3);
+}
+.advanced > summary::-webkit-details-marker { display: none; }
+.advanced > summary::before { content: '▸'; font-size: 10px; }
+.advanced[open] > summary::before { content: '▾'; }
+.advanced > summary:hover { color: var(--ink); }
+.advanced > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.advanced-body { padding-top: 12px; }
+.field.chooser { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.field.chooser[hidden], .advanced .field[hidden] { display: none; }
+.field.chooser .select { width: auto; max-width: 60%; }
+.field.chooser input[type="color"] { width: 44px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: transparent; cursor: pointer; }
+
 /* ---- overlay rows (timeline-overlays.js), above the clips */
 .tl-overlay-labels .tl-label { height: 30px; margin-top: 0; }
 .tl-overlay-labels + .tl-label { margin-top: 2px; }
