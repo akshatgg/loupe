@@ -21,6 +21,7 @@ export function commandFor(e, platform) {
     if (key === 'z') return e.shiftKey ? 'redo' : 'undo';
     if (key === 'y' && !mac) return 'redo';
     if (key === 'e') return 'export';
+    if (key === 'a') return e.shiftKey ? null : 'selectAll';
     if (key === '=' || key === '+') return 'timelineZoomIn';
     if (key === '-' || key === '_') return 'timelineZoomOut';
     if (key === '0') return 'timelineFit';
@@ -43,6 +44,8 @@ export function commandFor(e, platform) {
     case 'm': return e.shiftKey ? 'nextMarker' : 'addMarker';
     case 'f': return e.shiftKey ? 'freezeFrame' : null;
     case 'z': return e.shiftKey ? null : 'addZoom';
+    case 't': return e.shiftKey ? null : 'addText';
+    case 'b': return e.shiftKey ? null : 'addBlur';
     case 'Delete':
     case 'Backspace': return 'delete';
     case '?': return 'cheatSheet';
@@ -74,6 +77,10 @@ export function cheatSheet(platform) {
       { keys: [plus(mac ? '⇧' : 'Shift', 'F')], what: 'Freeze the frame at the playhead for 2 seconds' },
       { keys: [plus(mac ? '⇧' : 'Shift', 'M')], what: 'Go to the next marker' },
       { keys: ['Z'], what: 'Add a zoom at the playhead' },
+      { keys: ['T'], what: 'Add text at the playhead' },
+      { keys: ['B'], what: 'Add a blur at the playhead' },
+      { keys: [plus(mod, 'A')], what: 'Select everything on the timeline' },
+      { keys: [mac ? '⌘-click' : 'Ctrl+click', mac ? '⇧-click' : 'Shift+click'], what: 'Select several things' },
       { keys: [mac ? '⌫' : 'Delete'], what: 'Delete what’s selected' },
       { keys: [plus(mod, 'Z')], what: 'Undo' },
       { keys: [mac ? '⇧⌘Z' : 'Ctrl+Y'], what: 'Redo' }

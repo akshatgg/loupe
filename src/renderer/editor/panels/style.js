@@ -1,11 +1,11 @@
-// Style: presets, what's around the recording (background colour, gradient
-// or picture, padding, corners, shadow, shape), how the cursor looks and the
-// keyboard shortcut badges. Every control is one undo step; a slider dragged
-// back and forth is one step too.
+// Look: presets and what's around the recording (background colour, gradient
+// or picture, padding, corners, shadow, shape). The cursor and the keyboard
+// badges are next door (cursor.js). Every control is one undo step; a slider
+// dragged back and forth is one step too.
 
-import { h, slider, toggle, segmented, section } from '../ui.js';
+import { h, slider, segmented, section } from '../ui.js';
 import { setStyle } from '../../../core/project.js';
-import { presetsSection, picturesRow, keystrokesSection } from './style-extras.js';
+import { presetsSection, picturesRow } from './style-extras.js';
 
 export const GRADIENTS = [
   { angle: 135, stops: ['#4f5bd5', '#962fbf'] },
@@ -38,7 +38,7 @@ function aspectIcon(w, hgt) {
 
 export default {
   id: 'style',
-  title: 'Style',
+  title: 'Look',
   icon: 'style',
   mount(container, editor) {
     const { store } = editor;
@@ -76,7 +76,6 @@ export default {
     const custom = h('label', { class: 'swatch swatch-custom', title: 'Pick any colour' }, picker);
     const pictures = picturesRow(editor, { onPick: (bg) => { setBackground(bg); done(); } });
     const presets = presetsSection(editor);
-    const keys = keystrokesSection(editor);
 
     // ---- frame
     const padding = slider({
@@ -100,31 +99,11 @@ export default {
     });
     aspect.classList.add('aspects');
 
-    // ---- cursor
-    const showCursor = toggle({ label: 'Show cursor', checked: style().cursor.show, onChange: (v) => { edit({ cursor: { show: v } }); done(); } });
-    const size = slider({
-      label: 'Cursor size', min: 0.5, max: 3, step: 0.05, value: style().cursor.size,
-      format: (v) => `${v.toFixed(1)}×`, onInput: (v) => edit({ cursor: { size: v } }, 'style:cursor-size'), onChange: done
-    });
-    const smooth = toggle({ label: 'Smooth movement', hint: 'Glides the cursor instead of jittering', checked: style().cursor.smooth, onChange: (v) => { edit({ cursor: { smooth: v } }); done(); } });
-    const idle = toggle({ label: 'Hide when still', hint: 'Fades the cursor out when you stop moving it', checked: style().cursor.hideWhenIdle, onChange: (v) => { edit({ cursor: { hideWhenIdle: v } }); done(); } });
-    const highlight = segmented({
-      label: 'Highlight',
-      options: [{ value: 'none', label: 'None' }, { value: 'spotlight', label: 'Spotlight' }, { value: 'ring', label: 'Ring' }],
-      value: style().cursor.highlight,
-      onChange: (v) => { edit({ cursor: { highlight: v } }); done(); }
-    });
-    const clicks = toggle({ label: 'Show clicks', hint: 'A ripple wherever you click', checked: style().cursor.clicks, onChange: (v) => { edit({ cursor: { clicks: v } }); done(); } });
-    const cursorOnly = [size, smooth, idle, highlight];
-
     container.append(
       presets.el,
       section('Background', h('div', { class: 'swatches' }, none, ...grads, ...cols, custom), pictures.el),
       section('Frame', padding, radius, shadow),
-      section('Shape', aspect),
-      section('Cursor', showCursor, ...cursorOnly),
-      section('Clicks', clicks),
-      keys.el
+      section('Shape', aspect)
     );
 
     function update() {
@@ -137,15 +116,7 @@ export default {
       radius.set(s.radius);
       shadow.set(s.shadow);
       aspect.set(s.aspect);
-      showCursor.set(s.cursor.show);
-      size.set(s.cursor.size);
-      smooth.set(s.cursor.smooth);
-      idle.set(s.cursor.hideWhenIdle);
-      highlight.set(s.cursor.highlight);
-      clicks.set(s.cursor.clicks);
-      for (const row of cursorOnly) row.classList.toggle('disabled', !s.cursor.show);
       pictures.update();
-      keys.update();
     }
     update();
     return { update };

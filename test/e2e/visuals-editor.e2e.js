@@ -107,7 +107,7 @@ const lastAnnotation = (ed) => ed.js('window.__editor.store.project.annotations.
 
 const CASES = [
   ['annotations: add, drag on the preview, type in place, resize, move on the timeline, delete and undo', async (ed, dir) => {
-    await ed.clickOn('#tabs .tab[data-panel=annotations]');
+    await ed.js('window.__editor.store.select(null); window.__editor.editor.showPanel("annotations")');
     await ed.shot('visuals-01-annotations-panel');
     await seek(ed, 2.2);
     await ed.clickOn('.add-tile[data-type="text"]');
@@ -148,8 +148,8 @@ const CASES = [
     assert.ok(Math.max(...backing) < 70, `text backing ${backing}`);
 
     // A box, resized by its corner.
-    await ed.clickOn('#tabs .tab[data-panel=annotations]');
     await ed.key('Escape');
+    await ed.js('window.__editor.store.select(null); window.__editor.editor.showPanel("annotations")');
     await ed.clickOn('.add-tile[data-type="box"]');
     await ed.settle();
     const box0 = await lastAnnotation(ed);
@@ -169,7 +169,9 @@ const CASES = [
 
     // A hidden area turns what's under it into blocks.
     await ed.key('Escape');
-    await ed.clickOn('.add-tile[data-type="blur"]');
+    assert.strictEqual(await ed.js('document.getElementById("sidebar").dataset.mode'), 'video', 'Escape goes back to the video\u2019s settings');
+    // From the toolbar, as a person would.
+    await ed.clickOn('#blurBtn');
     await ed.settle();
     assert.strictEqual((await lastAnnotation(ed)).type, 'blur');
 
@@ -203,8 +205,8 @@ const CASES = [
 
     // A title card: full screen in the preview.
     await seek(ed, 0);
-    await ed.clickOn('#tabs .tab[data-panel=annotations]');
     await ed.key('Escape');
+    await ed.js('window.__editor.store.select(null); window.__editor.editor.showPanel("annotations")');
     await ed.clickOn('.add-tile[data-type="title"]');
     await ed.settle();
     const title = await lastAnnotation(ed);
@@ -218,11 +220,20 @@ const CASES = [
     // and a click on the empty space beside the preview lets go of it.
     assert.deepStrictEqual(await ed.js('window.__editor.store.selection'), { kind: 'annotation', id: title.id });
     assert.strictEqual(await ed.js('[...document.querySelectorAll(".add-tile")].filter((b) => b.offsetParent).length'), 5, 'add tiles stay visible');
-    assert.strictEqual(await ed.js('!!document.querySelector(".anno-back")?.offsetParent'), true, 'a way back to the list');
+    assert.strictEqual(await ed.js('!document.getElementById("inspectorBack").hidden'), true, 'a way back to the video\u2019s settings');
+    assert.strictEqual(await ed.js('document.getElementById("panelTitle").textContent'), 'Title card');
     const stage = await ed.box('#stage');
     await ed.click(Math.round(stage.x + 8), Math.round(stage.y + stage.h / 2));
     assert.strictEqual(await ed.js('window.__editor.store.selection'), null, 'clicking beside the preview deselects');
-    assert.strictEqual(await ed.js('[...document.querySelectorAll(".add-tile")].filter((b) => b.offsetParent).length'), 5);
+    // Back on the video's settings; the next one is added from the toolbar.
+    assert.strictEqual(await ed.js('document.getElementById("sidebar").dataset.mode'), 'video');
+    await ed.clickOn('#textBtn');
+    assert.strictEqual(await ed.js('[...document.querySelectorAll("#addText, #addTitle, #addArrow, #addBox")].filter((b) => b.offsetParent).length'), 4, 'the Text menu offers all four');
+    await seek(ed, 4);
+    await ed.clickOn('#addArrow');
+    await ed.settle();
+    assert.strictEqual((await lastAnnotation(ed)).type, 'arrow');
+    assert.strictEqual(await ed.js('document.getElementById("panelTitle").textContent'), 'Arrow');
   }],
 
   ['style: a background on a recording with no room around it makes some; tabs open at their top', async (ed, dir) => {
@@ -339,11 +350,14 @@ const CASES = [
     await ed.shot('visuals-12-presets');
     // Badges off.
     await ed.js('document.querySelector(".panel-wrap").scrollTop = 10000');
-    const toggles = await ed.js('Array.from(document.querySelectorAll(".panel-body[data-panel=style] .toggle .label")).map((l) => l.textContent)');
+    // The badges are on the Cursor tab, with the cursor's own settings.
+    await ed.clickOn('#tabs .tab[data-panel=cursor]');
+    await ed.js('document.querySelector(".panel-wrap").scrollTop = 10000');
+    const toggles = await ed.js('Array.from(document.querySelectorAll(".panel-body[data-panel=cursor] .toggle .label")).map((l) => l.textContent)');
     const i = toggles.indexOf('Show keyboard shortcuts');
     assert.ok(i >= 0, 'the keyboard toggle is there');
-    await ed.js(`document.querySelectorAll(".panel-body[data-panel=style] .toggle")[${i}].scrollIntoView()`);
-    await ed.clickOn(`.panel-body[data-panel=style] .panel-section:last-child .toggle`);
+    await ed.js(`document.querySelectorAll(".panel-body[data-panel=cursor] .toggle")[${i}].scrollIntoView()`);
+    await ed.clickOn(`.panel-body[data-panel=cursor] .panel-section:last-child .toggle`);
     await ed.settle();
     assert.strictEqual(readProject(dir).style.keystrokes.show, false);
   }]

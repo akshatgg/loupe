@@ -51,3 +51,17 @@ test('pro editing keys: I/O marks, J/K/L shuttle, M markers, ⌥X clears the mar
   assert.equal(commandFor({ ...key('≈', { altKey: true }), code: 'KeyX' }, 'darwin'), 'clearMarks');
   assert.equal(commandFor({ ...key('x', { altKey: true }), code: 'KeyX' }, 'win32'), 'clearMarks');
 });
+
+test('select all, text and blur have keys, on both platforms', () => {
+  const k = (key, mods = {}) => ({ key, code: `Key${key.toUpperCase()}`, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
+  assert.equal(commandFor(k('a', { metaKey: true }), 'darwin'), 'selectAll');
+  assert.equal(commandFor(k('a', { ctrlKey: true }), 'win32'), 'selectAll');
+  assert.equal(commandFor(k('a', { ctrlKey: true }), 'darwin'), null, 'Ctrl is not the Mac’s shortcut key');
+  assert.equal(commandFor(k('a'), 'darwin'), null);
+  assert.equal(commandFor(k('t'), 'darwin'), 'addText');
+  assert.equal(commandFor(k('b'), 'win32'), 'addBlur');
+  const all = cheatSheet('darwin').flatMap((g) => g.items.map((i) => i.what));
+  for (const what of ['Add text at the playhead', 'Add a blur at the playhead', 'Select everything on the timeline', 'Select several things']) {
+    assert.ok(all.includes(what), what);
+  }
+});

@@ -136,7 +136,10 @@ const CASES = [
     near(added.start, 1, 0.1, 'zoom start');
     near(added.end, 2.5, 0.1, 'zoom end');
     assert.strictEqual(added.level, 2);
-    assert.strictEqual(await ed.js('document.querySelector(".tab[aria-selected=true]").dataset.panel'), 'zoom');
+    // The right side shows the new zoom's settings, under its name.
+    assert.strictEqual(await ed.js('document.getElementById("sidebar").dataset.panel'), 'zoom');
+    assert.strictEqual(await ed.js('document.getElementById("panelTitle").textContent'), 'Zoom');
+    assert.strictEqual(await ed.js('document.getElementById("tabs").hidden'), true, 'the video\u2019s tabs step aside');
     // Drag its right edge out to 3.5 s.
     const edge = await ed.box('.zoom.selected .handle.end');
     await ed.drag(Math.round(edge.x + edge.w / 2), y, await ed.timelineX(3.5), y);
@@ -177,17 +180,23 @@ const CASES = [
     await ed.key('Delete');
     await ed.settle();
     assert.strictEqual(readProject(dir).zooms.length, 2);
-    // Double-click opens a zoom's settings.
-    await ed.clickOn('#tabs .tab[data-panel=style]');
+    // The back arrow returns to the video's settings; a click on the zoom
+    // brings its settings back.
     const again = await ed.box(`.zoom[data-id="${added.id}"]`);
-    await ed.click(Math.round(again.x + again.w / 2), y, { clickCount: 1 });
-    await ed.click(Math.round(again.x + again.w / 2), y, { clickCount: 2 });
-    assert.strictEqual(await ed.js('document.querySelector(".tab[aria-selected=true]").dataset.panel'), 'zoom');
+    await ed.click(Math.round(again.x + again.w / 2), y);
+    assert.strictEqual(await ed.js('document.getElementById("sidebar").dataset.panel'), 'zoom');
+    await ed.clickOn('#inspectorBack');
+    assert.strictEqual(await ed.js('document.getElementById("sidebar").dataset.mode'), 'video');
+    assert.strictEqual(await ed.js('document.querySelector("#tabs .tab[aria-selected=true]").dataset.panel'), 'style');
+    assert.strictEqual(await ed.js('window.__editor.store.selected.length'), 0);
+    await ed.click(Math.round(again.x + again.w / 2), y);
+    assert.strictEqual(await ed.js('document.getElementById("sidebar").dataset.panel'), 'zoom');
   }],
 
-  ['speed: drag across the speed track and pick 2x', async (ed, dir) => {
-    const y = await trackY(ed, '.tl-speed');
-    await ed.drag(await ed.timelineX(1), y, await ed.timelineX(3), y);
+  ['speed: Alt-drag across the clip and pick 2x', async (ed, dir) => {
+    const y = await trackY(ed, '.tl-clips');
+    assert.strictEqual(await ed.js('document.querySelector(".tl-speed")'), null, 'speed has no row of its own');
+    await ed.drag(await ed.timelineX(1), y, await ed.timelineX(3), y, 12, { modifiers: ['alt'] });
     assert.strictEqual(await ed.js('!document.querySelector(".speed-menu").hidden'), true, 'the speed menu opens');
     await ed.shot('05-speed-menu');
     await ed.clickOn('.speed-menu button[data-rate="2"]');
@@ -200,7 +209,8 @@ const CASES = [
     const duration = await ed.js('window.__editor.store.tl.duration');
     assert.ok(duration < 7.2 && duration > 6.9, `2x over 2 s of 8: ${duration}`);
     // Clicking the stretch opens the menu again; Normal takes it away.
-    await ed.clickOn('.tl-speed .speed');
+    assert.strictEqual(await ed.js('document.querySelector(".tl-clips .speed").textContent'), '2×', 'the clip carries a speed badge');
+    await ed.clickOn('.tl-clips .speed');
     await ed.clickOn('.speed-menu button[data-rate="1"]');
     await ed.settle();
     assert.deepStrictEqual(readProject(dir).speed, []);
@@ -213,7 +223,8 @@ const CASES = [
         s.dispatchEvent(new Event('input', { bubbles: true })); s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
     }
     await ed.clickOn('.aspects .seg-btn[data-value="9:16"]');
-    await ed.js('document.querySelector(".panel-wrap").scrollTop = 1000');
+    // The cursor has its own tab.
+    await ed.clickOn('#tabs .tab[data-panel=cursor]');
     await ed.clickOn('.seg-btn[data-value="ring"]');
     await ed.settle();
     const style = readProject(dir).style;

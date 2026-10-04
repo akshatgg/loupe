@@ -1,5 +1,6 @@
 // Fills the static buttons in index.html with their icons and labels, so the
-// page reads right before the project has loaded.
+// page reads right before the project has loaded. (The tools between the
+// preview and the timeline are built by toolbar.js.)
 
 import { icon } from './ui.js';
 
@@ -15,13 +16,6 @@ fill('shortcutsBtn', 'keyboard', null, 20);
 fill('backBtn', 'back', 'Recordings');
 fill('settingsBtn', 'settings', null, 20);
 fill('play', 'play', null, 20);
-fill('splitBtn', 'split', 'Split');
-fill('cutBtn', 'cut', 'Cut');
-fill('zoomBtn', 'zoomAdd', 'Zoom');
-fill('deleteBtn', 'trash', 'Delete');
-fill('addRecBtn', 'plus', 'Add recording');
-fill('addAudioBtn', 'music', 'Audio');
-fill('addOverlayBtn', 'image', 'Overlay');
 fill('tlOut', 'minus', null, 16);
 fill('tlFit', 'fit', null, 16);
 fill('tlIn', 'plus', null, 16);

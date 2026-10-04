@@ -13,7 +13,9 @@ import { createTimeline } from './timeline-view.js';
 import { createExportDialog, plainError } from './export-dialog.js';
 import { createCheatSheet } from './cheat-sheet.js';
 import { commandFor } from './shortcuts.js';
-import { PANELS, panelById } from './panels/index.js';
+import { VIDEO_TABS, panelById } from './panels/index.js';
+import { createInspector } from './inspector.js';
+import { createToolbar } from './toolbar.js';
 import { installMusicDrop, addAudioFiles, splitSelectedAudio } from './panels/audio.js';
 import { h, icon } from './ui.js';
 import { clipLayout, newZoomRange, formatTime } from './timeline-math.js';
@@ -127,44 +129,35 @@ async function start() {
 
   // ---- panels
 
-  const tabs = $('tabs');
-  const panelBox = $('panel');
-  const mounted = new Map();
-  let currentPanel = null;
+  // inspector.js: the video's settings on tabs, or the selected thing's.
+  let inspector = null;
+  const showPanel = (id, opts) => inspector?.show(id, opts);
 
   const editor = {
     store, player, core: P, platform: loupe.platform, toast, sources: loaded.sources,
-    select(sel, { seek = false } = {}) {
-      store.select(sel);
-      if (sel?.kind === 'annotation') {
-        showPanel('annotations');
+    // Selects one thing ({ add } or { toggle } to select it with the others);
+    // the inspector then shows its settings. `seek` brings the playhead to it.
+    select(sel, { seek = false, add = false, toggle = false } = {}) {
+      store.select(sel, { add, toggle });
+      if (!seek || !sel) return;
+      if (sel.kind === 'annotation') {
         const a = store.project.annotations.find((q) => q.id === sel.id);
         const at = store.tl.toSource(player.time);
         // Past its fade-in, so it's fully there to drag.
         const onScreen = a && at.source === a.source && at.t >= a.start + 0.25 && at.t < a.end - 0.25;
-        if (seek && a && !onScreen) {
+        if (a && !onScreen) {
           const t = store.tl.toOutput(a.source, Math.min((a.start + a.end) / 2, a.start + 0.3));
           if (t !== null && t !== undefined) player.seek(t);
         }
-      }
-      if (sel?.kind === 'zoom') {
-        showPanel('zoom');
-        if (seek) {
-          const z = store.project.zooms.find((q) => q.id === sel.id);
-          const t = z && store.tl.toOutput(z.source, z.start);
-          if (t !== null && t !== undefined) player.seek(t);
-        }
-      } else if (sel?.kind === 'caption') {
-        showPanel('captions');
-      } else if (sel?.kind === 'audio') {
-        showPanel('audio');
-      } else if (sel?.kind === 'clip' || sel?.kind === 'overlay') {
-        // The selected clip's own settings, as an editor's inspector.
-        showPanel('clip');
+      } else if (sel.kind === 'zoom') {
+        const z = store.project.zooms.find((q) => q.id === sel.id);
+        const t = z && store.tl.toOutput(z.source, z.start);
+        if (t !== null && t !== undefined) player.seek(t);
       }
     },
+    deleteSelected: () => deleteSelection(),
     showPanel: (id, opts) => showPanel(id, opts),
-    revealCaption: (id, opts) => mounted.get('captions')?.api.reveal?.(id, opts),
+    revealCaption: (id, opts) => { showPanel('captions'); inspector.api('captions')?.reveal?.(id, opts); },
     addZoom(range) {
       const before = new Set(store.project.zooms.map((z) => z.id));
       const next = store.apply((p) => P.addZoom(p, { ...range, level: 2, follow: true }));
@@ -226,30 +219,10 @@ async function start() {
     }
   };
 
-  function showPanel(id, { focus = false } = {}) {
-    const panel = panelById(id);
-    if (!panel) return;
-    // Another panel opens at its top, not at the last one's scroll position.
-    if (currentPanel !== id) panelBox.closest('.panel-wrap').scrollTop = 0;
-    currentPanel = id;
-    for (const b of tabs.children) b.setAttribute('aria-selected', String(b.dataset.panel === id));
-    for (const [pid, m] of mounted) m.el.hidden = pid !== id;
-    if (!mounted.has(id)) {
-      const el = h('div', { class: 'panel-body', dataset: { panel: id } });
-      panelBox.append(el);
-      mounted.set(id, { el, api: panel.mount(el, editor) });
-    }
-    $('panelTitle').textContent = panel.title;
-    mounted.get(id).api.update('panel');
-    if (focus) mounted.get(id).el.querySelector('input, button')?.focus();
-  }
-
-  for (const panel of PANELS) {
-    tabs.append(h('button', {
-      type: 'button', role: 'tab', class: 'tab', title: panel.title, 'aria-label': panel.title,
-      dataset: { panel: panel.id }, onclick: () => showPanel(panel.id)
-    }, icon(panel.icon, { size: 20 }), h('span', {}, panel.title)));
-  }
+  inspector = createInspector({
+    sidebar: $('sidebar'), tabsEl: $('tabs'), titleEl: $('panelTitle'), backEl: $('inspectorBack'), panelBox: $('panel'),
+    store, editor, tabs: VIDEO_TABS, panelById
+  });
   showPanel('style');
   // A song dropped anywhere on the window becomes the video's music.
   installMusicDrop(editor);
@@ -295,6 +268,7 @@ async function start() {
   $('redo').title = loupe.platform === 'darwin' ? 'Redo (⇧⌘Z)' : 'Redo (Ctrl+Y)';
   $('exportBtn').title = `Export (${mod}E)`;
 
+  let toolbar = null;
   function deleteSelection() {
     // A marked In..Out part goes first, closing the gap (an editor's extract).
     const { in: a, out: b } = timeline.marks;
@@ -308,34 +282,25 @@ async function start() {
       }
       return;
     }
-    const sel = store.selection;
-    if (!sel) {
+    const items = store.selected;
+    if (!items.length) {
       toast('Select a clip, zoom, speed change or annotation first.');
       return;
     }
-    if (sel.kind === 'clip') {
-      if (store.project.clips.length === 1) {
-        toast('A video needs at least one clip. Drag its edges to trim it instead.');
-        return;
-      }
-      store.apply((p) => P.deleteClip(p, sel.id));
-    } else if (sel.kind === 'zoom') {
-      store.apply((p) => P.removeZoom(p, sel.id));
-    } else if (sel.kind === 'annotation') {
-      store.apply((p) => P.removeAnnotation(p, sel.id));
-    } else if (sel.kind === 'caption') {
-      store.apply((p) => P.setCaptions(p, { segments: p.captions.segments.filter((c) => c.id !== sel.id) }));
-    } else if (sel.kind === 'audio') {
-      store.apply((p) => P.removeAudioClip(p, sel.id));
-    } else if (sel.kind === 'overlay') {
-      store.apply((p) => P.removeOverlay(p, sel.id));
-    } else if (sel.kind === 'marker') {
-      store.apply((p) => P.removeMarker(p, sel.id));
-    } else if (sel.kind === 'speed') {
-      store.apply((p) => P.paintSpeed(p, { source: sel.source, start: sel.start, end: sel.end, rate: 1 }));
+    if (items.length === 1 && items[0].kind === 'clip' && store.project.clips.length === 1) {
+      toast('A video needs at least one clip. Drag its edges to trim it instead.');
+      return;
     }
-    store.select(null);
+    // One undo step, however many things were selected.
+    const next = store.apply((p) => P.removeItems(p, items, { leaveGap: !closeGaps() }));
+    if (next) {
+      if (items.length > 1) toast(`Deleted ${items.length} items`);
+      store.select(null);
+    }
   }
+  // Deleting a clip pulls the later ones left unless "Close gaps" is off
+  // (the toolbar's switch).
+  const closeGaps = () => toolbar?.closeGaps ?? true;
 
   function split() {
     // A selected song or sound is split, as the selected clip is in any editor.
@@ -376,6 +341,16 @@ async function start() {
       else toast(store.project.markers.length ? 'No more markers after the playhead' : 'No markers yet: press M to add one');
     },
     addZoom: () => editor.addZoomAtPlayhead(),
+    addText: () => editor.addAnnotation('text'),
+    addBlur: () => editor.addAnnotation('blur'),
+    addAnnotation: (type) => editor.addAnnotation(type),
+    // The Audio tab's own recorder, at the playhead.
+    recordVoiceover: () => {
+      store.select(null);
+      showPanel('audio');
+      document.getElementById('recordVoiceover')?.click();
+    },
+    selectAll: () => timeline.selectAll(),
     delete: deleteSelection,
     timelineZoomIn: () => timeline.zoomIn(),
     timelineZoomOut: () => timeline.zoomOut(),
@@ -383,8 +358,9 @@ async function start() {
     cheatSheet: () => cheat.toggle(),
     escape: () => {
       if (cheat.open) cheat.toggle();
+      else if (toolbar.menuOpen) toolbar.closeMenus();
       else if (timeline.menuOpen) timeline.closeMenu();
-      else if (firstRun.open && !store.selection) firstRun.dismiss();
+      else if (firstRun.open && !store.selected.length) firstRun.dismiss();
       else store.select(null);
     },
     addRecording: () => addRecording.show(),
@@ -396,13 +372,11 @@ async function start() {
   $('redo').onclick = actions.redo;
   $('exportBtn').onclick = actions.export;
   $('play').onclick = actions.playPause;
-  $('splitBtn').onclick = actions.split;
-  $('cutBtn').onclick = actions.cut;
-  $('zoomBtn').onclick = actions.addZoom;
-  $('deleteBtn').onclick = actions.delete;
-  $('addRecBtn').onclick = actions.addRecording;
-  $('addAudioBtn').onclick = actions.addAudio;
-  $('addOverlayBtn').onclick = actions.addOverlay;
+  toolbar = createToolbar({ tools: $('tools'), options: $('tlOptions'), actions });
+  timeline.setSnap(toolbar.snap);
+  toolbar.onChange((key, on) => {
+    if (key === 'snap') timeline.setSnap(on);
+  });
   $('tlOut').onclick = actions.timelineZoomOut;
   $('tlIn').onclick = actions.timelineZoomIn;
   $('tlFit').onclick = actions.timelineFit;
@@ -458,14 +432,13 @@ async function start() {
     }
   });
 
-  function refresh(what) {
+  function refresh() {
     $('undo').disabled = !store.canUndo;
     $('redo').disabled = !store.canRedo;
     const { in: markA, out: markB } = timeline.marks;
-    $('deleteBtn').disabled = !store.selection && !(markA !== null && markB !== null);
+    $('deleteBtn').disabled = !store.selected.length && !(markA !== null && markB !== null);
     if (document.activeElement !== title) title.value = store.project.title;
     document.title = store.project.title || 'Loupe';
-    for (const [id, m] of mounted) if (id === currentPanel) m.api.update(what);
   }
   store.subscribe(refresh);
 
@@ -493,9 +466,9 @@ async function start() {
   requestAnimationFrame(drawMeter);
   player.onTime(() => {
     // The zoom panel's "Add a zoom here" depends on where the playhead is.
-    if (currentPanel === 'zoom' && !store.selection && !player.playing) mounted.get('zoom').api.update('time');
+    if (inspector.current === 'zoom' && !store.selection && !player.playing) inspector.updateCurrent('time');
     // Keyframed values and their ◆ state depend on where the playhead is.
-    if (currentPanel === 'clip' && store.selection && !player.playing) mounted.get('clip').api.update('time');
+    if (inspector.current === 'clip' && store.selection && !player.playing) inspector.updateCurrent('time');
   });
   refresh('load');
   player.seek(0);
@@ -510,7 +483,7 @@ async function start() {
 
   // For the end-to-end tests (test/e2e/editor.js), which drive this page.
   window.__editor = {
-    store, player, timeline, exportDialog, cheat, editor, actions, saver, overlay, addRecording, cutDialog, thumbnails, firstRun,
+    store, player, timeline, exportDialog, cheat, editor, actions, saver, overlay, addRecording, cutDialog, thumbnails, firstRun, inspector, toolbar,
     meter: meterState
   };
   document.body.dataset.ready = 'true';

@@ -99,10 +99,6 @@ export default {
       section(null, remove));
 
     const top = h('div', { class: 'anno-top' }, intro, addSection, list);
-    const back = h('button', {
-      type: 'button', class: 'chip anno-back', onclick: () => editor.select(null)
-    }, icon('back', { size: 14 }), 'All annotations');
-    detail.prepend(back);
     container.append(top, detail);
 
     function renderList() {

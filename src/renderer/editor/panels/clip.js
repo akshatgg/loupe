@@ -254,10 +254,22 @@ export default {
     }, icon('trash', { size: 14 }), 'Delete overlay');
     const overlaySection = section(null, oTitle, oInfo, oX, oY, oScale, oRotate, oOpacity, keyNav, oFadeIn, oFadeOut, oTimes, oDelete);
 
+    // ---- speed: the whole clip at once (⌥-drag on the timeline for a part)
+    const SPEEDS = [0.25, 0.5, 1, 1.5, 2, 3, 4, 8];
+    const speedChips = h('div', { class: 'chips', id: 'clipSpeeds' }, SPEEDS.map((rate) => h('button', {
+      type: 'button', class: 'chip', dataset: { rate: String(rate) },
+      onclick: () => {
+        const s = selected();
+        if (s) apply((p) => P.paintSpeed(p, { source: s.clip.source, start: s.clip.start, end: s.clip.end, rate }));
+      }
+    }, rate === 1 ? 'Normal' : `${rate}×`)));
+    const speedHint = h('p', { class: 'hint' });
+    const speedSection = section('Speed', speedChips, speedHint);
+
     const settings = section(null, title, length, reverse, holdRow);
     const tools = section(null, freezeBtn,
       h('p', { class: 'hint' }, 'Holds the frame at the playhead for 2 seconds, splitting the clip there.'));
-    container.append(empty, overlaySection, settings, place, colourSection, tools);
+    container.append(empty, overlaySection, settings, speedSection, place, colourSection, tools);
 
     function update() {
       const s = selected();
@@ -268,6 +280,17 @@ export default {
       settings.hidden = !s;
       place.hidden = !s;
       colourSection.hidden = !s;
+      speedSection.hidden = !s || s.clip.hold > 0;
+      if (s && !(s.clip.hold > 0)) {
+        // The clip's speed changes: one rate over all of it, several, or none.
+        const inside = store.project.speed.filter((q) => q.source === s.clip.source && q.end > s.clip.start + 1e-6 && q.start < s.clip.end - 1e-6);
+        const whole = inside.length === 1 && inside[0].start <= s.clip.start + 1e-6 && inside[0].end >= s.clip.end - 1e-6;
+        const rate = !inside.length ? 1 : whole ? inside[0].rate : null;
+        for (const b of speedChips.children) b.setAttribute('aria-pressed', String(Number(b.dataset.rate) === rate));
+        speedHint.textContent = rate === null
+          ? 'Parts of this clip play at different speeds. Pick one to set the whole clip.'
+          : 'For just a part, hold ⌥ (Alt) and drag across it on the timeline.';
+      }
       if (o) {
         oTitle.textContent = o.name || 'Overlay';
         oInfo.textContent = `${o.kind === 'video' ? 'A video' : 'A picture'} on row V${o.lane + 2}, ${formatTime(o.start, { fraction: true })} to ${formatTime(o.start + o.length, { fraction: true })}`;

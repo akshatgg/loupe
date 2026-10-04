@@ -307,3 +307,15 @@ const THUMB_STEPS = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300];
 export function thumbStep(seconds) {
   return THUMB_STEPS.find((s) => s >= seconds * 0.25) ?? THUMB_STEPS.at(-1);
 }
+
+// What a selection box takes in: every item whose rectangle it overlaps
+// (touching edges don't count). rects: [{ item, x0, x1, y0, y1 }]; the box
+// has the same shape, its corners in any order.
+export function boxHits(rects, box) {
+  const bx0 = Math.min(box.x0, box.x1);
+  const bx1 = Math.max(box.x0, box.x1);
+  const by0 = Math.min(box.y0, box.y1);
+  const by1 = Math.max(box.y0, box.y1);
+  if (bx1 - bx0 <= 0 || by1 - by0 <= 0) return [];
+  return rects.filter((r) => r.x0 < bx1 && r.x1 > bx0 && r.y0 < by1 && r.y1 > by0).map((r) => r.item);
+}

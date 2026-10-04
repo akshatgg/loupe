@@ -14,7 +14,7 @@ const CORNERS = [
 
 export default {
   id: 'webcam',
-  title: 'Webcam',
+  title: 'Camera',
   icon: 'webcam',
   mount(container, editor) {
     const { store } = editor;
