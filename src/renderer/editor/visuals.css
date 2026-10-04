@@ -73,6 +73,9 @@ textarea.text-input { resize: vertical; display: block; }
 .anno-text { min-height: 56px; }
 .swatches.colours { grid-template-columns: repeat(7, 1fr); gap: 6px; }
 .swatch.small { border-radius: 50%; }
+.swatches.backings { grid-template-columns: repeat(9, 1fr); }
+.anno-animations { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0 0 12px; }
+.anno-animations .field { margin: 0; }
 .anno-icon { display: grid; place-items: center; width: 20px; color: var(--note); }
 .anno-row span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 

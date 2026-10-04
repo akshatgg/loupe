@@ -24,6 +24,7 @@
     "test:e2e:audio-tools": "electron test/e2e/audio-tools.e2e.js",
     "test:e2e:redesign": "electron test/e2e/redesign.e2e.js",
     "test:e2e:tracking": "electron test/e2e/tracking-blur.e2e.js",
+    "test:e2e:text": "electron test/e2e/text-captions.e2e.js",
     "test:e2e:pro": "electron test/e2e/pro-editing.e2e.js && electron test/e2e/clip-effects.e2e.js && electron test/e2e/overlays.e2e.js",
     "test:e2e:effects": "electron test/e2e/effects-colour.e2e.js",
     "build:native": "bash packaging/build-native.sh",

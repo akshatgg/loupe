@@ -41,7 +41,9 @@ test('captions from disk are cleaned up rather than failing the project', () => 
   assert.deepStrictEqual(c.segments[0].words, [{ text: 'first', start: 1, end: 1.5 }]);
   assert.notStrictEqual(c.segments[1].id, 'a', 'a duplicate id is replaced');
   assert.strictEqual(c.segments[1].source, 'main');
-  assert.deepStrictEqual(c.style, { size: 2, position: 'bottom', box: true });
+  assert.deepStrictEqual(c.style, {
+    size: 2, position: 'bottom', box: true, preset: 'classic', font: 'system', color: '#ffffff', activeColor: '#ffd60a', animation: 'none'
+  });
   assert.strictEqual(normalizeCaptions({ style: { box: false } }).style.box, false);
   assert.deepStrictEqual(normalizeCaptions(null), defaultCaptions());
 });

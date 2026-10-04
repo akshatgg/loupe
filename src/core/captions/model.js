@@ -1,7 +1,8 @@
 // Captions in the project (docs/EDITOR-V2.md §3):
 //
 //   captions: { show, language, segments: [{ id, source, start, end, text, words? }],
-//               style: { size, position, box } }
+//               style: { size, position, box,
+//                        preset, font, color, activeColor, animation } }   (style.js)
 //
 // Segments are in SOURCE time, like every other attached item, so trimming,
 // cutting or speeding up the video never moves a caption off the words it
@@ -9,6 +10,11 @@
 // drawn or exported. `words` ([{ text, start, end }], also source time) is
 // optional: transcription fills it so a caption can be split at the right
 // moment, and an edit to the text drops it because it no longer matches.
+
+import { FONT_IDS } from '../fonts.js';
+import { CAPTION_STYLE_DEFAULTS, CAPTION_PRESET_NAMES, CAPTION_ANIMATIONS, completeCaptionStyle } from './style.js';
+
+const COLOR_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 
 export const CAPTION_POSITIONS = ['bottom', 'top'];
 export const CAPTION_SIZE_MIN = 0.5;
@@ -25,7 +31,7 @@ export function createCaptionId() {
 }
 
 export function defaultCaptions() {
-  return { show: false, language: 'auto', segments: [], style: { size: 1, position: 'bottom', box: true } };
+  return { show: false, language: 'auto', segments: [], style: { size: 1, position: 'bottom', box: true, ...CAPTION_STYLE_DEFAULTS } };
 }
 
 export function compareSegments(a, b) {
@@ -88,12 +94,18 @@ export function normalizeCaptions(raw) {
     show: raw.show === true,
     language: typeof raw.language === 'string' && raw.language ? raw.language : d.language,
     segments: sortSegments(segments),
-    style: {
+    style: completeCaptionStyle({
       size: isNum(style.size) ? Math.min(CAPTION_SIZE_MAX, Math.max(CAPTION_SIZE_MIN, style.size)) : 1,
       position: CAPTION_POSITIONS.includes(style.position) ? style.position : 'bottom',
       // The dark box behind the words; without it the words get an outline.
-      box: style.box !== false
-    }
+      box: style.box !== false,
+      // The newer settings (style.js), each kept only when it is usable.
+      ...(CAPTION_PRESET_NAMES.includes(style.preset) ? { preset: style.preset } : null),
+      ...(FONT_IDS.includes(style.font) ? { font: style.font } : null),
+      ...(COLOR_RE.test(style.color) ? { color: style.color } : null),
+      ...(COLOR_RE.test(style.activeColor) ? { activeColor: style.activeColor } : null),
+      ...(CAPTION_ANIMATIONS.includes(style.animation) ? { animation: style.animation } : null)
+    })
   };
 }
 

@@ -7,6 +7,7 @@
 // not part of any one video.
 
 import { h, icon } from './ui.js';
+import { LOWER_THIRDS } from '../../core/text-style.js';
 
 const KEYS = { snap: 'loupe.snap', closeGaps: 'loupe.closeGaps', transcript: 'loupe.transcript' };
 
@@ -107,7 +108,9 @@ export function createToolbar({ tools, options, actions, storage = globalThis.lo
       { id: 'addText', icon: 'text', label: 'Text', hint: 'Words on the video (T)', run: () => actions.addText() },
       { id: 'addTitle', icon: 'titleCard', label: 'Title card', hint: 'A full-screen card that fades in and out', run: () => actions.addAnnotation('title') },
       { id: 'addArrow', icon: 'arrow', label: 'Arrow', hint: 'Point at something', run: () => actions.addAnnotation('arrow') },
-      { id: 'addBox', icon: 'box', label: 'Box', hint: 'Frame something', run: () => actions.addAnnotation('box') }
+      { id: 'addBox', icon: 'box', label: 'Box', hint: 'Frame something', run: () => actions.addAnnotation('box') },
+      // Ready-made text styles (core/text-style.js).
+      ...LOWER_THIRDS.map((t) => ({ id: `addLowerThird-${t.id}`, icon: 'text', label: t.label, hint: t.hint, run: () => actions.addLowerThird(t.id) }))
     ]
   });
   // Zooms made from the clicks, for a recording that has any.

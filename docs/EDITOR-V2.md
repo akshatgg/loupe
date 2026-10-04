@@ -126,7 +126,9 @@ item is attached to.
     webcam: { show: true, shape: "circle"|"rounded", size: 0.22, corner: "bottom-right" }
   },
   annotations: [{ id, type: "text"|"title"|"arrow"|"box"|"blur", source, start, end,
-                  x, y, w, h, x2, y2, text, color, size }],
+                  x, y, w, h, x2, y2, text, color, size,
+                  font?, weight?, align?, outline?, background?,   // text and title only
+                  animateIn?, animateOut?, animateSeconds? }],
                                  // text: x,y = centre, 0..1 of the content area; arrow/box/blur:
                                  // 0..1 of the recording's picture (they follow zooms); title:
                                  // full frame, `color` is its background
@@ -152,8 +154,9 @@ item is attached to.
                                  // A project's old `music: {...}` opens as clip a1 (repeating)
     voiceover: [{ id, file, source, t, volume: 1 }]       // anchored to a source moment
   },
-  captions: { show: false, language: "auto", segments: [{ id, source, start, end, text }],
-              style: { size: 1, position: "bottom", box: true } },
+  captions: { show: false, language: "auto", segments: [{ id, source, start, end, text, words? }],
+              style: { size: 1, position: "bottom", box: true, preset: "classic", font: "system",
+                       color: "#ffffff", activeColor: "#ffd60a", animation: "none" } },
   export: { format: "mp4"|"webm"|"gif", resolution: "1080p", quality: "balanced", fps: 60,
             codec: "h264"|"hevc" }
 }
@@ -582,6 +585,23 @@ and the whole app recording with every addition on).
   `subtitles` (path) or `subtitlesError`.
 - Check: `npm run test:e2e:captions` also runs `captions-editor.e2e.js`
   (say → recording → editor → export with burned captions + .srt).
+- Styles (2026-10): `captions.style` also has `preset`
+  (`classic | outline | karaoke | pop | typewriter`, or `custom` once the
+  style matches none), `font` (an id from `src/core/fonts.js`: a short fixed
+  list of font stacks present on macOS and Windows, nothing bundled),
+  `color`, `activeColor` and `animation` (`none | highlight | pop |
+  typewriter`). `captions/style.js` holds the preset bundles; `setCaptions`
+  applies a picked preset's bundle and renames the style when a later change
+  stops it matching. A project saved without these loads with defaults that
+  draw exactly what it drew before (`test/core-text-captions-baseline.test.mjs`
+  compares every draw call with a recording of the old code's).
+  `captions/words.js` maps a segment's `words` to output time with the same
+  `tl.toOutput` the segment uses, so cues carry `words` in output time and
+  the layer picks the spoken word from the frame's `outT` alone: cuts and
+  speed changes move the words with the sound, and preview and export agree.
+  A line whose words are missing or no longer its text is drawn whole. The
+  panel's preset tiles are drawn by `drawCaptions` itself.
+  Check: `npm run test:e2e:text`.
 
 ### The editor's layout (redesign, 2026-10)
 
@@ -616,6 +636,20 @@ Design: `docs/superpowers/specs/2026-10-04-editor-redesign-design.md`.
   `layers/transitions.js` (`transitionAt(project, tl, outT)`; fade/dip drawn
   by the layer; crossfade blended in `drawFrame` from a second full frame of
   the other side's held picture, passed as `frames["@transition"]`).
+- Text styling (2026-10): a `text` or `title` annotation may also carry
+  `font` (an id from `core/fonts.js`), `weight` (`regular | medium | bold`),
+  `align` (`left | center | right`), `outline` (0..1), `background` (text
+  only: null for the usual dark backing, a colour, or a fully clear colour
+  for none), `animateIn` / `animateOut` (`none | fade | slide | pop |
+  typewriter`) and `animateSeconds` (0.1..2). All optional: one saved
+  without them is left as it is and draws exactly as before, including its
+  0.2 s fade (0.5 s for a title card); once an animation is chosen it takes
+  `animateSeconds`, 0.4 s unless set. `core/text-style.js` holds the
+  animation arithmetic (`textAnimationAt(a, t)` from the frame's source
+  time, so preview and export agree) and `LOWER_THIRDS`, three ready-made
+  text styles (Name and title, Chapter, Callout) offered at the end of the
+  toolbar's Text menu (`addLowerThird-<id>`). `panels/annotations.js` has
+  the controls. Check: `npm run test:e2e:text`.
 - New recordings: `recorder.stop({ style })` writes the default preset's
   style (main.js reads it with `presets.defaultPresetStyle`); `migrate` takes
   `v1.style`, and the v2 source fields `webcam`, `keys`, `systemAudio`,

@@ -4,7 +4,7 @@
 //
 // Three states: nothing yet ("Generate captions", the language, and what the
 // first time downloads), working (progress with Cancel), and editing (show
-// on the video, style, the transcript). Every change is one undo step; the
+// on the video, style presets, the transcript). Every change is one undo step; the
 // transcript's text is committed when a caption loses focus or Enter is
 // pressed, so typing a sentence is one step too.
 
@@ -17,8 +17,27 @@ import { toSRT } from '../../../core/captions/format.js';
 import { createCaptionsEngine } from '../../captions/client.js';
 import { clipLayout, formatTime } from '../timeline-math.js';
 import { transcriptRows, captionIdAt, newCaptionRange, replaceSegments } from '../captions-math.js';
+import { CAPTION_PRESETS } from '../../../core/captions/style.js';
+import { FONTS } from '../../../core/fonts.js';
+import { drawCaptions, layoutCaptions } from '../../../core/layers/captions.js';
 
 const MODEL = 'standard';
+
+// What each preset tile shows: one short line, said over and over.
+const SAMPLE_TEXT = 'Words as you speak';
+const SAMPLE_WORDS = [
+  { text: ' Words', start: 0.3, end: 0.75 }, { text: ' as', start: 0.75, end: 1.1 },
+  { text: ' you', start: 1.1, end: 1.5 }, { text: ' speak', start: 1.5, end: 2.1 }
+];
+const SAMPLE_SECONDS = 3;
+const TILE = { w: 300, h: 132 };
+
+// A colour as the colour picker wants it: #rrggbb.
+function pickerColour(hex) {
+  let v = String(hex ?? '').replace('#', '');
+  if (v.length <= 4) v = [...v.slice(0, 3)].map((c) => c + c).join('');
+  return /^[0-9a-f]{6}/i.test(v) ? `#${v.slice(0, 6).toLowerCase()}` : '#ffffff';
+}
 
 const megabytes = (bytes) => `${Math.max(1, Math.round(bytes / 1e6))} MB`;
 
@@ -115,6 +134,60 @@ export default {
     });
     box.input.id = 'captionsBox';
 
+    // ---- the style: presets drawn by the same code that draws the video
+    // (layers/captions.js), so a tile shows what picking it gives.
+    const tiles = CAPTION_PRESETS.map((preset) => {
+      const canvas = h('canvas', { class: 'cap-preset-canvas', width: TILE.w, height: TILE.h, 'aria-hidden': 'true' });
+      const el = h('button', {
+        type: 'button', class: 'cap-preset', id: `captionPreset-${preset.id}`, 'aria-pressed': 'false', title: `${preset.label} captions`,
+        onclick: () => edit(() => ({ style: { preset: preset.id } }))
+      }, canvas, h('span', {}, preset.label));
+      return { preset, canvas, el };
+    });
+    const presetGrid = h('div', { class: 'cap-presets', id: 'captionPresets', role: 'group', 'aria-label': 'Caption style' }, tiles.map((t) => t.el));
+
+    function paintTile(tile, t) {
+      const ctx = tile.canvas.getContext('2d');
+      if (!ctx) return;
+      const { w, h: height } = TILE;
+      const sky = ctx.createLinearGradient(0, 0, w, height);
+      sky.addColorStop(0, '#31415f');
+      sky.addColorStop(1, '#8b6f9e');
+      ctx.fillStyle = sky;
+      ctx.fillRect(0, 0, w, height);
+      // The tile is a close-up of the middle of a frame three tiles wide.
+      const look = { ...captions().style, ...tile.preset.style, size: 1.15, position: 'bottom' };
+      const cues = [{ text: SAMPLE_TEXT, words: SAMPLE_WORDS }];
+      const area = { x: -w, y: 0, w: w * 3, h: (w * 3 * 9) / 16 };
+      const l = layoutCaptions(ctx, area, cues, look);
+      if (l) area.y += height / 2 - (l.y + l.h / 2);
+      drawCaptions(ctx, area, cues, look, t);
+    }
+
+    const still = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    function paintTiles() {
+      // Hidden (another tab, or something selected): nothing to draw for.
+      if (!presetGrid.isConnected || presetGrid.offsetParent === null) return;
+      const t = still ? 1.2 : (performance.now() / 1000) % SAMPLE_SECONDS;
+      for (const tile of tiles) paintTile(tile, t);
+    }
+    if (!still) setInterval(paintTiles, 80);
+
+    const font = h('select', { id: 'captionFont', class: 'select', 'aria-label': 'Font' },
+      FONTS.map((f) => h('option', { value: f.id }, f.label)));
+    font.addEventListener('change', () => edit(() => ({ style: { font: font.value } })));
+    const fontField = h('label', { class: 'field' }, h('span', { class: 'label' }, 'Font'), font);
+    const colourInput = (id, label, key) => {
+      const input = h('input', { type: 'color', id, class: 'cap-colour', 'aria-label': label });
+      input.addEventListener('input', () => edit(() => ({ style: { [key]: input.value } }), `captions:${key}`));
+      input.addEventListener('change', done);
+      const field = h('label', { class: 'field cap-colour-field' }, h('span', { class: 'label' }, label), input);
+      return { input, field };
+    };
+    const colour = colourInput('captionColor', 'Colour', 'color');
+    const activeColour = colourInput('captionActiveColor', 'Spoken word', 'activeColor');
+    const colours = h('div', { class: 'cap-colours' }, colour.field, activeColour.field);
+
     const count = h('h3', {});
     const list = h('div', { class: 'cap-list', id: 'captionsList' });
     const addBtn = h('button', { type: 'button', class: 'btn', id: 'captionsAdd', onclick: () => addHere() }, icon('plus'), 'Add a caption here');
@@ -127,6 +200,7 @@ export default {
       section(null, show),
       section(null, count, h('p', { class: 'hint cap-list-hint' }, 'Click a time to jump there, and fix any words right here.'), list,
         h('div', { class: 'cap-buttons' }, addBtn, saveBtn)),
+      section('Style', presetGrid, fontField, colours),
       section('Look', size, position, box),
       section('Captions from speech', againLanguage, againHint, h('div', { class: 'cap-buttons' }, againBtn, keepBtn)));
 
@@ -398,6 +472,13 @@ export default {
         size.set(c.style.size);
         position.set(c.style.position);
         box.set(c.style.box);
+        for (const tile of tiles) tile.el.setAttribute('aria-pressed', String(tile.preset.id === c.style.preset));
+        font.value = c.style.font;
+        if (document.activeElement !== colour.input) colour.input.value = pickerColour(c.style.color);
+        if (document.activeElement !== activeColour.input) activeColour.input.value = pickerColour(c.style.activeColor);
+        // Only styles that pick out the spoken word have a colour for it.
+        activeColour.field.classList.toggle('disabled', c.style.animation !== 'highlight' && c.style.animation !== 'pop');
+        paintTiles();
         renderList();
       }
     }

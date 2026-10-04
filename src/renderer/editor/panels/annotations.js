@@ -1,13 +1,21 @@
 // Annotations: text, title cards, arrows, boxes and hidden areas on the video.
 // The buttons add one at the playhead; it's then dragged into place on the
 // preview (annotation-overlay.js) and along the timeline's annotation track.
-// Selected, this panel edits its words, colour, size and how long it shows.
+// Selected, this panel edits its words, colour, size and how long it shows;
+// for text and title cards also the font, weight, alignment, outline,
+// background and how it arrives and leaves (core/text-style.js).
 
-import { h, icon, slider, section } from '../ui.js';
+import { h, icon, slider, segmented, section } from '../ui.js';
 import { updateAnnotation, removeAnnotation, MIN_RANGE_SECONDS } from '../../../core/project.js';
 import { clipLayout, rangePieces, formatTime } from '../timeline-math.js';
 import { KINDS, COLOURS, kindOf, annotationLabel } from '../annotation-math.js';
 import { plainError } from '../export-dialog.js';
+import { FONTS } from '../../../core/fonts.js';
+import {
+  TEXT_STYLE_DEFAULTS, TEXT_ANIMATIONS, ANIMATE_SECONDS_MIN, ANIMATE_SECONDS_MAX, animateSecondsOf, isClear, CLEAR
+} from '../../../core/text-style.js';
+
+const ANIMATION_LABELS = { none: 'None', fade: 'Fade', slide: 'Slide', pop: 'Pop', typewriter: 'Typewriter' };
 
 const HINTS = {
   text: 'Drag it on the video to move it, or double-click to change the words.',
@@ -64,6 +72,57 @@ export default {
       label: 'Size', min: 0.4, max: 3, step: 0.05, value: 1, format: (v) => `${Math.round(v * 100)}%`,
       onInput: (v) => change({ size: v }, 'annotation:size'), onChange: done
     });
+    // ---- how the words look (text and title cards)
+    const font = h('select', { id: 'annoFont', class: 'select', 'aria-label': 'Font' }, FONTS.map((f) => h('option', { value: f.id }, f.label)));
+    font.addEventListener('change', () => { change({ font: font.value }); done(); });
+    const fontField = h('label', { class: 'field' }, h('span', { class: 'label' }, 'Font'), font);
+    const weight = segmented({
+      label: 'Weight', value: TEXT_STYLE_DEFAULTS.weight,
+      options: [{ value: 'regular', label: 'Regular' }, { value: 'medium', label: 'Medium' }, { value: 'bold', label: 'Bold' }],
+      onChange: (v) => { change({ weight: v }); done(); }
+    });
+    weight.id = 'annoWeight';
+    const align = segmented({
+      label: 'Alignment', value: TEXT_STYLE_DEFAULTS.align,
+      options: [{ value: 'left', label: 'Left' }, { value: 'center', label: 'Centre' }, { value: 'right', label: 'Right' }],
+      onChange: (v) => { change({ align: v }); done(); }
+    });
+    align.id = 'annoAlign';
+    const outline = slider({
+      label: 'Outline', min: 0, max: 1, step: 0.05, value: 0, format: (v) => (v > 0 ? `${Math.round(v * 100)}%` : 'None'),
+      onInput: (v) => change({ outline: v }, 'annotation:outline'), onChange: done
+    });
+    outline.querySelector('input').id = 'annoOutline';
+    // The backing behind the words: the usual dark one, none, or a colour.
+    const backings = [
+      { value: null, title: 'Dark', css: 'rgba(17, 17, 20, 0.72)' }, { value: CLEAR, title: 'None', none: true },
+      ...COLOURS.map((c) => ({ value: c, title: c, css: c }))
+    ].map((o) => {
+      const b = h('button', {
+        type: 'button', class: `swatch small${o.none ? ' swatch-none' : ''}`, title: o.title, 'aria-label': `Background ${o.title}`,
+        dataset: { background: o.value ?? 'default' }, onclick: () => { change({ background: o.value }); done(); }
+      });
+      if (o.css) b.style.background = o.css;
+      return { ...o, el: b };
+    });
+    const backgroundField = h('div', { class: 'field', id: 'annoBackground' }, h('span', { class: 'label' }, 'Background'),
+      h('div', { class: 'swatches colours backings' }, backings.map((b) => b.el)));
+    const animationPicker = (id, label, key) => {
+      const select = h('select', { id, class: 'select', 'aria-label': label }, TEXT_ANIMATIONS.map((k) => h('option', { value: k }, ANIMATION_LABELS[k])));
+      select.addEventListener('change', () => { change({ [key]: select.value }); done(); });
+      return { select, field: h('label', { class: 'field' }, h('span', { class: 'label' }, label), select) };
+    };
+    const animateIn = animationPicker('annoIn', 'In', 'animateIn');
+    const animateOut = animationPicker('annoOut', 'Out', 'animateOut');
+    const animateSeconds = slider({
+      label: 'Takes', min: ANIMATE_SECONDS_MIN, max: ANIMATE_SECONDS_MAX, step: 0.05, value: TEXT_STYLE_DEFAULTS.animateSeconds,
+      format: (v) => `${v.toFixed(2)} s`,
+      onInput: (v) => change({ animateSeconds: v }, 'annotation:animateSeconds'), onChange: done
+    });
+    animateSeconds.querySelector('input').id = 'annoAnimateSeconds';
+    const styleSection = section('Style', fontField, weight, align, outline, backgroundField);
+    const animationSection = section('Animation', h('div', { class: 'anno-animations' }, animateIn.field, animateOut.field), animateSeconds);
+
     const length = slider({
       label: 'Shows for', min: 0.5, max: 20, step: 0.1, value: 3, format: (v) => `${v.toFixed(1)} s`,
       onInput: (v) => {
@@ -168,6 +227,7 @@ export default {
       section(null, heading, when, hint),
       section(null, textField, colourField, size),
       followSection,
+      styleSection, animationSection,
       section('Timing', length, h('div', { class: 'chips' }, toPlayhead)),
       section(null, remove));
 
@@ -217,6 +277,27 @@ export default {
       for (const s of swatches) s.setAttribute('aria-pressed', String(s.dataset.colour.toLowerCase() === a.color.toLowerCase()));
       size.querySelector('.label').textContent = a.type === 'blur' ? 'Block size' : a.type === 'title' ? 'Text size' : 'Size';
       size.set(a.size);
+      styleSection.hidden = !words;
+      animationSection.hidden = !words;
+      if (words) {
+        font.value = a.font ?? TEXT_STYLE_DEFAULTS.font;
+        weight.set(a.weight ?? TEXT_STYLE_DEFAULTS.weight);
+        align.set(a.align ?? TEXT_STYLE_DEFAULTS.align);
+        // A title card's colour is its background, and its words need no outline.
+        outline.hidden = a.type === 'title';
+        backgroundField.hidden = a.type === 'title';
+        outline.set(a.outline ?? 0);
+        const backing = a.background ?? null;
+        for (const b of backings) {
+          const on = b.value === null ? backing === null : b.none ? isClear(backing) : String(backing).toLowerCase() === b.value.toLowerCase();
+          b.el.setAttribute('aria-pressed', String(on));
+        }
+        animateIn.select.value = a.animateIn ?? TEXT_STYLE_DEFAULTS.animateIn;
+        animateOut.select.value = a.animateOut ?? TEXT_STYLE_DEFAULTS.animateOut;
+        // What it really takes: the short fade it always had, until changed.
+        animateSeconds.set(Math.round((a.animateSeconds ?? animateSecondsOf({ ...a, start: 0, end: 1e6 })) * 100) / 100);
+        animateSeconds.classList.toggle('disabled', (a.animateIn ?? 'fade') === 'none' && (a.animateOut ?? 'fade') === 'none');
+      }
       length.set(Math.round((a.end - a.start) * 10) / 10);
       followSection.hidden = a.type !== 'blur';
       if (a.type === 'blur') {
