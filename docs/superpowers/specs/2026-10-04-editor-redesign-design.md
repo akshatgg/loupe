@@ -233,10 +233,10 @@ restored by re-inserting that source range as a clip at its place.
   filler list (`core/captions/fillers.js`; English "um, uh, er, ah, hmm" and
   "you know / I mean / like" only when flanked by pauses) is cut, tagged
   `reason: 'filler'`. Off: those cuts are restored.
-- **Shorten silences:** a switch with a length (default: gaps over 1.0 s
-  shortened to 0.4 s), tagged `reason: 'silence'`, from word timings plus the
-  sound level (`core/audio/level.js`) so a silent demo with no words is
-  handled too.
+- **Shorten long pauses:** a switch (pauses over 1.0 s between words
+  shortened to 0.4 s), tagged `reason: 'silence'`, from the word timings. A
+  recording with no transcript has no words to measure pauses between, so
+  the switch needs the captions written first.
 
 ### 8.3 Motion blur
 
@@ -250,7 +250,10 @@ cost nothing. Preview uses 2 samples to stay real-time.
 ### 8.4 AI voice
 
 As designed in `2026-09-23-ai-voice-design.md`; its entry point becomes the
-toolbar's Voice menu.
+toolbar's Voice menu. Status: built on branch `sp3-ai-voice` and tested with
+a stand-in for the speech model; not merged until it has spoken with the
+real one (the vendored phonemizer needs its JSON imports patched first --
+`src/vendor/phonemize/README.md` on that branch).
 
 ### 8.5 Blur that follows
 

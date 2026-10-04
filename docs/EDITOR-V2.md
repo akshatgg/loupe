@@ -624,6 +624,18 @@ Design: `docs/superpowers/specs/2026-10-04-editor-redesign-design.md`.
   (Alt-drag, or the Clip inspector's Speed buttons). A zoom's right-click
   menu switches it off (`zooms[].disabled`, ignored by `solveCamera`).
 - `transcript-panel.js`: the transcript beside the preview (read-only).
+- `core/auto-zoom.js` + `applyAutoZooms` / `removeAutoZooms`: zooms made
+  from a recording's clicks (`zooms[].auto`), made by the recorder when the
+  `autoZoom` setting is on (`recording-v2.js`), remade from the Zoom menu;
+  `autoZoomNote` is the one-time note (`auto-zoom-note.js`).
+- `core/clipboard.js`: `copyItems`, `pasteItems`, `moveItems` (copy / paste /
+  duplicate, and dragging several selected things together).
+- `core/keyframes.js` `KEYFRAME_EASES`; `zooms[].ease` (`camera.js`
+  `ZOOM_EASES`); `speed[].rampIn` / `rampOut` (`timeline.js`).
+- `core/transcript-edit.js`: `cutSource` / `restoreSource`, and the filler
+  and pause switches (`project.transcript.cuts`). A caption cue leaves out
+  words that were cut and joins across a small cut (`captions/timeline.js`).
+- `core/motion-blur.js` + `compose.js` `drawMoving`: `style.motionBlur`.
 - Checks: `npm run test:e2e:redesign`.
 
 ### Visuals (wired)

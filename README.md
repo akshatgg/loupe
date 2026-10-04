@@ -41,9 +41,11 @@ the zoom key is Alt by default.
 - **Record** the entire screen, one window, or part of one (drag a rectangle — e.g. a browser window without its toolbar).
 - **Zoom while recording:** hold a zoom key (⌥ by default; pick ⌃ ⌘ or ⇧ instead) or a mouse side button and scroll — up to zoom in, back to zoom out, up to 4×. The view follows your cursor smoothly.
 - **See what's in shot:** while zoomed, a frame on your screen shows exactly what the video will show, and its zoom level. It is never recorded, and neither is the control bar.
-- **Edit:** split, trim, cut, reorder and freeze clips; add, move, switch off or remove zooms; speed up or slow down any stretch (0.25×–8×, voices keep a natural pitch); text, arrows, boxes and blurs; music, voiceover and captions written on your computer.
-- **One place for settings:** click anything on the timeline and its settings show on the right; click away and the video's own (Look, Cursor, Camera, Captions, Audio) come back. Select several things with ⌘-click, ⇧-click or a box, and delete them together.
-- **Transcript:** what was said, beside the preview; click a word to go there.
+- **Zoom on your clicks:** a new recording is zoomed in wherever you clicked; keep the zooms, ask for fewer, or remove them, and switch any one off.
+- **Edit:** split, trim, cut, reorder and freeze clips; copy, paste and duplicate anything; speed up or slow down any stretch (0.25×–8×, voices keep a natural pitch) and choose how it eases in and out; text with fonts and animation, arrows, boxes, and blurs that follow what they hide; music, voiceover and captions written on your computer.
+- **Edit by the words:** the transcript sits beside the preview. Pick words and delete them to cut the video, put them back, remove filler words, and shorten long pauses.
+- **One place for settings:** click anything on the timeline and its settings show on the right; click away and the video's own (Look, Cursor, Camera, Captions, Audio) come back. Select several things with ⌘-click, ⇧-click or a box, and move or delete them together.
+- **Polish:** motion blur on zooms and the cursor, word-by-word caption styles, pictures and videos on top with green screen, shapes and blend modes, and finer colour and sound controls under "Advanced".
 - **Export** MP4, WebM or GIF, up to 4K and 60 fps.
 - Everything stays on your computer — no account, no upload.
 
