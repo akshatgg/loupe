@@ -209,7 +209,7 @@ async function pickerChecks() {
   assert.strictEqual(await checked('systemAudio'), false);
   assert.strictEqual(await checked('recordKeys'), true);
   assert.strictEqual(await checked('camera'), false);
-  // One row of five on/off buttons: a short label each, the full wording as
+  // One row of six on/off buttons: a short label each, the full wording as
   // the tooltip.
   const toggles = await js(`[...document.querySelectorAll('.options .toggle')].map((l) => ({
     id: l.querySelector('input').id, label: l.textContent.trim(), title: l.title,
@@ -219,6 +219,7 @@ async function pickerChecks() {
     ['systemAudio', 'Computer sound', 'Record computer sound'],
     ['camera', 'Camera', 'Add yourself to the recording with the camera'],
     ['recordKeys', 'Shortcuts', 'Show keyboard shortcuts I press (never what I type)'],
+    ['autoZoom', 'Zoom on clicks', 'Zoom in where I click, once the recording is done. Change or remove the zooms afterwards.'],
     ['countdown', 'Countdown', 'Count down 3, 2, 1 before recording']
   ]);
   assert.strictEqual(new Set(toggles.map((t) => t.top)).size, 1, `all on one row: ${JSON.stringify(toggles)}`);
