@@ -7,6 +7,7 @@ import { h, icon, slider, section } from '../ui.js';
 import { updateAnnotation, removeAnnotation, MIN_RANGE_SECONDS } from '../../../core/project.js';
 import { clipLayout, rangePieces, formatTime } from '../timeline-math.js';
 import { KINDS, COLOURS, kindOf, annotationLabel } from '../annotation-math.js';
+import { plainError } from '../export-dialog.js';
 
 const HINTS = {
   text: 'Drag it on the video to move it, or double-click to change the words.',
@@ -92,9 +93,81 @@ export default {
         if (a) store.apply((p) => removeAnnotation(p, a.id));
       }
     }, icon('trash'), 'Remove');
+    // ---- a hidden area that follows what's under it (core/track.js): the
+    // recording's frames are matched in a hidden window (main's ipc/track.js)
+    // and the path that comes back is stored on the annotation as one edit.
+    const loupe = globalThis.window?.loupe;
+    let following = null; // { id } while a follow runs
+    const followNotes = new Map(); // annotation id -> where a follow stopped
+    const followBar = h('div', { class: 'progress-fill' });
+    const followBtn = h('button', {
+      type: 'button', class: 'btn', id: 'blurFollow',
+      title: 'Keep it on what it hides when that scrolls or moves', onclick: () => follow()
+    }, 'Follow what’s under it');
+    const unfollowBtn = h('button', {
+      type: 'button', class: 'btn', id: 'blurUnfollow', title: 'It stays where it starts',
+      onclick: () => {
+        const a = selected();
+        if (!a?.path) return;
+        followNotes.delete(a.id);
+        store.apply((p) => updateAnnotation(p, a.id, { follow: undefined, path: undefined }));
+      }
+    }, 'Stop following');
+    const followWork = h('div', { class: 'progress-row', id: 'blurFollowProgress', hidden: true },
+      h('div', { class: 'progress', role: 'progressbar', 'aria-label': 'Following what’s under it' }, followBar),
+      h('button', { type: 'button', class: 'btn', id: 'blurFollowCancel', onclick: () => loupe?.cancelFollowBlur() }, 'Cancel'));
+    const followNote = h('p', { class: 'hint', id: 'blurFollowNote', hidden: true });
+    const followSection = section('When it moves', h('div', { class: 'btn-row' }, followBtn, unfollowBtn), followWork, followNote);
+
+    // The moment of the video (not of the recording) a source time plays at.
+    const shownAt = (a, t) => {
+      const p = store.project;
+      const piece = rangePieces(p, clipLayout(p, store.tl), a.source, t, Math.max(a.end, t + MIN_RANGE_SECONDS))[0];
+      return formatTime(piece ? piece.outStart : t, { fraction: true });
+    };
+
+    async function follow() {
+      const a = selected();
+      if (!a || a.type !== 'blur' || following || !loupe?.followBlur) return;
+      following = { id: a.id };
+      followNotes.delete(a.id);
+      followBar.style.width = '0%';
+      update();
+      const stop = loupe.onFollowBlurProgress((p) => {
+        if (p.total > 0) followBar.style.width = `${Math.round((p.frame / p.total) * 100)}%`;
+      });
+      try {
+        // Main follows the box as it is saved, so it hears of the newest edit first.
+        await loupe.saveProject(store.project);
+        const result = await loupe.followBlur(a.id);
+        if (result.cancelled) return;
+        const now = store.project.annotations.find((q) => q.id === a.id);
+        if (!now) return;
+        const same = now.start === result.start && ['x', 'y', 'w', 'h'].every((k) => now[k] === result.rect[k]);
+        if (!same) {
+          editor.toast('The hidden area was changed while it was being followed. Follow it again.');
+          return;
+        }
+        store.apply((p) => updateAnnotation(p, a.id, { follow: true, path: result.path }));
+        if (result.lostAt !== null) {
+          const note = `Lost what was under the box at ${shownAt(now, result.lostAt)}. The blur stays put from there. ` +
+            'To cover the rest, end this one there and add another from that point.';
+          followNotes.set(a.id, note);
+          editor.toast(note);
+        }
+      } catch (err) {
+        editor.toast(plainError(err));
+      } finally {
+        stop();
+        following = null;
+        update();
+      }
+    }
+
     const detail = h('div', {},
       section(null, heading, when, hint),
       section(null, textField, colourField, size),
+      followSection,
       section('Timing', length, h('div', { class: 'chips' }, toPlayhead)),
       section(null, remove));
 
@@ -145,6 +218,21 @@ export default {
       size.querySelector('.label').textContent = a.type === 'blur' ? 'Block size' : a.type === 'title' ? 'Text size' : 'Size';
       size.set(a.size);
       length.set(Math.round((a.end - a.start) * 10) / 10);
+      followSection.hidden = a.type !== 'blur';
+      if (a.type === 'blur') {
+        const busy = following?.id === a.id;
+        followBtn.hidden = busy;
+        followBtn.disabled = Boolean(following);
+        followBtn.textContent = a.path ? 'Follow again' : 'Follow what’s under it';
+        unfollowBtn.hidden = busy || !a.path;
+        followWork.hidden = !busy;
+        // A note about where it stopped goes once the path does (an undo, too).
+        if (!a.path) followNotes.delete(a.id);
+        const note = busy ? null : followNotes.get(a.id) ??
+          (a.path ? 'It moves with what was under it. Drag it on the video to shift the whole path.' : null);
+        followNote.hidden = !note;
+        followNote.textContent = note ?? '';
+      }
     }
     update();
     return { update };

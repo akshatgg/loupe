@@ -93,6 +93,16 @@ contextBridge.exposeInMainWorld('loupe', {
     ipcRenderer.on('export:progress', listener);
     return () => ipcRenderer.removeListener('export:progress', listener);
   },
+  // A hidden area that follows what's under it (src/main/ipc/track.js): runs
+  // in a hidden window and resolves with { path, lostAt, start, rect } for
+  // the editor to store, or { cancelled: true }; progress is { frame, total }.
+  followBlur: (id) => ipcRenderer.invoke('track:start', { id }),
+  cancelFollowBlur: () => ipcRenderer.invoke('track:cancel'),
+  onFollowBlurProgress: (cb) => {
+    const listener = (_e, d) => cb(d);
+    ipcRenderer.on('track:progress', listener);
+    return () => ipcRenderer.removeListener('track:progress', listener);
+  },
   // After export (src/main/ipc/share.js, src/main/ipc/fileActions.js document
   // the shapes). Share: hide the button unless shareStatus().enabled;
   // shareUpload resolves {ok, url | code, message}, never throws for
