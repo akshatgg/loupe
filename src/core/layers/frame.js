@@ -1,4 +1,5 @@
 import { gradeFrame } from './lut-gl.js';
+import { needsGrade, vignetteStops } from '../grade.js';
 
 // Layers 2 and 3: the recording itself. The content area gets its drop
 // shadow here; compose.js then clips to the rounded content area and this
@@ -60,7 +61,9 @@ export function draw(ctx, state) {
   // Its LUT (loaded into assets.luts by the player and the exporter): the
   // frame graded first, then drawn as the frame would be.
   const lut = look?.lut ? state.assets?.luts?.[look.lut] : null;
-  const image = (lut && gradeFrame(state.frame, lut, look.lutMix ?? 1)) || state.frame;
+  // The finer colour tools (grade.js) go through the same pass.
+  const grade = needsGrade(look?.color) ? look.color : null;
+  const image = ((lut || grade) && gradeFrame(state.frame, lut, look.lutMix ?? 1, grade)) || state.frame;
   if (look && look.filter !== 'none') {
     ctx.save();
     ctx.filter = look.filter;
@@ -72,6 +75,18 @@ export function draw(ctx, state) {
     ctx.save();
     ctx.globalCompositeOperation = look.tint.blend;
     ctx.fillStyle = look.tint.color;
+    ctx.fillRect(content.x, content.y, content.w, content.h);
+    ctx.restore();
+  }
+  // Dark corners: black from the middle of the picture out to its corners.
+  const stops = vignetteStops(look?.color?.vignette ?? 0);
+  if (stops.length && typeof ctx.createRadialGradient === 'function') {
+    const cx = content.x + content.w / 2;
+    const cy = content.y + content.h / 2;
+    const corners = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.hypot(content.w, content.h) / 2);
+    for (const [at, dark] of stops) corners.addColorStop(at, `rgba(0, 0, 0, ${dark.toFixed(3)})`);
+    ctx.save();
+    ctx.fillStyle = corners;
     ctx.fillRect(content.x, content.y, content.w, content.h);
     ctx.restore();
   }

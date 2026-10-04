@@ -9,18 +9,25 @@
 //   color:     { brightness, contrast, saturation, filter, lut, lutMix }
 //     -1..1 each (0 = as recorded), a preset look from COLOR_FILTERS, and a
 //     .cube LUT copied into the project ('luts/<file>', or null) applied at
-//     lutMix (0..1) -- graded on the GPU by layers/lut-gl.js.
+//     lutMix (0..1) -- graded on the GPU by layers/lut-gl.js. And the finer
+//     tools of grade.js: temperature, tint, highlights, shadows, curve,
+//     sharpen (the same GPU pass) and vignette (drawn over the picture).
 //
 // compose.js applies the transform to the recording and what sits on it
 // (the cursor, its clicks) -- not to captions, titles or the webcam, which
 // have their own places -- and the colour as a canvas filter when drawing
 // the recording's frame, plus a tint for the warm and cool looks.
 
+import { needsGrade } from './grade.js';
+
 export const COLOR_FILTERS = ['none', 'bw', 'sepia', 'vivid', 'warm', 'cool', 'faded', 'dramatic'];
 
 const DEFAULT_TRANSFORM = { x: 0, y: 0, scale: 1, rotate: 0, flipH: false, flipV: false };
 const DEFAULT_CROP = { left: 0, top: 0, right: 0, bottom: 0 };
-const DEFAULT_COLOR = { brightness: 0, contrast: 0, saturation: 0, filter: 'none', lut: null, lutMix: 1 };
+const DEFAULT_COLOR = {
+  brightness: 0, contrast: 0, saturation: 0, filter: 'none', lut: null, lutMix: 1,
+  temperature: 0, tint: 0, highlights: 0, shadows: 0, vignette: 0, sharpen: 0, curve: null
+};
 
 export function clipTransform(clip) {
   const t = clip?.transform ?? {};
@@ -68,7 +75,8 @@ export function isPlain(clip) {
   const c = clipColor(clip);
   return t.x === 0 && t.y === 0 && t.scale === 1 && t.rotate === 0 && !t.flipH && !t.flipV &&
     !t.crop.left && !t.crop.top && !t.crop.right && !t.crop.bottom &&
-    !c.brightness && !c.contrast && !c.saturation && c.filter === 'none' && !c.lut;
+    !c.brightness && !c.contrast && !c.saturation && c.filter === 'none' && !c.lut &&
+    !c.vignette && !needsGrade(c);
 }
 
 // The canvas transform [a, b, c, d, e, f] (setTransform order) that places

@@ -15,6 +15,7 @@ import { formatTime, parseTime } from '../timeline-math.js';
 import { valueAt, keyframeAt, neighbours } from '../../../core/keyframes.js';
 import { advanced } from '../disclosure.js';
 import { overlayEffects } from '../../../core/overlay-effects.js';
+import { createCurveEditor, createHistogram } from '../colour-tools.js';
 
 const FILTER_LABELS = {
   none: 'None', bw: 'B&W', sepia: 'Sepia', vivid: 'Vivid', warm: 'Warm', cool: 'Cool', faded: 'Faded', dramatic: 'Dramatic'
@@ -216,7 +217,34 @@ export default {
       }, icon('trash', { size: 16 })));
     const removeLut = lutRow.lastElementChild;
     const lutMix = sl('clipLutMix', 'LUT amount', 0, 1, 0.01, percent, (v) => ({ color: { lutMix: v } }));
-    const colourSection = section('Colour', filters, bright, contrast, saturation, lutRow, lutMix, resetColour);
+    // Advanced: the finer colour tools (core/grade.js), a curve and a histogram.
+    const fine = (id, label, title, min, key) => {
+      const row = sl(id, label, min, 1, 0.01, min < 0 ? signed : percent, (v) => ({ color: { [key]: v } }));
+      row.title = title;
+      return row;
+    };
+    const temperature = fine('clipTemperature', 'Warmth', 'Temperature: left is cooler (bluer), right is warmer', -1, 'temperature');
+    const tint = fine('clipTint', 'Tint', 'Tint: left is greener, right is pinker (magenta)', -1, 'tint');
+    const shadows = fine('clipShadows', 'Brighten shadows', 'Shadows: the dark parts only; left darkens them', -1, 'shadows');
+    const highlights = fine('clipHighlights', 'Brighten highlights', 'Highlights: the bright parts only; left darkens them', -1, 'highlights');
+    const vignette = fine('clipVignette', 'Darken corners', 'Vignette', 0, 'vignette');
+    const sharpen = fine('clipSharpen', 'Sharpen', 'Sharpening: edges made crisper', 0, 'sharpen');
+    const curve = createCurveEditor({ id: 'clipCurve', onInput: (points) => look({ color: { curve: points } }, 'clipCurve'), onChange: done });
+    const curveField = h('div', { class: 'field' },
+      h('span', { class: 'field-row' }, h('span', { class: 'label' }, 'Curve'),
+        h('button', { type: 'button', class: 'btn small', id: 'clipCurveReset', onclick: () => look({ color: { curve: null } }) }, 'Straighten')),
+      curve.el,
+      h('p', { class: 'hint' }, 'Click to add a point, drag it up to brighten or down to darken, double-click it to remove.'));
+    const histo = createHistogram({ id: 'clipHistogram', source: () => document.getElementById('preview') });
+    const histoField = h('div', { class: 'field' }, h('span', { class: 'label' }, 'Brightness of this frame'), histo.el,
+      h('p', { class: 'hint' }, 'Dark on the left, bright on the right.'));
+    const colourAdvanced = advanced('clipColour', { id: 'clipColourAdvanced' }, temperature, tint, shadows, highlights, vignette, sharpen, curveField, histoField);
+    // The histogram follows the preview: at once when this opens, and a few
+    // times a second while it shows (playing or not; it is a small picture).
+    const showing = () => colourAdvanced.open && histo.el.offsetParent !== null;
+    colourAdvanced.addEventListener('toggle', () => { if (showing()) { curve.draw(); histo.draw(); } });
+    setInterval(() => { if (showing()) histo.draw(); }, 250);
+    const colourSection = section('Colour', filters, bright, contrast, saturation, lutRow, lutMix, colourAdvanced, resetColour);
 
     // ---- an overlay: a picture or video over the video
     const oTitle = h('h3', { class: 'clip-title' });
@@ -358,6 +386,13 @@ export default {
       lutMix.hidden = !c.lut;
       lutMix.set(c.lutMix);
       removeLut.hidden = !c.lut;
+      temperature.set(c.temperature);
+      tint.set(c.tint);
+      shadows.set(c.shadows);
+      highlights.set(c.highlights);
+      vignette.set(c.vignette);
+      sharpen.set(c.sharpen);
+      curve.set(c.curve);
       const { clip, index, bounds } = s;
       const held = clip.hold > 0;
       title.textContent = held ? `Freeze frame (clip ${index + 1})` : `Clip ${index + 1}`;

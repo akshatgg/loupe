@@ -299,7 +299,7 @@ function applyLook(ctx, state) {
   ctx.beginPath();
   ctx.rect(crop.x, crop.y, crop.w, crop.h);
   ctx.clip();
-  state.look = { filter: cssFilter(color), tint: tintOf(color), crop, lut: color.lut, lutMix: color.lutMix };
+  state.look = { filter: cssFilter(color), tint: tintOf(color), crop, lut: color.lut, lutMix: color.lutMix, color };
 }
 
 // What still shows over a gap (a deleted clip's place, left black): things

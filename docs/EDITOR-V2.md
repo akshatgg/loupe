@@ -263,6 +263,13 @@ flushes a pending save first; closing the editor and quitting flush too.
   GPU, `core/look.js`, `core/lut.js`, `layers/lut-gl.js`, `ipc/luts.js`);
   ◆ keyframes (`core/keyframes.js`) on position, scale, rotation (clips, in
   recording time) and opacity (overlays, from their start).
+  Colour > Advanced (`core/grade.js`, all optional, 0 = as recorded):
+  `temperature`, `tint`, `highlights`, `shadows`, `sharpen` and `curve`
+  (2-8 points, a monotone cubic) in the same GPU pass as the LUT, before it
+  (`gradePixel` is the CPU reference and fallback); `vignette` drawn over
+  the picture by `layers/frame.js`; a curve editor and a brightness
+  histogram of the preview (`colour-tools.js`).
+  Check: `test/e2e/effects-colour.e2e.js` (`npm run test:e2e:effects`).
 - Transitions (`layers/transitions.js transitionPlan`): fade, crossfade, dip
   to black / white, blur, wipe left / right / up / down, slide left / right,
   circle, zoom; two-picture ones get the other side's held frame.

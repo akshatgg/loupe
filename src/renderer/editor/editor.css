@@ -716,6 +716,13 @@ kbd {
 .field.chooser { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .field.chooser[hidden], .advanced .field[hidden] { display: none; }
 .field.chooser .select { width: auto; max-width: 60%; }
+.curve-editor, .histogram {
+  display: block; width: 100%; margin: 6px 0; border: 1px solid var(--line); border-radius: 6px;
+  background: rgba(0, 0, 0, .22); color: var(--ink);
+}
+.curve-editor { height: 150px; cursor: crosshair; touch-action: none; }
+.histogram { height: 56px; color: var(--ink-3); }
+.advanced .field-row .btn.small { margin-left: auto; }
 .field.chooser input[type="color"] { width: 44px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: transparent; cursor: pointer; }
 
 /* ---- overlay rows (timeline-overlays.js), above the clips */

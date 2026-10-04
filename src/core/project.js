@@ -10,6 +10,7 @@
 
 import { buildTimeline } from './timeline.js';
 import { COLOR_FILTERS } from './look.js';
+import { MAX_CURVE_POINTS } from './grade.js';
 import { OVERLAY_BLENDS, MASK_SHAPES, defaultMask, defaultKey } from './overlay-effects.js';
 import { setKeyframe, removeKeyframe } from './keyframes.js';
 import { clipLength, clipEnd, freeLane, audioName, laneOf, splitPoints, MAX_LANES, MIN_AUDIO_SECONDS } from './audio/clips.js';
@@ -443,6 +444,26 @@ function validateColor(c) {
     if (!/^luts\/[^/\\]+\.cube$/i.test(c.lut) || c.lut.includes('..')) fail('A LUT must be a .cube file in the project\u2019s luts folder');
   }
   if (c.lutMix !== undefined) num(c.lutMix, 'LUT amount', 0, 1);
+  // The finer tools (grade.js); every one optional.
+  if (c.temperature !== undefined) num(c.temperature, 'Warmth', -1, 1);
+  if (c.tint !== undefined) num(c.tint, 'Tint', -1, 1);
+  if (c.highlights !== undefined) num(c.highlights, 'Highlights', -1, 1);
+  if (c.shadows !== undefined) num(c.shadows, 'Shadows', -1, 1);
+  if (c.vignette !== undefined) num(c.vignette, 'Dark corners', 0, 1);
+  if (c.sharpen !== undefined) num(c.sharpen, 'Sharpen', 0, 1);
+  if (c.curve !== undefined && c.curve !== null) {
+    if (!Array.isArray(c.curve) || c.curve.length < 2 || c.curve.length > MAX_CURVE_POINTS) {
+      fail(`A colour curve must be a list of 2 to ${MAX_CURVE_POINTS} points`);
+    }
+    let last = -Infinity;
+    for (const pt of c.curve) {
+      if (!isObj(pt)) fail('A colour curve point is not an object');
+      num(pt.x, 'Curve point position', 0, 1);
+      num(pt.y, 'Curve point height', 0, 1);
+      if (pt.x <= last) fail('A colour curve\u2019s points must go from left to right');
+      last = pt.x;
+    }
+  }
 }
 
 function validateSpeedSegment(s, sources) {
