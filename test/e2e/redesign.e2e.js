@@ -511,6 +511,65 @@ async function run() {
     await key('Escape');
   });
 
+  await check('transcript editing: pick words and cut them, put them back, remove filler words and shorten pauses \u2014 measured in the export', async () => {
+    // One clip again, and a transcript with fillers and a long pause.
+    await js(`window.__editor.store.apply((p) => { const k = p.clips[0].source; const C = window.__editor.editor.core;
+      return C.setCaptions({ ...p, clips: [{ id: 'c1', source: k, start: 0, end: 6 }], transitions: [] }, { segments: [
+        { id: 's1', source: k, start: 0.4, end: 5.6, text: 'So um this is uh the editor ... and done',
+          words: [{ text: 'So', start: 0.4, end: 0.6 }, { text: 'um', start: 0.7, end: 1.0 }, { text: 'this', start: 1.1, end: 1.3 },
+            { text: 'is', start: 1.35, end: 1.5 }, { text: 'uh', start: 1.6, end: 1.9 }, { text: 'the', start: 2.0, end: 2.1 },
+            { text: 'editor', start: 2.15, end: 2.6 }, { text: 'and', start: 4.8, end: 5.0 }, { text: 'done', start: 5.05, end: 5.6 }] }] }); })`);
+    const length = () => js('window.__editor.store.tl.duration');
+    near(await length(), 6, 1e-6, 'six seconds to start with');
+    await clickOn('#transcriptBtn');
+    assert.strictEqual(await js('document.querySelectorAll("#transcriptBody .tw").length'), 9);
+    // Pick "this is" (click, then shift-click) and cut it.
+    await clickOn('#transcriptBody .tw[data-i="2"]');
+    await clickOn('#transcriptBody .tw[data-i="3"]', { modifiers: ['shift'] });
+    assert.strictEqual(await js('document.querySelectorAll("#transcriptBody .tw.picked").length'), 2);
+    assert.strictEqual(await js('document.getElementById("transcriptCut").textContent'), 'Cut 2 words');
+    await shot('14-transcript-picked');
+    // Delete, with the transcript in focus, cuts the words (not the timeline's selection).
+    send({ type: 'keyDown', keyCode: 'Backspace' });
+    send({ type: 'keyUp', keyCode: 'Backspace' });
+    await sleep(200);
+    near(await length(), 6 - 0.4, 1e-6, 'shorter by "this is" (1.1 to 1.5)');
+    assert.deepStrictEqual(await js('[...document.querySelectorAll("#transcriptBody .tw.cut")].map((w) => w.textContent)'), ['this', 'is'], 'struck through, still listed');
+    assert.strictEqual((await project()).clips.length, 2);
+    near(lengthOf(await exportFile()), 5.6, 0.1, 'the export is shorter too');
+    // A struck word, clicked, offers to put the part back.
+    await clickOn('#transcriptBody .tw.cut');
+    assert.strictEqual(await js('document.getElementById("transcriptRestore").hidden'), false);
+    await clickOn('#transcriptRestore');
+    near(await length(), 6, 1e-6, 'back to six seconds');
+    assert.strictEqual(await js('document.querySelectorAll("#transcriptBody .tw.cut").length'), 0);
+    assert.strictEqual((await project()).clips.length, 1, 'one clip again');
+    // Remove filler words: "um" and "uh" go, 0.6 s in all; the switch shows on.
+    await js('document.getElementById("transcriptFillers").click()');
+    near(await length(), 6 - 0.6, 1e-6, 'shorter by the two fillers');
+    assert.deepStrictEqual(await js('[...document.querySelectorAll("#transcriptBody .tw.cut")].map((w) => w.textContent)'), ['um', 'uh']);
+    assert.match(await js('document.getElementById("toast").textContent'), /Filler words removed: 0\.6 s shorter/);
+    // Shorten long pauses: the 2.2 s pause before "and" becomes 0.4 s.
+    await js('document.getElementById("transcriptSilences").click()');
+    near(await length(), 6 - 0.6 - 1.8, 1e-6, 'and by the pause');
+    await shot('15-transcript-switches');
+    const tidy = await exportFile();
+    near(lengthOf(tidy), 3.6, 0.1, 'the export has neither');
+    // Off again, in the other order: everything returns.
+    await js('document.getElementById("transcriptFillers").click()');
+    assert.strictEqual(await js('document.getElementById("transcriptFillers").checked'), false);
+    near(await length(), 6 - 1.8, 1e-6, 'fillers back');
+    await js('document.getElementById("transcriptSilences").click()');
+    near(await length(), 6, 1e-6, 'pauses back');
+    assert.strictEqual((await project()).clips.length, 1);
+    // Undo steps back through the switches too.
+    await js('window.__editor.store.undo()');
+    assert.strictEqual(await js('document.getElementById("transcriptSilences").checked'), true, 'undo: the pause switch is on again');
+    await js('window.__editor.store.redo()');
+    await clickOn('#transcriptClose');
+    await js('window.__editor.store.apply((p) => ({ ...p, captions: { ...p.captions, segments: [] } }))');
+  });
+
   await check('Snap off: a zoom dragged near the playhead no longer jumps to it', async () => {
     await seek(2);
     const y = zoomY;

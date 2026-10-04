@@ -54,3 +54,20 @@ test('wordAt finds the word being said, and nothing in a long silence', () => {
   assert.equal(wordAt(words, 7), 3);
   assert.equal(wordAt([], 1), -1);
 });
+
+test('with cut words kept, they sit where they were said, marked cut, and are never the word being said', async () => {
+  const { wordsRange } = await import('../src/renderer/editor/transcript-panel.js');
+  const p = P.cutRange(project(), 1.55, 2.3);
+  const words = transcriptWords(p, buildTimeline(p), { withCut: true });
+  assert.deepEqual(words.map((w) => [w.text, Boolean(w.cut)]), [['Hello', false], ['there', true], ['world', false], ['A line without word times', false]]);
+  assert.equal(wordAt(words, 1.56), 0, 'the cut word is skipped');
+  assert.deepEqual(wordsRange(words, 0, 2), { source: 'main', start: 1, end: 3, count: 2 });
+  assert.deepEqual(wordsRange(words, 2, 0), { source: 'main', start: 1, end: 3, count: 2 }, 'picked backwards');
+  assert.equal(wordsRange(words, 1, 1), null, 'only a cut word: nothing to cut');
+});
+
+test('words carry their moment of the recording', () => {
+  const p = project();
+  const [hello] = transcriptWords(p, buildTimeline(p));
+  assert.deepEqual([hello.source, hello.start, hello.end], ['main', 1, 1.5]);
+});

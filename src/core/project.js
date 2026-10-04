@@ -754,6 +754,14 @@ export function validateProject(p) {
     export: p.export ? { ...defaultExport(), ...p.export } : defaultExport()
   };
   if (out.autoZoomNote !== undefined && out.autoZoomNote !== true) delete out.autoZoomNote;
+  // What the transcript's switches cut (transcript-edit.js); anything that
+  // isn't a list of ranges is dropped rather than refused.
+  if (out.transcript !== undefined) {
+    const cuts = Array.isArray(out.transcript?.cuts) ? out.transcript.cuts.filter((c) => isObj(c) && sources[c.source] &&
+      isNum(c.start) && isNum(c.end) && c.end > c.start && ['filler', 'silence'].includes(c.reason)).slice(0, 5000) : [];
+    if (cuts.length) out.transcript = { cuts };
+    else delete out.transcript;
+  }
   if (!Array.isArray(p.clips) || p.clips.length === 0) fail('The project has no clips');
   p.clips.forEach((c) => validateClip(c, sources));
   if (new Set(p.clips.map((c) => c.id)).size !== p.clips.length) fail('Two clips have the same id');

@@ -124,3 +124,13 @@
 }
 .zoom-note p { margin: 0; flex: 1; min-width: 180px; color: var(--ink); }
 .zoom-note .btn-row { flex-wrap: nowrap; gap: 6px; }
+
+.transcript-body:focus-visible { outline: none; }
+.tw.picked { background: rgba(138, 180, 248, .28); color: var(--ink); border-radius: 0; }
+.tw.cut { text-decoration: line-through; color: var(--ink-3); opacity: .75; }
+.tw.cut:hover { color: var(--ink-2); opacity: 1; }
+.transcript-actions { display: flex; gap: 8px; padding: 0 18px; }
+.transcript-actions:has(.btn:not([hidden])) { padding: 8px 18px; border-top: 1px solid var(--line); }
+.transcript-foot { padding: 6px 18px 12px; border-top: 1px solid var(--line); }
+.transcript-foot.disabled { opacity: .5; pointer-events: none; }
+.transcript-foot[hidden] { display: none; }
