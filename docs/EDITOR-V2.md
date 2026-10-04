@@ -267,6 +267,13 @@ flushes a pending save first; closing the editor and quitting flush too.
   GPU, `core/look.js`, `core/lut.js`, `layers/lut-gl.js`, `ipc/luts.js`);
   ◆ keyframes (`core/keyframes.js`) on position, scale, rotation (clips, in
   recording time) and opacity (overlays, from their start).
+  Colour > Advanced (`core/grade.js`, all optional, 0 = as recorded):
+  `temperature`, `tint`, `highlights`, `shadows`, `sharpen` and `curve`
+  (2-8 points, a monotone cubic) in the same GPU pass as the LUT, before it
+  (`gradePixel` is the CPU reference and fallback); `vignette` drawn over
+  the picture by `layers/frame.js`; a curve editor and a brightness
+  histogram of the preview (`colour-tools.js`).
+  Check: `test/e2e/effects-colour.e2e.js` (`npm run test:e2e:effects`).
 - Transitions (`layers/transitions.js transitionPlan`): fade, crossfade, dip
   to black / white, blur, wipe left / right / up / down, slide left / right,
   circle, zoom; two-picture ones get the other side's held frame.
@@ -274,6 +281,12 @@ flushes a pending save first; closing the editor and quitting flush too.
   `ipc/media.js`): pictures and videos on rows V2, V3... above the clips
   (the Overlay button), a picture-in-picture until moved, trimmed and moved
   like clips, placed, faded and keyframed in the Clip panel.
+  Advanced (folded; `disclosure.js`, open/closed kept in localStorage):
+  `blend` (normal, multiply, screen, overlay, soft-light, add), `mask`
+  ({ shape: none | rectangle | ellipse, feather }) and `key` (a green
+  screen: { on, color, tolerance, softness }, measured in chroma) --
+  `core/overlay-effects.js` is the reference maths, `layers/key-gl.js` the
+  shader (no GPU: drawn unkeyed). All optional; without them, as before.
   Checks: `test/e2e/clip-effects.e2e.js`, `test/e2e/overlays.e2e.js`.
 - `cut-dialog.js` ("Cut", X): From/To times (`timeline-math.js` `parseTime`,
   `cutRanges`) -> "Remove this part" or "Keep only this part", core

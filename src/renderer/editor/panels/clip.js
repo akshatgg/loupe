@@ -13,6 +13,9 @@ import * as P from '../../../core/project.js';
 import { clipTransform, clipColor, COLOR_FILTERS } from '../../../core/look.js';
 import { formatTime, parseTime } from '../timeline-math.js';
 import { valueAt, keyframeAt, neighbours, KEYFRAME_EASES } from '../../../core/keyframes.js';
+import { advanced } from '../disclosure.js';
+import { overlayEffects } from '../../../core/overlay-effects.js';
+import { createCurveEditor, createHistogram } from '../colour-tools.js';
 
 const FILTER_LABELS = {
   none: 'None', bw: 'B&W', sepia: 'Sepia', vivid: 'Vivid', warm: 'Warm', cool: 'Cool', faded: 'Faded', dramatic: 'Dramatic'
@@ -216,7 +219,34 @@ export default {
       }, icon('trash', { size: 16 })));
     const removeLut = lutRow.lastElementChild;
     const lutMix = sl('clipLutMix', 'LUT amount', 0, 1, 0.01, percent, (v) => ({ color: { lutMix: v } }));
-    const colourSection = section('Colour', filters, bright, contrast, saturation, lutRow, lutMix, resetColour);
+    // Advanced: the finer colour tools (core/grade.js), a curve and a histogram.
+    const fine = (id, label, title, min, key) => {
+      const row = sl(id, label, min, 1, 0.01, min < 0 ? signed : percent, (v) => ({ color: { [key]: v } }));
+      row.title = title;
+      return row;
+    };
+    const temperature = fine('clipTemperature', 'Warmth', 'Temperature: left is cooler (bluer), right is warmer', -1, 'temperature');
+    const tint = fine('clipTint', 'Tint', 'Tint: left is greener, right is pinker (magenta)', -1, 'tint');
+    const shadows = fine('clipShadows', 'Brighten shadows', 'Shadows: the dark parts only; left darkens them', -1, 'shadows');
+    const highlights = fine('clipHighlights', 'Brighten highlights', 'Highlights: the bright parts only; left darkens them', -1, 'highlights');
+    const vignette = fine('clipVignette', 'Darken corners', 'Vignette', 0, 'vignette');
+    const sharpen = fine('clipSharpen', 'Sharpen', 'Sharpening: edges made crisper', 0, 'sharpen');
+    const curve = createCurveEditor({ id: 'clipCurve', onInput: (points) => look({ color: { curve: points } }, 'clipCurve'), onChange: done });
+    const curveField = h('div', { class: 'field' },
+      h('span', { class: 'field-row' }, h('span', { class: 'label' }, 'Curve'),
+        h('button', { type: 'button', class: 'btn small', id: 'clipCurveReset', onclick: () => look({ color: { curve: null } }) }, 'Straighten')),
+      curve.el,
+      h('p', { class: 'hint' }, 'Click to add a point, drag it up to brighten or down to darken, double-click it to remove.'));
+    const histo = createHistogram({ id: 'clipHistogram', source: () => document.getElementById('preview') });
+    const histoField = h('div', { class: 'field' }, h('span', { class: 'label' }, 'Brightness of this frame'), histo.el,
+      h('p', { class: 'hint' }, 'Dark on the left, bright on the right.'));
+    const colourAdvanced = advanced('clipColour', { id: 'clipColourAdvanced' }, temperature, tint, shadows, highlights, vignette, sharpen, curveField, histoField);
+    // The histogram follows the preview: at once when this opens, and a few
+    // times a second while it shows (playing or not; it is a small picture).
+    const showing = () => colourAdvanced.open && histo.el.offsetParent !== null;
+    colourAdvanced.addEventListener('toggle', () => { if (showing()) { curve.draw(); histo.draw(); } });
+    setInterval(() => { if (showing()) histo.draw(); }, 250);
+    const colourSection = section('Colour', filters, bright, contrast, saturation, lutRow, lutMix, colourAdvanced, resetColour);
 
     // ---- an overlay: a picture or video over the video
     const oTitle = h('h3', { class: 'clip-title' });
@@ -254,7 +284,40 @@ export default {
       type: 'button', class: 'btn small danger-quiet', id: 'deleteOverlay',
       onclick: () => { const it = item(); if (it) { store.apply((p) => P.removeOverlay(p, it.id)); editor.select(null); } }
     }, icon('trash', { size: 14 }), 'Delete overlay');
-    const overlaySection = section(null, oTitle, oInfo, oX, oY, oScale, oRotate, oOpacity, keyNav, oFadeIn, oFadeOut, oTimes, oDelete);
+    // Advanced: how it mixes with the video, a shape it is cut to, a green screen.
+    const fxNow = () => overlayEffects(item()?.overlay);
+    const chooser = (id, label, title, options, onPick) => {
+      const select = h('select', { id, class: 'select', 'aria-label': label, title },
+        options.map(([value, text]) => h('option', { value }, text)));
+      select.addEventListener('change', () => onPick(select.value));
+      return h('label', { class: 'field chooser' }, h('span', { class: 'label' }, label), select);
+    };
+    const oSlider = (id, label, title, patchOf) => {
+      const row = slider({ label, min: 0, max: 1, step: 0.01, value: 0, format: percent, onInput: (v) => overlayEdit(patchOf(v), id), onChange: () => store.endGesture() });
+      row.querySelector('input').id = id;
+      row.title = title;
+      return row;
+    };
+    const oBlend = chooser('overlayBlend', 'Mix with the video', 'Blend mode',
+      [['normal', 'Normal'], ['multiply', 'Darken (multiply)'], ['screen', 'Lighten (screen)'], ['overlay', 'Overlay'], ['soft-light', 'Soft light'], ['add', 'Glow (add)']],
+      (v) => overlayEdit({ blend: v }));
+    const oMask = chooser('overlayMask', 'Cut to a shape', 'Mask',
+      [['none', 'None'], ['rectangle', 'Rectangle'], ['ellipse', 'Oval']],
+      (v) => overlayEdit({ mask: { ...fxNow().mask, shape: v } }));
+    const oMaskFeather = oSlider('overlayMaskFeather', 'Soften the shape’s edge', 'Feather', (v) => ({ mask: { ...fxNow().mask, feather: v } }));
+    const oKeyOn = toggle({
+      label: 'Green screen', hint: 'Makes one colour see-through, so the video shows where it was.',
+      onChange: (on) => overlayEdit({ key: { ...fxNow().key, on } })
+    });
+    oKeyOn.input.id = 'overlayKeyOn';
+    const oKeyColor = h('input', { type: 'color', id: 'overlayKeyColor', value: '#00ff00', 'aria-label': 'Colour to remove' });
+    oKeyColor.addEventListener('input', () => overlayEdit({ key: { ...fxNow().key, color: oKeyColor.value } }, 'overlayKeyColor'));
+    oKeyColor.addEventListener('change', () => store.endGesture());
+    const oKeyColorRow = h('label', { class: 'field chooser', title: 'Key colour' }, h('span', { class: 'label' }, 'Colour to remove'), oKeyColor);
+    const oKeyTolerance = oSlider('overlayKeyTolerance', 'How much to remove', 'Tolerance: how far from that colour still goes', (v) => ({ key: { ...fxNow().key, tolerance: v } }));
+    const oKeySoftness = oSlider('overlayKeySoftness', 'Soften the cut-out’s edge', 'Softness', (v) => ({ key: { ...fxNow().key, softness: v } }));
+    const overlayAdvanced = advanced('overlay', { id: 'overlayAdvanced' }, oBlend, oMask, oMaskFeather, oKeyOn, oKeyColorRow, oKeyTolerance, oKeySoftness);
+    const overlaySection = section(null, oTitle, oInfo, oX, oY, oScale, oRotate, oOpacity, keyNav, oFadeIn, oFadeOut, oTimes, overlayAdvanced, oDelete);
 
     // ---- how the keyframe at the playhead is arrived at (Advanced)
     const EASE_LABELS = { smooth: 'Smoothly', linear: 'At a steady pace', 'ease-in': 'Slow, then fast', 'ease-out': 'Fast, then slow', hold: 'All at once (hold)' };
@@ -372,6 +435,16 @@ export default {
         oFadeOut.set(o.fadeOut);
         if (document.activeElement !== oStart.input) oStart.input.value = formatTime(o.start, { fraction: true });
         if (document.activeElement !== oLength.input) oLength.input.value = formatTime(o.length, { fraction: true });
+        const fx = overlayEffects(o);
+        oBlend.querySelector('select').value = fx.blend;
+        oMask.querySelector('select').value = fx.mask.shape;
+        oMaskFeather.hidden = fx.mask.shape === 'none';
+        oMaskFeather.set(fx.mask.feather);
+        oKeyOn.set(fx.key.on);
+        if (document.activeElement !== oKeyColor) oKeyColor.value = fx.key.color;
+        for (const row of [oKeyColorRow, oKeyTolerance, oKeySoftness]) row.hidden = !fx.key.on;
+        oKeyTolerance.set(fx.key.tolerance);
+        oKeySoftness.set(fx.key.softness);
       }
       if (!s) return;
       const t = clipTransform(s.clip);
@@ -386,6 +459,13 @@ export default {
       lutMix.hidden = !c.lut;
       lutMix.set(c.lutMix);
       removeLut.hidden = !c.lut;
+      temperature.set(c.temperature);
+      tint.set(c.tint);
+      shadows.set(c.shadows);
+      highlights.set(c.highlights);
+      vignette.set(c.vignette);
+      sharpen.set(c.sharpen);
+      curve.set(c.curve);
       const { clip, index, bounds } = s;
       const held = clip.hold > 0;
       title.textContent = held ? `Freeze frame (clip ${index + 1})` : `Clip ${index + 1}`;

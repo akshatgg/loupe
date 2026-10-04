@@ -10,6 +10,8 @@
 
 import { buildTimeline } from './timeline.js';
 import { COLOR_FILTERS } from './look.js';
+import { MAX_CURVE_POINTS } from './grade.js';
+import { OVERLAY_BLENDS, MASK_SHAPES, defaultMask, defaultKey } from './overlay-effects.js';
 import { setKeyframe, removeKeyframe, setKeyframeEase, KEYFRAME_EASES } from './keyframes.js';
 import { ZOOM_EASES } from './camera.js';
 import { autoZoomRanges } from './auto-zoom.js';
@@ -445,6 +447,26 @@ function validateColor(c) {
     if (!/^luts\/[^/\\]+\.cube$/i.test(c.lut) || c.lut.includes('..')) fail('A LUT must be a .cube file in the project\u2019s luts folder');
   }
   if (c.lutMix !== undefined) num(c.lutMix, 'LUT amount', 0, 1);
+  // The finer tools (grade.js); every one optional.
+  if (c.temperature !== undefined) num(c.temperature, 'Warmth', -1, 1);
+  if (c.tint !== undefined) num(c.tint, 'Tint', -1, 1);
+  if (c.highlights !== undefined) num(c.highlights, 'Highlights', -1, 1);
+  if (c.shadows !== undefined) num(c.shadows, 'Shadows', -1, 1);
+  if (c.vignette !== undefined) num(c.vignette, 'Dark corners', 0, 1);
+  if (c.sharpen !== undefined) num(c.sharpen, 'Sharpen', 0, 1);
+  if (c.curve !== undefined && c.curve !== null) {
+    if (!Array.isArray(c.curve) || c.curve.length < 2 || c.curve.length > MAX_CURVE_POINTS) {
+      fail(`A colour curve must be a list of 2 to ${MAX_CURVE_POINTS} points`);
+    }
+    let last = -Infinity;
+    for (const pt of c.curve) {
+      if (!isObj(pt)) fail('A colour curve point is not an object');
+      num(pt.x, 'Curve point position', 0, 1);
+      num(pt.y, 'Curve point height', 0, 1);
+      if (pt.x <= last) fail('A colour curve\u2019s points must go from left to right');
+      last = pt.x;
+    }
+  }
 }
 
 function validateSpeedSegment(s, sources) {
@@ -1307,8 +1329,30 @@ export function defaultOverlay() {
     name: '', start: 0, from: 0, length: DEFAULT_PICTURE_SECONDS, fileDuration: null, lane: 0,
     x: 0.3, y: 0.3, scale: 0.35, rotate: 0, opacity: 1, fadeIn: 0, fadeOut: 0, keyframes: {},
     // A video file's own quarter turn (a phone video), as video-probe.js reads it.
-    mediaRotation: 0
+    mediaRotation: 0,
+    // Effects (overlay-effects.js): how it mixes with the video, a shape it
+    // is cut to, a green screen.
+    blend: 'normal', mask: defaultMask(), key: defaultKey()
   };
+}
+
+// An overlay's effects; every one optional (a project from before them).
+function validateOverlayEffects(o) {
+  if (o.blend !== undefined) oneOf(o.blend, OVERLAY_BLENDS, 'Blend');
+  if (o.mask !== undefined) {
+    if (!isObj(o.mask)) fail('An overlay\u2019s mask must be an object');
+    if (o.mask.shape !== undefined) oneOf(o.mask.shape, MASK_SHAPES, 'Mask shape');
+    if (o.mask.feather !== undefined) num(o.mask.feather, 'Mask edge softness', 0, 1);
+  }
+  if (o.key !== undefined) {
+    if (!isObj(o.key)) fail('An overlay\u2019s green screen must be an object');
+    if (o.key.on !== undefined) bool(o.key.on, 'Green screen on');
+    if (o.key.color !== undefined && (typeof o.key.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(o.key.color))) {
+      fail(`Green screen colour must be a colour like #00ff00, got ${JSON.stringify(o.key.color)}`);
+    }
+    if (o.key.tolerance !== undefined) num(o.key.tolerance, 'Green screen tolerance', 0, 1);
+    if (o.key.softness !== undefined) num(o.key.softness, 'Green screen softness', 0, 1);
+  }
 }
 
 function validateOverlay(o) {
@@ -1332,6 +1376,7 @@ function validateOverlay(o) {
   num(o.fadeOut, 'Overlay fade out', 0);
   validateKeyframes(o.keyframes, OVERLAY_ANIMATABLE);
   if (![0, 90, 180, 270].includes(o.mediaRotation)) fail('An overlay\u2019s turn must be 0, 90, 180 or 270');
+  validateOverlayEffects(o);
 }
 
 function overlayAt(project, id) {
