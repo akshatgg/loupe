@@ -66,7 +66,8 @@ The flow stays pick a source → record → the editor opens.
 - **New toggle, "Zoom in on my clicks"**, on by default, stored with the
   other recording settings (`src/main/recording-settings.js`). It decides
   only whether auto-zooms are made when the recording is first opened (§8.1);
-  clicks are recorded either way, as now.
+  clicks are recorded either way, as now. It ships with auto-zoom
+  (sub-project 3), not before, so it never sits there doing nothing.
 - **Recording bar** (`src/renderer/bar`): a Restart button beside Pause and
   Stop. It asks once ("Start over? This recording is thrown away."), discards
   the recording in progress and starts a new one of the same source with the
@@ -143,7 +144,9 @@ Right: **Snap** and **Close gaps** toggles, then the timeline zoom buttons.
   Ctrl while dragging turns it the other way for that drag.
 - **Close gaps** (on by default): today's behaviour — deleting a clip pulls
   later clips left. Off: the deleted clip leaves a gap of black for its
-  length (a new clip kind, `{ gap: seconds }`, drawn as empty and silent).
+  length: a freeze-frame clip marked `gap: true`, drawn black. Freeze
+  frames are already silent and already handled by the timeline, the player
+  and the exporter, so a gap needs nothing new from them.
 
 ### 4.4 Timeline rows
 
@@ -173,14 +176,15 @@ unchanged while it is moved over.
   selects everything on the rows that hold the current selection (all rows
   when nothing is selected); Esc clears.
 - Dragging one selected item moves all of them by the same amount; the move
-  is refused as a whole when any one of them can't go there.
+  is refused as a whole when any one of them can't go there (sub-project 2,
+  with the other multi-select actions).
 - Delete removes all of them in one undo step.
 
 ## 6. Project format
 
 Sub-project 1 adds only: `zooms[].disabled` (boolean, optional),
-`zooms[].auto` (boolean, optional), and gap clips (`clips[]` entries with
-`gap: seconds` and no source). The version stays 2; older projects load
+`zooms[].auto` (boolean, optional), and `clips[].gap` (boolean, optional, on
+a freeze-frame clip). The version stays 2; older projects load
 unchanged, and each later addition below is an optional field with a default
 so no migration is needed.
 
