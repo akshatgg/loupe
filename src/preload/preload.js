@@ -139,6 +139,9 @@ contextBridge.exposeInMainWorld('loupe', {
   pauseRecording: () => ipcRenderer.invoke('bar:pause'),
   resumeRecording: () => ipcRenderer.invoke('bar:resume'),
   cancelCountdown: () => ipcRenderer.invoke('bar:cancelCountdown'),
+  // Bar: Restart, once the bar has asked -- this take is thrown away and the
+  // same source is recorded again.
+  restartRecording: () => ipcRenderer.invoke('bar:restart'),
   // Webcam bubble (src/renderer/camera): only its own window is listened to.
   camera: {
     init: () => ipcRenderer.invoke('camera:init'),

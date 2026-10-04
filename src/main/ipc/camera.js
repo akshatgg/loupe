@@ -19,6 +19,8 @@ const { WEBCAM_FILE } = require('../recording-v2');
 //   finish()          Stop: the page stops, the last chunk lands, the file is
 //                     closed and given its duration; resolves
 //                     { file, startLocal, width, height } or null
+//   discard()         Restart: the page stops, the file so far is dropped, and
+//                     the bubble stays up for start() to be called again
 //   close()           Back/teardown: window closed, anything unfinished dropped
 //
 // Alignment (see clock-sync.js for the other half): the page reports, with
@@ -273,6 +275,27 @@ function createCameraBubble({
     return { file: WEBCAM_FILE, startLocal: s.startLocal, width: s.width, height: s.height };
   }
 
+  // Restart: this take is thrown away. The page is asked to stop and waited
+  // for (so none of its last chunks can land in the next take's file), the
+  // file is removed, and the window stays where the user put it.
+  async function discard() {
+    const s = session;
+    if (!s) return;
+    const w = win;
+    if (w && !w.isDestroyed()) {
+      w.webContents.send('camera:command', { action: 'stop' });
+      let timer;
+      await Promise.race([
+        s.stopped,
+        new Promise((resolve) => { timer = setTimeout(resolve, STOP_TIMEOUT_MS); })
+      ]);
+      clearTimeout(timer);
+    }
+    // Closed meanwhile (Back, quit): close() already dropped it.
+    if (session === s) abortSession();
+    await s.writes;
+  }
+
   function close() {
     // Stop runs finish() and then tears everything down, which lands here:
     // the page is still sending its last chunk, so finish() closes the
@@ -285,7 +308,7 @@ function createCameraBubble({
   }
 
   return {
-    open, start, finish, close, windowId,
+    open, start, finish, discard, close, windowId,
     isOpen: () => Boolean(win && !win.isDestroyed()),
     isRecording: () => Boolean(session && session.startLocal !== null),
     error: () => error

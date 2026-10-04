@@ -212,6 +212,25 @@ test('stop() writes a version-2 project.json from the recording', async () => {
   h.cleanup();
 });
 
+test('stop({ discard }) stops the helpers and writes nothing, and the recorder can start again', async () => {
+  const h = harness();
+  await startAt(h);
+  h.deliver('inputtap', { type: 'click', clock: 1001, x: 15, y: 25, button: 'left' }, 1001);
+  h.rec.pause();
+  assert.deepStrictEqual(await h.rec.stop({ discard: true }), { dir: h.dir, discarded: true });
+  assert.deepStrictEqual(fs.readdirSync(h.dir), [], 'no project, cursor track or keys were written');
+  assert.strictEqual(h.rec.state().recording, false);
+  assert.strictEqual(await h.rec.stop(), null, 'a second stop has nothing to do');
+
+  // The next take starts clean: nothing of the thrown-away one is in it.
+  await startAt(h, {}, 2000);
+  h.deliver('capture', { type: 'stopped', duration: 2, now: 2003 }, 2003);
+  const { recording } = await h.rec.stop();
+  assert.deepStrictEqual(recording.sources.main.clicks, []);
+  assert.deepStrictEqual(recording.sources.main.pauses, []);
+  h.cleanup();
+});
+
 test('stop() starts the project from the default preset, and keeps zooms and pauses', async () => {
   const h = harness();
   await startAt(h, {}, 1000);

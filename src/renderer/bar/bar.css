@@ -47,8 +47,11 @@ button.icon svg { width: 16px; height: 16px; fill: #ef4444; }
 #recording .mic { opacity: .8; }
 #recording .warn { color: #fbbf24; font-size: 11px; }
 #recording .error { color: #fca5a5; font-size: 11px; }
-#recording #pause { margin-left: auto; }
+#recording #restart { margin-left: auto; }
+button.icon:disabled { opacity: .45; cursor: default; }
 button.icon.plain svg { fill: #e8eaed; }
+button.icon svg.line { fill: none; stroke: #e8eaed; stroke-width: 1.6;
+                       stroke-linecap: round; stroke-linejoin: round; }
 
 /* Paused: the dot stops pulsing and turns amber, the timer dims. */
 .dot.paused { background: #fbbf24; animation: none; }
@@ -63,3 +66,9 @@ button.icon.plain svg { fill: #e8eaed; }
                     font-variant-numeric: tabular-nums; color: #ef4444; }
 #countdown .countlabel { font-size: 13px; line-height: 1.4; }
 #countdown .hint { color: #9aa0a6; font-size: 11px; }
+
+/* "Start over?" -- two rows, like the armed view, in the same window. */
+#restartConfirm .question { font-size: 13px; }
+.danger { background: #ef4444; color: #fff; }
+.danger:hover { background: #dc2626; }
+.danger:disabled, .danger:disabled:hover { background: rgba(239,68,68,.4); color: rgba(255,255,255,.6); cursor: default; }

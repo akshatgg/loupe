@@ -344,7 +344,11 @@ function createRecorder({
   // cursorTrack }: `project` is the version-2 project.json written, and
   // `recording` the raw facts it was made from (v1 fields plus
   // sources.main and clips).
-  async function stop({ webcam = null, style = null } = {}) {
+  //
+  // `discard` is the bar's Restart: the helpers are stopped the same way, but
+  // the take is being thrown away, so no project is written and the caller
+  // removes the folder. Resolves { dir, discarded: true }.
+  async function stop({ webcam = null, style = null, discard = false } = {}) {
     // stop() can be reached from a stop button or a global hotkey, either of
     // which may fire with no recording ever started (source is still null).
     // Rather than throwing out of an async function, resolve to null: a
@@ -376,6 +380,12 @@ function createRecorder({
     // so it gets far longer than stopHelper's default before that happens.
     if (toStopCapture) await stopHelper(toStopCapture, CAPTURE_STOP_MS);
     recording = false;
+
+    if (discard) {
+      // Whatever the camera bubble still holds open is let go first.
+      await Promise.resolve(webcam).catch(() => null);
+      return { dir, discarded: true };
+    }
 
     // Capture failed before its first frame (a locked screen, a display
     // that went away, permission withdrawn): there is no video at all, so

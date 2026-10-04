@@ -66,6 +66,8 @@ function startRecording() {
   };
   recorder.onstop = () => {
     const durationMs = performance.now() - startedAt;
+    // Let go of, so Restart on the bar can start another take in this bubble.
+    recorder = null;
     sending.then(() => camera.stopped({ durationMs }));
   };
   recorder.onerror = () => camera.error({ message: 'The camera stopped recording' });

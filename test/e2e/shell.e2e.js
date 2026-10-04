@@ -436,7 +436,7 @@ async function run() {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [EMPTY_FOLDER] });
   });
 
-  await check('Recording: zoom shortcuts use the same capture fields as the picker', async () => {
+  await check('Recording: zoom shortcuts are chosen here, and the picker says which to hold', async () => {
     await js(settingsWin, 'location.hash = "recording"');
     await waitFor('section', () => js(settingsWin, 'return !document.getElementById("recording").hidden'));
     assert.match(await js(settingsWin, 'return document.getElementById("zoomHelp").textContent'), /^Hold ⌥ or a mouse side button/);
@@ -445,8 +445,10 @@ async function run() {
     await shot(settingsWin, '12-settings-recording-capturing');
     await js(settingsWin, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }))`);
     await waitFor('saved', () => readSettings().zoomTriggers[1] === 'shift');
-    // The picker, open at the same time, shows the change too.
-    await waitFor('the picker updated', () => js(picker, `return document.querySelectorAll('.capture')[1].textContent === '⇧ Shift'`));
+    // The picker has no fields of its own any more; its hint, open at the
+    // same time, names the new shortcut too.
+    assert.strictEqual(await js(picker, `return document.querySelectorAll('.capture, .clear').length`), 0);
+    await waitFor('the picker updated', () => js(picker, `return /^Hold ⌥ or ⇧ and scroll/.test(document.getElementById('zoomHelp').textContent)`));
   });
 
   await check('Recording: devices, computer sound, keystrokes and presets', async () => {

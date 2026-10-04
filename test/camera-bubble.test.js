@@ -215,6 +215,35 @@ test('closing mid-recording (Back, quit) drops the unfinished file', async () =>
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('discard() (Restart) drops the take, keeps the bubble, and the next take records afresh', async () => {
+  const { bubble, handlers, dir } = setup();
+  const win = bubble.open({});
+  const from = { sender: win.webContents };
+  bubble.start(dir);
+  await handlers['camera:started'](from, { startedAgoMs: 0, width: 2, height: 2 });
+  await handlers['camera:chunk'](from, firstChunk());
+
+  const discarded = bubble.discard();
+  assert.deepStrictEqual(win.sent.at(-1), { channel: 'camera:command', data: { action: 'stop' } });
+  await handlers['camera:stopped'](from, { durationMs: 900 });
+  await discarded;
+  assert.ok(!fs.existsSync(path.join(dir, 'webcam.webm')), 'the thrown-away take is gone');
+  assert.ok(bubble.isOpen() && !win.closed && !win.hidden, 'the bubble stays on screen');
+  assert.strictEqual(bubble.isRecording(), false);
+
+  const next = fs.mkdtempSync(path.join(os.tmpdir(), 'loupe-cam-'));
+  assert.strictEqual(bubble.start(next), true, 'the same bubble records the next take');
+  await handlers['camera:started'](from, { startedAgoMs: 0, width: 2, height: 2 });
+  await handlers['camera:chunk'](from, firstChunk());
+  const finishing = bubble.finish();
+  await handlers['camera:stopped'](from, { durationMs: 500 });
+  assert.strictEqual((await finishing).file, 'webcam.webm');
+  assert.ok(fs.statSync(path.join(next, 'webcam.webm')).size > 0);
+  await bubble.discard(); // nothing recording: nothing to do
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(next, { recursive: true, force: true });
+});
+
 test('camera permission: macOS asks, Windows only has an off switch', async () => {
   let status = 'not-determined';
   const prefs = { getMediaAccessStatus: () => status, askForMediaAccess: async () => { status = 'granted'; return true; } };

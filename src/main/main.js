@@ -69,6 +69,8 @@ installWebGuard({ app });
 // spans, so nothing further is needed here.
 function onRecorderError(err) {
   if (err.source === 'inputtap') return;
+  // A take being thrown away (Restart) has nothing left to save or report.
+  if (barPhase === 'restarting') return;
 
   // A dead capture process means nothing is being written to raw.mov any
   // more -- this really is the end of the recording. Route it through the
@@ -140,7 +142,11 @@ function showPicker() {
 let barWindow = null;
 let barTimer = null;
 let startedAt = 0;
-let barPhase = null; // null (no bar open) | 'armed' | 'recording'
+let barPhase = null; // null (no bar open) | 'armed' | 'counting' | 'recording' | 'paused' | 'restarting'
+// The folder of the recording in progress, and (during Restart) the promise
+// of the old take being stopped and its folder removed.
+let recordingDir = null;
+let discarding = null;
 
 // The source the user picked in the picker, validated once at arm time
 // (see bar:arm) and reused, unmodified, by bar:start -- the picker itself
@@ -272,6 +278,7 @@ function teardownArmedState() {
   areaMode = 'full';
   currentAreaRect = null;
   barPhase = null;
+  recordingDir = null;
 }
 
 // The floating control bar. Its BrowserWindow media-source id is passed to
@@ -461,12 +468,17 @@ const extras = registerRecordingExtras({
 // channel).
 async function stopRecording() {
   if (!barWindow) return null;
-  const backingOut = barPhase === 'armed' || barPhase === 'counting';
+  // Mid-Restart there is no take to save either: the old one is being thrown
+  // away and the new one has not begun.
+  const backingOut = barPhase === 'armed' || barPhase === 'counting' || barPhase === 'restarting';
   barPhase = transition(barPhase, backingOut ? 'back' : 'stop');
   // The webcam file finishes while the helpers stop (recorder.stop awaits
   // it); started before teardown, which would otherwise just close it.
   const webcam = backingOut ? null : extras.finishWebcam();
   teardownArmedState();
+  // A Restart caught halfway finishes removing its take first, so quitting
+  // right then leaves no half-written folder behind.
+  if (discarding) await discarding;
   // recorder.stop() resolves to null when there is nothing to stop (e.g. the
   // bar was only ever armed, or a second call races the first); that is a
   // valid, falsy result and must not be dereferenced. A rejection, though,
@@ -712,111 +724,190 @@ ipcMain.handle('bar:setAreaMode', (_e, mode) => {
   setAreaMode(mode);
 });
 
-// The bar's Start button: this is the only place bin/capture is ever
-// spawned now -- pressing Continue in the picker no longer starts anything.
+// Starts capture for the armed source. This is the only place bin/capture is
+// ever spawned -- pressing Continue in the picker starts nothing. Called from
+// the bar's Start (phase 'armed') and again from Restart (phase
+// 'restarting'), so both begin a recording the very same way: microphone
+// check, 3-2-1 when it is on, a new folder, the helpers. Resolves
+// { cancelled: true } when the countdown was cancelled.
+async function beginRecording() {
+  if (!permissions.canRecord()) throw new Error('Screen Recording permission is required');
+
+  // A denied mic prompt used to be discarded entirely: bin/capture was
+  // started with --mic 1 regardless, which fails outright with "no
+  // microphone available" and takes the whole recording down with it --
+  // over a permission the user may not even have cared about (the
+  // checkbox may just be left on from a previous session). Falling back to
+  // recording without audio, rather than refusing to start, keeps the
+  // failure proportional to what was actually lost.
+  let recordMic = armedSource.mic;
+  if (armedSource.mic) {
+    const granted = await permissions.requestMicrophone();
+    if (!granted) recordMic = false;
+  }
+
+  // 3-2-1 on the bar before anything records (unless turned off). Escape
+  // cancels it back to armed, so the area overlay lends its Escape to the
+  // countdown and gets it back afterwards.
+  if (extras.settings().countdown) {
+    barPhase = transition(barPhase, 'countdown');
+    const overlayHadEscape = escapeHeld;
+    holdEscapeForBack(false);
+    const go = await extras.runCountdown((count) => {
+      barWindow?.webContents.send('bar:update', { ...barPayload(), state: 'countdown', count });
+    });
+    if (!go) {
+      // Stop/quit during the countdown already closed the bar.
+      if (barPhase === 'counting') {
+        barPhase = transition(barPhase, 'cancel');
+        if (overlayHadEscape && overlayWindow && !overlayWindow.isDestroyed()) holdEscapeForBack(true);
+        else showAreaOutlineAgain();
+        sendBarUpdate();
+      }
+      return { cancelled: true };
+    }
+    barPhase = transition(barPhase, 'go');
+  } else {
+    barPhase = transition(barPhase, 'start');
+  }
+
+  const dir = path.join(appShell.usableRecordingsFolder(), String(Date.now()));
+  fs.mkdirSync(dir, { recursive: true });
+
+  // Every Loupe-owned window that could be on screen right now -- the bar
+  // itself (always) and, with the outline still open, the
+  // region overlay -- must never appear in the recording.
+  // getMediaSourceId() returns "window:<CGWindowID>:0" on macOS; the
+  // middle segment is the same windowID `bin/sources` reports as
+  // "window:<n>" and that SCContentFilter(excludingWindows:) matches
+  // against -- verified empirically, see control-bar-report.md.
+  const excludeWindowIds = [barWindow.getMediaSourceId().split(':')[1], ...extras.excludeWindowIds()];
+  if (overlayWindow && !overlayWindow.isDestroyed()) {
+    excludeWindowIds.push(overlayWindow.getMediaSourceId().split(':')[1]);
+  }
+  // "The area outline goes away once recording starts" -- closed here,
+  // before capture spawns, rather than merely hidden, since it would only
+  // be clutter from this point on. This close is NOT relied on as the only
+  // protection against it appearing on screen: bin/capture is ALSO told
+  // its window id above, so a race between "Electron finished closing the
+  // window" and "ScreenCaptureKit's stream actually started rendering
+  // frames" can never let it slip into a frame either way.
+  closeOverlayWindow();
+
+  const region = areaMode === 'full' ? undefined : currentAreaRect;
+  const validated = validateStartOptions({ ...armedSource, region });
+
+  // Only when zoom can actually happen -- otherwise there's never a frame.
+  const zoomEnabled = permissions.canZoom();
+  const area = validated.region
+    ?? { x: validated.x, y: validated.y, width: validated.width, height: validated.height };
+  if (zoomEnabled) {
+    excludeWindowIds.push(createShotWindow(area).getMediaSourceId().split(':')[1]);
+  }
+
+  startedAt = Date.now();
+  captureFailed = false;
+  recordingDir = dir;
+  try {
+    await recorder.start({
+      source: validated.source, width: validated.width, height: validated.height,
+      x: validated.x, y: validated.y, title: validated.title, mic: recordMic, dir,
+      region: validated.region,
+      excludeWindowIds,
+      zoomEnabled,
+      inputTapArgs: inputTapArgs(currentSettings()),
+      ...extras.recorderOptions()
+    });
+  } catch (err) {
+    closeShotWindow();
+    barPhase = 'armed';
+    recordingDir = null;
+    throw err;
+  }
+  if (zoomEnabled) startShotFrame(area);
+  extras.onRecordingStarted(dir);
+
+  barTimer = setInterval(sendBarUpdate, 200);
+  sendBarUpdate();
+
+  return { dir, zoomEnabled: permissions.canZoom(), mic: recordMic, micRequested: armedSource.mic };
+}
+
+// The bar's Start button.
 ipcMain.handle('bar:start', async () => {
   if (starting || barPhase !== 'armed' || !armedSource) {
     throw new Error('Cannot start recording right now.');
   }
   starting = true;
   try {
-    if (!permissions.canRecord()) throw new Error('Screen Recording permission is required');
+    return await beginRecording();
+  } finally {
+    starting = false;
+  }
+});
 
-    // A denied mic prompt used to be discarded entirely: bin/capture was
-    // started with --mic 1 regardless, which fails outright with "no
-    // microphone available" and takes the whole recording down with it --
-    // over a permission the user may not even have cared about (the
-    // checkbox may just be left on from a previous session). Falling back to
-    // recording without audio, rather than refusing to start, keeps the
-    // failure proportional to what was actually lost.
-    let recordMic = armedSource.mic;
-    if (armedSource.mic) {
-      const granted = await permissions.requestMicrophone();
-      if (!granted) recordMic = false;
-    }
+// Back on the armed bar after Restart (its countdown cancelled, or the new
+// take could not start): the outline closed when the first take began, so it
+// comes back with the area that was being recorded.
+function showAreaOutlineAgain() {
+  if (areaMode !== 'full' && currentAreaRect && !overlayWindow) setAreaMode('rect');
+}
 
-    // 3-2-1 on the bar before anything records (unless turned off). Escape
-    // cancels it back to armed, so the area overlay lends its Escape to the
-    // countdown and gets it back afterwards.
-    if (extras.settings().countdown) {
-      barPhase = transition(barPhase, 'countdown');
-      const overlayHadEscape = escapeHeld;
-      holdEscapeForBack(false);
-      const go = await extras.runCountdown((count) => {
-        barWindow?.webContents.send('bar:update', { ...barPayload(), state: 'countdown', count });
-      });
-      if (!go) {
-        // Stop/quit during the countdown already closed the bar.
-        if (barPhase === 'counting') {
-          barPhase = transition(barPhase, 'cancel');
-          if (overlayHadEscape && overlayWindow && !overlayWindow.isDestroyed()) holdEscapeForBack(true);
-          sendBarUpdate();
-        }
-        return { cancelled: true };
-      }
-      barPhase = transition(barPhase, 'go');
-    } else {
-      barPhase = transition(barPhase, 'start');
-    }
-
-    const dir = path.join(appShell.usableRecordingsFolder(), String(Date.now()));
-    fs.mkdirSync(dir, { recursive: true });
-
-    // Every Loupe-owned window that could be on screen right now -- the bar
-    // itself (always) and, with the outline still open, the
-    // region overlay -- must never appear in the recording.
-    // getMediaSourceId() returns "window:<CGWindowID>:0" on macOS; the
-    // middle segment is the same windowID `bin/sources` reports as
-    // "window:<n>" and that SCContentFilter(excludingWindows:) matches
-    // against -- verified empirically, see control-bar-report.md.
-    const excludeWindowIds = [barWindow.getMediaSourceId().split(':')[1], ...extras.excludeWindowIds()];
-    if (overlayWindow && !overlayWindow.isDestroyed()) {
-      excludeWindowIds.push(overlayWindow.getMediaSourceId().split(':')[1]);
-    }
-    // "The area outline goes away once recording starts" -- closed here,
-    // before capture spawns, rather than merely hidden, since it would only
-    // be clutter from this point on. This close is NOT relied on as the only
-    // protection against it appearing on screen: bin/capture is ALSO told
-    // its window id above, so a race between "Electron finished closing the
-    // window" and "ScreenCaptureKit's stream actually started rendering
-    // frames" can never let it slip into a frame either way.
-    closeOverlayWindow();
-
-    const region = areaMode === 'full' ? undefined : currentAreaRect;
-    const validated = validateStartOptions({ ...armedSource, region });
-
-    // Only when zoom can actually happen -- otherwise there's never a frame.
-    const zoomEnabled = permissions.canZoom();
-    const area = validated.region
-      ?? { x: validated.x, y: validated.y, width: validated.width, height: validated.height };
-    if (zoomEnabled) {
-      excludeWindowIds.push(createShotWindow(area).getMediaSourceId().split(':')[1]);
-    }
-
-    startedAt = Date.now();
-    captureFailed = false;
+// Stops the take in progress and removes its folder, so it never reaches the
+// Library. The helpers stop exactly as for Stop (recorder.stop), only nothing
+// is written. Never rejects: whatever went wrong, the take is gone.
+async function discardRecordingInProgress() {
+  const dir = recordingDir;
+  recordingDir = null;
+  if (barTimer) { clearInterval(barTimer); barTimer = null; }
+  closeShotWindow();
+  try {
+    await recorder.stop({ webcam: extras.discardWebcam(), discard: true });
+  } catch (err) {
+    console.error('Loupe: could not stop the recording being started over:', err);
+  }
+  if (dir) {
     try {
-      await recorder.start({
-        source: validated.source, width: validated.width, height: validated.height,
-        x: validated.x, y: validated.y, title: validated.title, mic: recordMic, dir,
-        region: validated.region,
-        excludeWindowIds,
-        zoomEnabled,
-        inputTapArgs: inputTapArgs(currentSettings()),
-        ...extras.recorderOptions()
-      });
+      fs.rmSync(dir, { recursive: true, force: true });
     } catch (err) {
-      closeShotWindow();
-      barPhase = 'armed';
+      console.error('Loupe: could not remove the recording being started over:', err);
+    }
+  }
+}
+
+// The bar's Restart, after it has asked "Start over?": the take in progress
+// is thrown away and the same source is recorded again with the same choices
+// (area, microphone, camera, countdown). Only the bar may ask, and only while
+// something is recording.
+ipcMain.handle('bar:restart', async (event) => {
+  if (!barWindow || barWindow.isDestroyed() || event?.sender !== barWindow.webContents) {
+    throw new Error('Only the recording bar can do that.');
+  }
+  if (starting || (barPhase !== 'recording' && barPhase !== 'paused') || !armedSource) {
+    throw new Error('There is no recording to start over.');
+  }
+  starting = true;
+  try {
+    barPhase = transition(barPhase, 'restart');
+    discarding = discardRecordingInProgress();
+    try {
+      await discarding;
+    } finally {
+      discarding = null;
+    }
+    // Stop or quit while the old take was being stopped: the bar is gone.
+    if (barPhase !== 'restarting' || !barWindow) return { cancelled: true, closed: true };
+    try {
+      return await beginRecording();
+    } catch (err) {
+      // The bar goes back to its armed view, where the reason is shown.
+      if (barWindow) {
+        if (barPhase === 'restarting') barPhase = 'armed';
+        if (barPhase === 'armed') showAreaOutlineAgain();
+        sendBarUpdate();
+      }
       throw err;
     }
-    if (zoomEnabled) startShotFrame(area);
-    extras.onRecordingStarted(dir);
-
-    barTimer = setInterval(sendBarUpdate, 200);
-    sendBarUpdate();
-
-    return { dir, zoomEnabled: permissions.canZoom(), mic: recordMic, micRequested: armedSource.mic };
   } finally {
     starting = false;
   }

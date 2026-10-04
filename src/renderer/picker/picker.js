@@ -266,29 +266,21 @@ recordButton.onclick = async () => {
 };
 
 // ---- zoom shortcuts ---------------------------------------------------------
-// The two shortcut fields (click one, press a button) are shared with the
-// Settings window: src/renderer/shared/zoom-shortcuts.js. Only the header
-// line that spells out what's set belongs to the picker.
-const zoomShortcuts = window.loupeZoomShortcuts.mount({
-  captureEls: [...document.querySelectorAll('.capture')],
-  clearEls: [...document.querySelectorAll('.clear')],
-  onRender: (triggers) => {
-    const help = document.getElementById('zoomHelp');
-    const any = window.loupeZoomShortcuts.describe(help, triggers, {
-      after: ' and scroll while recording: scroll up to zoom in, back down to zoom out.'
-    });
-    if (!any) help.textContent = 'Zoom is off — set a zoom shortcut below to turn it on.';
-  },
-  onError: (err) => {
-    const banner = document.getElementById('banner');
-    banner.hidden = false;
-    banner.textContent = `Could not save the zoom shortcut: ${err.message}`;
-  }
-});
+// Chosen in Settings > Recording. Here, only the header line that says which
+// to hold (src/renderer/shared/zoom-shortcuts.js writes it the same way in
+// both windows).
+function renderZoomHelp(triggers) {
+  const help = document.getElementById('zoomHelp');
+  const any = window.loupeZoomShortcuts.describe(help, Array.isArray(triggers) ? triggers : [], {
+    after: ' and scroll while recording: scroll up to zoom in, back down to zoom out.'
+  });
+  if (!any) help.textContent = 'Zoom is off — choose a zoom shortcut in Settings to turn it on.';
+}
 
-window.loupe.getSettings().then((s) => zoomShortcuts.set(s.zoomTriggers));
+window.loupe.getSettings().then((s) => renderZoomHelp(s.zoomTriggers));
 // Changed in the Settings window while this one is open.
-window.loupe.onSettingsChanged?.((s) => zoomShortcuts.set(s.zoomTriggers));
+window.loupe.onSettingsChanged?.((s) => renderZoomHelp(s.zoomTriggers));
+document.getElementById('changeZoom').onclick = () => window.loupe.openSettings('recording');
 
 document.getElementById('recordings').onclick = () => window.loupe.openLibrary();
 
