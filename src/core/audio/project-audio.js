@@ -33,6 +33,11 @@
 //   3. Voiceover takes placed where their recording moment plays (voiceover.js).
 //   4. Each audio clip at its place, lowered while anyone talks (music.js, duck.js).
 //   5. mixTracks().
+//
+// The microphone, the computer sound and each audio clip can each have a pan,
+// an equalizer and a compressor (tone.js): the mix applies the first two's
+// to every stretch laid along the timeline (and so after clean-up and
+// levelling), and music.js a clip's before its fades.
 
 import { denoiseWithInfo } from './denoise.js';
 import { level } from './level.js';
@@ -42,6 +47,7 @@ import { audioClipTrack } from './music.js';
 import { clipHeard, anySolo } from './clips.js';
 import { duckingCurve } from './duck.js';
 import { mixTracks, MIX_RATE } from './mix.js';
+import { toneOf, isNeutralTone } from './tone.js';
 
 export function createVoiceCache() {
   return new WeakMap();
@@ -131,8 +137,11 @@ export async function renderProjectAudio(project, tl, inputs = {}, {
   const soundOf = (key) => {
     if (!sourceSound.has(key)) {
       const parts = [];
-      if (!audio.mic.muted && mic[key]) parts.push({ ...mic[key], volume: audio.mic.volume });
-      if (!audio.system.muted && inputs.system?.[key]) parts.push({ ...inputs.system[key], volume: audio.system.volume });
+      // With the microphone's and the computer sound's own pan, equalizer
+      // and compressor, as on the video.
+      const tone = (settings) => (isNeutralTone(settings) ? null : toneOf(settings));
+      if (!audio.mic.muted && mic[key]) parts.push({ ...mic[key], volume: audio.mic.volume, tone: tone(audio.mic) });
+      if (!audio.system.muted && inputs.system?.[key]) parts.push({ ...inputs.system[key], volume: audio.system.volume, tone: tone(audio.system) });
       const length = project.sources[key]?.duration ?? 0;
       sourceSound.set(key, parts.length && length > 0 ? mixTracks(parts, { sampleRate, duration: length }) : null);
     }

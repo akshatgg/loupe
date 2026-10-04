@@ -579,6 +579,29 @@ export function defaultAudioClip() {
 
 const MAX_POINTS = 500;
 
+// The finer tools of a clip, the microphone or the computer sound
+// (audio/tone.js): pan, a three-band equalizer and a compressor. All
+// optional -- a project saved before them has none and sounds as it did.
+function validateTone(t, what) {
+  if (t.pan !== undefined) num(t.pan, `${what} pan`, -1, 1);
+  if (t.eq !== undefined) {
+    if (!isObj(t.eq)) fail(`${what} tone settings must be an object`);
+    for (const [k, name] of [['low', 'low'], ['mid', 'middle'], ['high', 'high']]) {
+      if (t.eq[k] !== undefined) num(t.eq[k], `${what} ${name} tones`, -12, 12);
+    }
+  }
+  if (t.compressor !== undefined) {
+    const c = t.compressor;
+    if (!isObj(c)) fail(`${what} evening out settings must be an object`);
+    if (c.on !== undefined) bool(c.on, `${what} even out loud and quiet parts`);
+    if (c.threshold !== undefined) num(c.threshold, `${what} evening out level`, -60, 0);
+    if (c.ratio !== undefined) num(c.ratio, `${what} evening out amount`, 1, 20);
+    if (c.attack !== undefined) num(c.attack, `${what} evening out attack`, 0.001, 0.5);
+    if (c.release !== undefined) num(c.release, `${what} evening out release`, 0.01, 2);
+    if (c.makeup !== undefined) num(c.makeup, `${what} evening out boost`, 0, 24);
+  }
+}
+
 function validateAudioClip(c, sources) {
   if (!isObj(c)) fail('An audio clip is not an object');
   str(c.id, 'Audio clip id', { max: 64 });
@@ -615,6 +638,7 @@ function validateAudioClip(c, sources) {
     last = pt.t;
   }
   if (!Number.isInteger(c.lane) || c.lane < 0 || c.lane >= MAX_LANES) fail(`Audio row must be 0 to ${MAX_LANES - 1}`);
+  validateTone(c, 'Audio');
 }
 
 function validateAudio(audio, sources) {
@@ -625,9 +649,11 @@ function validateAudio(audio, sources) {
   bool(mic.muted, 'Microphone muted');
   bool(mic.cleanUp, 'Clean up microphone');
   bool(mic.level, 'Even out microphone volume');
+  validateTone(mic, 'Microphone');
   if (!isObj(system)) fail('System audio settings must be an object');
   num(system.volume, 'System audio volume', 0, 2);
   bool(system.muted, 'System audio muted');
+  validateTone(system, 'System audio');
   if (!Array.isArray(clips)) fail('Audio clips must be a list');
   if (clips.length > 500) fail('Too many audio clips');
   clips.forEach((c) => validateAudioClip(c, sources));

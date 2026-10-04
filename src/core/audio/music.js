@@ -18,6 +18,7 @@
 import { duckingCurve } from './duck.js';
 import { gainAt } from './mix.js';
 import { clipLength, clipGainAt } from './clips.js';
+import { applyTone, isNeutralTone } from './tone.js';
 
 const CURVE_RATE = 100;
 
@@ -88,9 +89,16 @@ function applyFades(channels, sampleRate, n, fadeIn, fadeOut) {
 export function audioClipTrack(clip, decoded, videoDuration, { ducking = null } = {}) {
   const length = Math.min(clipLength(clip, videoDuration), videoDuration - clip.start);
   if (!(length > 0)) return null;
-  const fitted = fitMusic(decoded, length, {
-    loop: clip.loop, offset: clip.from, fadeIn: clip.fadeIn, fadeOut: clip.fadeOut
-  });
+  let fitted;
+  if (isNeutralTone(clip)) {
+    fitted = fitMusic(decoded, length, { loop: clip.loop, offset: clip.from, fadeIn: clip.fadeIn, fadeOut: clip.fadeOut });
+  } else {
+    // The clip's pan, equalizer and compressor (tone.js) go before its
+    // fades: a compressor after them would turn a fade-out back up.
+    fitted = fitMusic(decoded, length, { loop: clip.loop, offset: clip.from, fadeIn: 0, fadeOut: 0 });
+    fitted.channels = applyTone(fitted.channels, fitted.sampleRate, clip);
+    applyFades(fitted.channels, fitted.sampleRate, fitted.channels[0].length, clip.fadeIn, clip.fadeOut);
+  }
   const points = clip.points ?? [];
   const duck = clip.duck ? ducking : null;
   // Volume points and ducking make one curve over the clip, in video time.

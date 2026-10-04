@@ -11,6 +11,10 @@
 //   Voiceover       Record voiceover at the playhead, the takes: jump to one,
 //                   move it to the playhead, delete it
 //
+// The microphone, the computer sound and the selected audio each end with a
+// folded "Advanced" part (advancedTone below): left or right, low / middle /
+// high tones, and evening out loud and quiet parts (core/audio/tone.js).
+//
 // Every change is a project edit (core setAudio), so it is undoable, saved,
 // heard in the preview (audio-preview.js) and in the export.
 
@@ -19,6 +23,7 @@ import * as P from '../../../core/project.js';
 import { setAudio } from '../../../core/project.js';
 import { anchorAt } from '../../../core/audio/voiceover.js';
 import { MUSIC_EXTENSIONS } from '../../../core/audio/music.js';
+import { defaultTone, toneOf, isNeutralTone } from '../../../core/audio/tone.js';
 import { formatTime, parseTime } from '../timeline-math.js';
 import { createVoiceoverSession } from '../voiceover-session.js';
 import { plainError } from '../export-dialog.js';
@@ -178,6 +183,83 @@ function trackHead(iconName, name, { onMute } = {}) {
   return head;
 }
 
+const panWords = (v) => (Math.abs(v) < 0.005 ? 'Middle' : `${Math.round(Math.abs(v) * 100)}% ${v < 0 ? 'left' : 'right'}`);
+const decibels = (v) => `${v > 0 ? '+' : ''}${Math.round(v * 10) / 10} dB`;
+
+// The folded "Advanced" part of one sound's settings: pan, a three-band
+// equalizer and a compressor, in plain words (the usual names are in the
+// tooltips). `prefix` names the sound in the controls' ids ('clip', 'mic',
+// 'system'); read() gives its settings (or null), write(patch, gesture) is
+// the edit, done() ends a slider drag's undo step. Whether it is open is
+// remembered in this page's localStorage, not in the project.
+function advancedTone(prefix, { read, write, done, storage = globalThis.localStorage }) {
+  const key = `loupe.audio.advanced.${prefix}`;
+  const tone = () => toneOf(read() ?? {});
+  const named = (row, id, title) => {
+    (row.input ?? row.querySelector('input')).id = id;
+    row.title = title;
+    return row;
+  };
+  const pan = named(slider({
+    label: 'Left or right', min: -1, max: 1, step: 0.05, value: 0, format: panWords,
+    onInput: (v) => write({ pan: v }, 'pan'), onChange: done
+  }), `${prefix}Pan`, 'Pan: which side the sound comes from');
+  const band = (name, label, id, title) => named(slider({
+    label, min: -12, max: 12, step: 0.5, value: 0, format: decibels,
+    onInput: (v) => write({ eq: { ...tone().eq, [name]: v } }, `eq-${name}`), onChange: done
+  }), id, title);
+  const low = band('low', 'Low tones', `${prefix}EqLow`, 'Equalizer: bass, below about 200 Hz');
+  const mid = band('mid', 'Middle tones', `${prefix}EqMid`, 'Equalizer: the middle, around 1 kHz');
+  const high = band('high', 'High tones', `${prefix}EqHigh`, 'Equalizer: treble, above about 4 kHz');
+  const compressor = (patch, gesture = null) => write({ compressor: { ...tone().compressor, ...patch } }, gesture);
+  const on = named(toggle({
+    label: 'Even out loud and quiet parts', hint: 'Turns the loudest moments down',
+    onChange: (checked) => compressor({ on: checked })
+  }), `${prefix}CompOn`, 'Compressor');
+  const threshold = named(slider({
+    label: 'Turn down above', min: -60, max: 0, step: 1, value: -24, format: decibels,
+    onInput: (v) => compressor({ threshold: v }, 'threshold'), onChange: done
+  }), `${prefix}CompThreshold`, 'Compressor threshold: louder than this is turned down');
+  const ratio = named(slider({
+    label: 'How much', min: 1, max: 20, step: 0.5, value: 4, format: (v) => `${v}:1`,
+    onInput: (v) => compressor({ ratio: v }, 'ratio'), onChange: done
+  }), `${prefix}CompRatio`, 'Compressor ratio: 4:1 lets a quarter of the extra loudness through');
+  const makeup = named(slider({
+    label: 'Then turn it all up', min: 0, max: 24, step: 0.5, value: 0, format: decibels,
+    onInput: (v) => compressor({ makeup: v }, 'makeup'), onChange: done
+  }), `${prefix}CompMakeup`, 'Makeup gain: added after the loud parts are turned down');
+  const reset = h('button', {
+    type: 'button', class: 'btn small', id: `${prefix}ToneReset`, title: 'Back to the middle, flat tones and no evening out',
+    onclick: () => { if (!isNeutralTone(read() ?? {})) write(defaultTone()); }
+  }, 'Reset');
+  const note = h('span', { class: 'advanced-note' });
+  const details = h('details', { class: 'advanced', id: `${prefix}Advanced` },
+    h('summary', {}, 'Advanced', note),
+    h('div', { class: 'advanced-body' }, pan, low, mid, high, on, threshold, ratio, makeup,
+      h('div', { class: 'clip-actions' }, reset)));
+  try { details.open = storage?.getItem(key) === '1'; } catch { /* private storage unavailable: it starts folded */ }
+  details.addEventListener('toggle', () => {
+    try { storage?.setItem(key, details.open ? '1' : '0'); } catch { /* it just starts folded next time */ }
+  });
+  details.update = () => {
+    const t = tone();
+    pan.set(t.pan);
+    low.set(t.eq.low);
+    mid.set(t.eq.mid);
+    high.set(t.eq.high);
+    on.set(t.compressor.on);
+    threshold.set(t.compressor.threshold);
+    ratio.set(t.compressor.ratio);
+    makeup.set(t.compressor.makeup);
+    for (const el of [threshold, ratio, makeup]) el.hidden = !t.compressor.on;
+    const neutral = isNeutralTone(t);
+    reset.disabled = neutral;
+    // Folded, it still says that something in it is changing the sound.
+    note.textContent = neutral ? '' : 'in use';
+  };
+  return details;
+}
+
 export default {
   id: 'audio',
   title: 'Audio',
@@ -205,7 +287,10 @@ export default {
       onChange: (on) => change({ mic: { level: on } })
     });
     even.input.id = 'micLevel';
-    const micSection = section(null, micHead, micVolume, cleanUp, even);
+    const micAdvanced = advancedTone('mic', {
+      read: () => store.project.audio.mic, write: (patch, gesture) => change({ mic: patch }, gesture && `audio:mic:${gesture}`), done
+    });
+    const micSection = section(null, micHead, micVolume, cleanUp, even, micAdvanced);
 
     // ---- computer sound
     const sysHead = trackHead('screen', 'Computer sound', { onMute: () => change({ system: { muted: !store.project.audio.system.muted } }) });
@@ -214,7 +299,10 @@ export default {
       onInput: (v) => change({ system: { volume: v } }, 'audio:system'), onChange: done
     });
     sysVolume.querySelector('input').id = 'systemVolume';
-    const sysSection = section(null, sysHead, sysVolume);
+    const sysAdvanced = advancedTone('system', {
+      read: () => store.project.audio.system, write: (patch, gesture) => change({ system: patch }, gesture && `audio:system:${gesture}`), done
+    });
+    const sysSection = section(null, sysHead, sysVolume, sysAdvanced);
     sysSection.id = 'systemSection';
 
     // ---- the video's own sound as its own clips ("detach audio")
@@ -395,8 +483,11 @@ export default {
         }
       }, icon('trash', { size: 14 }), 'Delete'));
     clipActions.append(reattach);
+    const clipAdvanced = advancedTone('clip', {
+      read: selectedClip, write: (patch, gesture) => clipChange(patch, gesture && `audio:${store.selection?.id}:${gesture}`), done
+    });
     const inspector = section(null, trackHead('music', 'Selected audio'), clipHead, lockedNote, clipVolume, pointsNote, pointsRow,
-      fadeIn, fadeOut, clipTimes, loop, beats, duck, mute, clipActions);
+      fadeIn, fadeOut, clipTimes, loop, beats, duck, mute, clipActions, clipAdvanced);
     inspector.classList.add('audio-inspector');
     inspector.id = 'audioInspector';
 
@@ -484,10 +575,13 @@ export default {
       micVolume.set(a.mic.volume);
       cleanUp.set(a.mic.cleanUp);
       even.set(a.mic.level);
-      for (const el of [micVolume, cleanUp, even]) el.classList.toggle('disabled', a.mic.muted);
+      micAdvanced.update();
+      for (const el of [micVolume, cleanUp, even, micAdvanced]) el.classList.toggle('disabled', a.mic.muted);
       sysHead.setMuted(a.system.muted);
       sysVolume.set(a.system.volume);
       sysVolume.classList.toggle('disabled', a.system.muted);
+      sysAdvanced.update();
+      sysAdvanced.classList.toggle('disabled', a.system.muted);
       const c = selectedClip();
       inspector.hidden = !c;
       if (c) {
@@ -521,8 +615,9 @@ export default {
           ? `The volume follows ${c.points.length} point${c.points.length > 1 ? 's' : ''} on the clip\u2019s line: drag them, double-click one to remove it.`
           : 'To change the volume over time, ⌥-click the line on the clip, or add a point here.';
         clipVolume.classList.toggle('disabled', hasPoints || c.muted || locked);
-        for (const el of [fadeIn, fadeOut, duck, pointsRow, clipTimes, loop, beats, mute, clipActions]) el.classList.toggle('disabled', locked);
-        for (const el of [fadeIn, fadeOut, duck]) if (c.muted) el.classList.add('disabled');
+        clipAdvanced.update();
+        for (const el of [fadeIn, fadeOut, duck, pointsRow, clipTimes, loop, beats, mute, clipActions, clipAdvanced]) el.classList.toggle('disabled', locked);
+        for (const el of [fadeIn, fadeOut, duck, clipAdvanced]) if (c.muted) el.classList.add('disabled');
         // Detached video sound: no song settings, and a way back.
         clipFrom.label.textContent = c.source ? 'Video from' : 'Song from';
         loop.hidden = Boolean(c.source);
