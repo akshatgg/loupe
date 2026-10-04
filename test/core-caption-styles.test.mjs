@@ -68,24 +68,24 @@ test('the spoken word is the last one that has started, by the frame\'s time', (
   assert.strictEqual(activeWordIndex(gappy, 0.6), 0);
 });
 
-test('word timings follow a cut: later words light up earlier in the video', () => {
-  // Source 2.2-2.8 (inside "there") is cut out of the video.
+test('word timings follow a cut: later words light up earlier in the video, and a word cut away is not shown', () => {
+  // Source 2.2-2.8 (the middle of "there") is cut out of the video.
   const p = P.cutRange(project(), 2.2, 2.8);
   const tl = buildTimeline(p);
   const cues = captionsToOutput(p.captions.segments, tl);
-  assert.strictEqual(cues.length, 2, 'the caption plays either side of the cut');
-  const [before, after] = cues;
-  near(before.end, 2.2);
-  near(after.start, 2.2);
+  // The video plays straight on over the cut, so it is still one caption --
+  // without the word that was cut.
+  assert.strictEqual(cues.length, 1, 'one caption across the cut');
+  const [cue] = cues;
+  assert.strictEqual(cue.text, 'Hello good people');
+  near(cue.start, 1);
+  near(cue.end, 5 - 0.6);
   // "good" is said at source 3, which is now 2.4 in the video.
-  near(after.words[2].start, 2.4);
-  near(after.words[2].start, tl.toOutput('main', 3));
-  near(after.words[3].start, 3.4);
-  assert.strictEqual(activeWordIndex(segmentsAt(cues, 2.3)[0].words, 2.3), 1, '"there" is still being said just after the cut');
-  assert.strictEqual(activeWordIndex(segmentsAt(cues, 2.5)[0].words, 2.5), 2, '"good" at 2.5, not at 3');
-  // In the part before the cut, the words after it never start.
-  assert.strictEqual(activeWordIndex(before.words, 2.19), 1);
-  assert.ok(before.words[2].start >= before.end - 1e-6);
+  near(cue.words[1].start, 2.4);
+  near(cue.words[1].start, tl.toOutput('main', 3));
+  near(cue.words[2].start, 3.4);
+  assert.strictEqual(activeWordIndex(segmentsAt(cues, 2.3)[0].words, 2.3), 0, '"Hello" is still the spoken word just after the cut');
+  assert.strictEqual(activeWordIndex(segmentsAt(cues, 2.5)[0].words, 2.5), 1, '"good" at 2.5, not at 3');
 });
 
 test('word timings follow a speed change: at 2x the words come sooner and closer together', () => {
@@ -119,7 +119,7 @@ test('a cut and a 2x stretch together still land each word on its moment', () =>
     assert.strictEqual(activeWordIndex(last.words, o + 0.05), i);
     checked++;
   }
-  assert.strictEqual(checked, 2, '"good" and "people" play after the cut');
+  assert.strictEqual(checked, 3, '"Hello" before the cut, "good" and "people" after it ("there" starts inside the cut)');
   // "good" (source 3) is a second earlier because of the cut before it.
   near(last.words[2].start, 2, 0.02);
 });

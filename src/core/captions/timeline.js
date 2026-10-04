@@ -16,6 +16,8 @@ const MAX_RATE = 8.5;
 // Leftovers shorter than this after a cut are a flicker, not a caption.
 const MIN_CUE_SECONDS = 0.15;
 const BISECT_STEPS = 12;
+// Two stretches of one caption this close in the video read as one.
+const JOIN_SECONDS = 0.1;
 
 // Whether source moments t1 < t2 (at output o1, o2) play one after the other.
 function continuous(t1, o1, t2, o2) {
@@ -62,6 +64,7 @@ export function segmentToOutput(seg, tl, step = SAMPLE_STEP) {
     }
   }
 
+  const timed = wordsMatchText(seg.words, seg.text);
   const cues = [];
   for (const r of runs) {
     let s = ts[r.firstK];
@@ -74,10 +77,31 @@ export function segmentToOutput(seg, tl, step = SAMPLE_STEP) {
     const cue = { id: seg.id, start: os, end: oe, text: seg.text };
     // Word timings, in output time too, for captions that move as they are
     // spoken (layers/captions.js). Left out when they are not this text's.
-    if (wordsMatchText(seg.words, seg.text)) cue.words = wordsToOutput(seg.words, source, tl, { s, e, os, oe });
+    if (timed) {
+      // Only the words this stretch plays: one cut from the video (a filler
+      // word, say) is not in the caption either.
+      const said = seg.words.filter((w) => { const mid = (w.start + w.end) / 2; return mid >= s - 1e-6 && mid <= e + 1e-6; });
+      cue.words = wordsToOutput(said, source, tl, { s, e, os, oe });
+      cue.text = said.map((w) => w.text).join('').replace(/\s+/g, ' ').trim();
+    }
     cues.push(cue);
   }
-  return cues;
+  if (!timed) return cues;
+  // Stretches that play straight on from each other (the cut between them
+  // took only a word or a pause) are one caption, not a flicker of several.
+  const joined = [];
+  for (const cue of cues) {
+    const prev = joined.at(-1);
+    if (prev && Math.abs(cue.start - prev.end) <= JOIN_SECONDS) {
+      prev.end = cue.end;
+      prev.words = [...prev.words, ...cue.words];
+      prev.text = `${prev.text} ${cue.text}`.replace(/\s+/g, ' ').trim();
+    } else {
+      joined.push(cue);
+    }
+  }
+  // A stretch whose every word was cut has nothing to say.
+  return joined.filter((cue) => cue.text.length > 0);
 }
 
 // All captions in output time, sorted, for the preview, burn-in and SRT/VTT.

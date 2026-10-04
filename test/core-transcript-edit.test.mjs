@@ -112,3 +112,33 @@ test('a hand-edited transcript section is cleaned, not refused', () => {
   assert.equal(P.validateProject(p).transcript.cuts.length, 1);
   assert.equal('transcript' in P.validateProject({ ...p, transcript: 'x' }), false);
 });
+
+test('a caption no longer says a word that was cut, and stays one caption across the cut', async () => {
+  const { captionsToOutput } = await import('../src/core/captions/timeline.js');
+  // Words as the transcriber writes them: each with its leading space.
+  const words = [[' So', 1, 1.2], [' um', 1.4, 1.7], [' this', 1.8, 2], [' works.', 2.05, 2.6]].map(([text, start, end]) => ({ text, start, end }));
+  let p = P.createProject({ main: { width: 1920, height: 1080, duration: 30 }, createdAt: 0 });
+  p = P.setCaptions(p, { segments: [{ id: 's1', source: 'main', start: 1, end: 2.6, text: 'So um this works.', words }] });
+  const before = captionsToOutput(p.captions.segments, buildTimeline(p));
+  assert.deepEqual(before.map((c) => c.text), ['So um this works.']);
+  const cut = T.setFillersCut(p, true);
+  const after = captionsToOutput(cut.captions.segments, buildTimeline(cut));
+  assert.deepEqual(after.map((c) => c.text), ['So this works.']);
+  assert.deepEqual(after[0].words.map((w) => w.text.trim()), ['So', 'this', 'works.']);
+  near(after[0].end - after[0].start, 1.6 - 0.3, 'as long as what is left', 1e-3);
+  // The project's own transcript is untouched, so putting the word back restores the caption.
+  const back = T.setFillersCut(cut, false);
+  assert.deepEqual(captionsToOutput(back.captions.segments, buildTimeline(back)).map((c) => c.text), ['So um this works.']);
+});
+
+test('a caption cut in two by a long removal is two captions, each with its own words', async () => {
+  const { captionsToOutput } = await import('../src/core/captions/timeline.js');
+  const words = [[' One', 1, 1.4], [' two', 1.5, 1.9], [' three', 6, 6.4], [' four', 6.5, 7]].map(([text, start, end]) => ({ text, start, end }));
+  let p = P.createProject({ main: { width: 1920, height: 1080, duration: 30 }, createdAt: 0 });
+  p = P.setCaptions(p, { segments: [{ id: 's1', source: 'main', start: 1, end: 7, text: 'One two three four', words }] });
+  // Move the second half to the front: the halves no longer play one after the other.
+  p = P.splitAt(p, 4);
+  p = P.moveClip(p, 1, 0);
+  const cues = captionsToOutput(p.captions.segments, buildTimeline(p));
+  assert.deepEqual(cues.map((c) => c.text), ['three four', 'One two']);
+});
