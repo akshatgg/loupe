@@ -21,6 +21,7 @@
     "test:e2e:app": "electron test/e2e/app-flow.e2e.js",
     "test:e2e:import": "electron test/e2e/import-video.e2e.js",
     "test:e2e:audio-clips": "electron test/e2e/audio-clips.e2e.js",
+    "test:e2e:redesign": "electron test/e2e/redesign.e2e.js",
     "test:e2e:pro": "electron test/e2e/pro-editing.e2e.js && electron test/e2e/clip-effects.e2e.js && electron test/e2e/overlays.e2e.js",
     "build:native": "bash packaging/build-native.sh",
     "dist:mac": "npm run build:native && electron-builder --mac --config electron-builder.config.js --publish never",

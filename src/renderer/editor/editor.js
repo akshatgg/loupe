@@ -16,6 +16,7 @@ import { commandFor } from './shortcuts.js';
 import { VIDEO_TABS, panelById } from './panels/index.js';
 import { createInspector } from './inspector.js';
 import { createToolbar } from './toolbar.js';
+import { createTranscriptPanel } from './transcript-panel.js';
 import { installMusicDrop, addAudioFiles, splitSelectedAudio } from './panels/audio.js';
 import { h, icon } from './ui.js';
 import { clipLayout, newZoomRange, formatTime } from './timeline-math.js';
@@ -374,8 +375,19 @@ async function start() {
   $('play').onclick = actions.playPause;
   toolbar = createToolbar({ tools: $('tools'), options: $('tlOptions'), actions });
   timeline.setSnap(toolbar.snap);
+  // The transcript beside the preview (the toolbar's Transcript switch).
+  const transcript = createTranscriptPanel({
+    root: $('transcript'), store, player, editor,
+    onClose: () => $('transcriptBtn').click()
+  });
+  const showTranscript = (on) => {
+    transcript.setOpen(on);
+    $('workspace').classList.toggle('with-transcript', on);
+  };
+  showTranscript(toolbar.transcript);
   toolbar.onChange((key, on) => {
     if (key === 'snap') timeline.setSnap(on);
+    if (key === 'transcript') showTranscript(on);
   });
   $('tlOut').onclick = actions.timelineZoomOut;
   $('tlIn').onclick = actions.timelineZoomIn;
@@ -483,7 +495,7 @@ async function start() {
 
   // For the end-to-end tests (test/e2e/editor.js), which drive this page.
   window.__editor = {
-    store, player, timeline, exportDialog, cheat, editor, actions, saver, overlay, addRecording, cutDialog, thumbnails, firstRun, inspector, toolbar,
+    store, player, timeline, exportDialog, cheat, editor, actions, saver, overlay, addRecording, cutDialog, thumbnails, firstRun, inspector, toolbar, transcript,
     meter: meterState
   };
   document.body.dataset.ready = 'true';
