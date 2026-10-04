@@ -7,6 +7,8 @@
 // play continuously, and each run's edges are refined by bisection to the
 // exact cut. Speed changes are just a steeper or flatter mapping inside a run.
 
+import { wordsMatchText, wordsToOutput } from './words.js';
+
 const SAMPLE_STEP = 0.05;
 // Faster than the fastest speed paint (8x): a bigger jump between two samples
 // means a join between clips, not playback.
@@ -38,7 +40,7 @@ function edge(tl, source, keptT, lostT) {
   return a;
 }
 
-// Output-time cues for one segment: [{ id, start, end, text }].
+// Output-time cues for one segment: [{ id, start, end, text, words? }].
 export function segmentToOutput(seg, tl, step = SAMPLE_STEP) {
   const { source, start, end } = seg;
   if (!(end > start)) return [];
@@ -69,7 +71,11 @@ export function segmentToOutput(seg, tl, step = SAMPLE_STEP) {
     const os = tl.toOutput(source, s);
     const oe = tl.toOutput(source, e);
     if (os === null || oe === null || oe - os < MIN_CUE_SECONDS) continue;
-    cues.push({ id: seg.id, start: os, end: oe, text: seg.text });
+    const cue = { id: seg.id, start: os, end: oe, text: seg.text };
+    // Word timings, in output time too, for captions that move as they are
+    // spoken (layers/captions.js). Left out when they are not this text's.
+    if (wordsMatchText(seg.words, seg.text)) cue.words = wordsToOutput(seg.words, source, tl, { s, e, os, oe });
+    cues.push(cue);
   }
   return cues;
 }

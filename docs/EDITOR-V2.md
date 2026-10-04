@@ -144,8 +144,9 @@ item is attached to.
                                  // A project's old `music: {...}` opens as clip a1 (repeating)
     voiceover: [{ id, file, source, t, volume: 1 }]       // anchored to a source moment
   },
-  captions: { show: false, language: "auto", segments: [{ id, source, start, end, text }],
-              style: { size: 1, position: "bottom", box: true } },
+  captions: { show: false, language: "auto", segments: [{ id, source, start, end, text, words? }],
+              style: { size: 1, position: "bottom", box: true, preset: "classic", font: "system",
+                       color: "#ffffff", activeColor: "#ffd60a", animation: "none" } },
   export: { format: "mp4"|"webm"|"gif", resolution: "1080p", quality: "balanced", fps: 60,
             codec: "h264"|"hevc" }
 }
@@ -546,6 +547,23 @@ and the whole app recording with every addition on).
   `subtitles` (path) or `subtitlesError`.
 - Check: `npm run test:e2e:captions` also runs `captions-editor.e2e.js`
   (say → recording → editor → export with burned captions + .srt).
+- Styles (2026-10): `captions.style` also has `preset`
+  (`classic | outline | karaoke | pop | typewriter`, or `custom` once the
+  style matches none), `font` (an id from `src/core/fonts.js`: a short fixed
+  list of font stacks present on macOS and Windows, nothing bundled),
+  `color`, `activeColor` and `animation` (`none | highlight | pop |
+  typewriter`). `captions/style.js` holds the preset bundles; `setCaptions`
+  applies a picked preset's bundle and renames the style when a later change
+  stops it matching. A project saved without these loads with defaults that
+  draw exactly what it drew before (`test/core-text-captions-baseline.test.mjs`
+  compares every draw call with a recording of the old code's).
+  `captions/words.js` maps a segment's `words` to output time with the same
+  `tl.toOutput` the segment uses, so cues carry `words` in output time and
+  the layer picks the spoken word from the frame's `outT` alone: cuts and
+  speed changes move the words with the sound, and preview and export agree.
+  A line whose words are missing or no longer its text is drawn whole. The
+  panel's preset tiles are drawn by `drawCaptions` itself.
+  Check: `npm run test:e2e:text`.
 
 ### The editor's layout (redesign, 2026-10)
 

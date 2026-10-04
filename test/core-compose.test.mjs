@@ -342,7 +342,9 @@ test('captions have a dark box by default, and outlined words without it', () =>
 test('an older project without the caption box setting gets it on load', () => {
   const p = P.createProject({ main: MAIN });
   const old = { ...p, captions: { ...p.captions, style: { size: 1.5, position: 'top' } } };
-  assert.deepStrictEqual(P.validateProject(old).captions.style, { size: 1.5, position: 'top', box: true });
+  assert.deepStrictEqual(P.validateProject(old).captions.style, {
+    size: 1.5, position: 'top', box: true, preset: 'classic', font: 'system', color: '#ffffff', activeColor: '#ffd60a', animation: 'none'
+  });
   assert.throws(() => P.setCaptions(p, { style: { box: 'yes' } }), /box/i);
 });
 

@@ -12,6 +12,10 @@ import { buildTimeline } from './timeline.js';
 import { COLOR_FILTERS } from './look.js';
 import { setKeyframe, removeKeyframe } from './keyframes.js';
 import { clipLength, clipEnd, freeLane, audioName, laneOf, splitPoints, MAX_LANES, MIN_AUDIO_SECONDS } from './audio/clips.js';
+import { FONT_IDS } from './fonts.js';
+import {
+  CAPTION_STYLE_DEFAULTS, CAPTION_PRESET_NAMES, CAPTION_ANIMATIONS, completeCaptionStyle, restyleCaptions
+} from './captions/style.js';
 
 export const VERSION = 2;
 export const SPEED_MIN = 0.25;
@@ -126,13 +130,13 @@ export function defaultAudio() {
 }
 
 export function defaultCaptions() {
-  return { show: false, language: 'auto', segments: [], style: { size: 1, position: 'bottom', box: true } };
+  return { show: false, language: 'auto', segments: [], style: { size: 1, position: 'bottom', box: true, ...CAPTION_STYLE_DEFAULTS } };
 }
 
 // A project saved before a caption style setting existed gets its default.
 function mergeCaptions(c) {
   const d = defaultCaptions();
-  return { ...d, ...c, style: isObj(c.style) ? { ...d.style, ...c.style } : c.style ?? d.style };
+  return { ...d, ...c, style: isObj(c.style) ? completeCaptionStyle({ ...d.style, ...c.style, preset: c.style.preset }) : c.style ?? d.style };
 }
 
 export function defaultExport() {
@@ -667,6 +671,11 @@ function validateCaptions(c, sources) {
   num(c.style.size, 'Caption size', 0.25, 4);
   oneOf(c.style.position, POSITIONS, 'Caption position');
   bool(c.style.box, 'Caption background box');
+  oneOf(c.style.preset, CAPTION_PRESET_NAMES, 'Caption style');
+  oneOf(c.style.font, FONT_IDS, 'Caption font');
+  color(c.style.color, 'Caption colour');
+  color(c.style.activeColor, 'Spoken word colour');
+  oneOf(c.style.animation, CAPTION_ANIMATIONS, 'Caption animation');
   return c;
 }
 
@@ -1541,7 +1550,11 @@ export function setAudio(project, patch) {
 }
 
 export function setCaptions(project, patch) {
-  const captions = validateCaptions(mergeKnown(project.captions, patch, 'Captions'), project.sources);
+  const merged = mergeKnown(project.captions, patch, 'Captions');
+  // A preset sets its bundle of style settings; any other style change
+  // keeps the preset's name only while the style still matches it.
+  if (isObj(patch.style) && isObj(project.captions.style)) merged.style = restyleCaptions(project.captions.style, patch.style);
+  const captions = validateCaptions(merged, project.sources);
   return { ...project, captions };
 }
 

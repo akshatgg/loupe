@@ -5,6 +5,8 @@ export * from './model.js';
 export * from './lines.js';
 export * from './edit.js';
 export * from './timeline.js';
+export * from './words.js';
+export * from './style.js';
 export * from './format.js';
 export * from './chunks.js';
 export * from './languages.js';
