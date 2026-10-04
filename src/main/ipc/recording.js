@@ -16,6 +16,7 @@ const { createCameraBubble, cameraAccess } = require('./camera');
 //               recorderOptions()        { systemAudio, keys, micName } for recorder.start
 //               onRecordingStarted(dir)  webcam recording + pause shortcut
 //   Stop        finishWebcam()           promise for recorder.stop({ webcam })
+//   Restart     discardWebcam()          the webcam take dropped, the bubble kept
 //   teardown    teardown()               everything above undone
 //
 // `togglePause` is main.js's pause/resume action, bound to the shortcut.
@@ -130,6 +131,11 @@ function registerRecordingExtras({
     return bubble.finish();
   }
 
+  // Restart: the bubble stays up; onRecordingStarted() records into it again.
+  function discardWebcam() {
+    return bubble.discard();
+  }
+
   function teardown() {
     countdown?.cancel();
     countdown = null;
@@ -151,7 +157,7 @@ function registerRecordingExtras({
 
   return {
     settings: current, onArm, runCountdown, cancelCountdown, excludeWindowIds,
-    recorderOptions, onRecordingStarted, finishWebcam, teardown, payload,
+    recorderOptions, onRecordingStarted, finishWebcam, discardWebcam, teardown, payload,
     cameraGranted: () => camera.granted()
   };
 }
