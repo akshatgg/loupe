@@ -11,6 +11,7 @@
 import { buildTimeline } from './timeline.js';
 import { COLOR_FILTERS } from './look.js';
 import { setKeyframe, removeKeyframe } from './keyframes.js';
+import { MAX_PATH_POINTS } from './track.js';
 import { clipLength, clipEnd, freeLane, audioName, laneOf, splitPoints, MAX_LANES, MIN_AUDIO_SECONDS } from './audio/clips.js';
 
 export const VERSION = 2;
@@ -529,6 +530,25 @@ function validateStyle(style) {
   return style;
 }
 
+// A hidden area that follows what is under it (core/track.js): `path` is
+// where its top-left corner is over time, [{ t, x, y }] in source seconds and
+// fractions of the recording, in time order.
+function validateFollow(a) {
+  if (a.type !== 'blur') fail('Only a hidden area can follow what is under it (follow, path)');
+  if (a.follow !== undefined) bool(a.follow, 'Annotation follow');
+  if (a.path === undefined) return;
+  if (!Array.isArray(a.path) || a.path.length < 1 || a.path.length > MAX_PATH_POINTS) {
+    fail(`An annotation's path must be a list of 1 to ${MAX_PATH_POINTS} points`);
+  }
+  a.path.forEach((pt, i) => {
+    if (!isObj(pt)) fail("A point of an annotation's path is not an object");
+    num(pt.t, 'Annotation path time', 0);
+    num(pt.x, 'Annotation path x', -1, 2);
+    num(pt.y, 'Annotation path y', -1, 2);
+    if (i > 0 && pt.t <= a.path[i - 1].t) fail("An annotation's path must be in time order");
+  });
+}
+
 function validateAnnotation(a, sources) {
   if (!isObj(a)) fail('An annotation is not an object');
   str(a.id, 'Annotation id', { max: 64 });
@@ -541,6 +561,7 @@ function validateAnnotation(a, sources) {
   str(a.text, 'Annotation text', { empty: true });
   color(a.color, 'Annotation colour');
   num(a.size, 'Annotation size', 0.1, 10);
+  if (a.follow !== undefined || a.path !== undefined) validateFollow(a);
   return a;
 }
 
@@ -1115,6 +1136,8 @@ export function updateAnnotation(project, id, patch) {
   if (!isObj(patch) || 'id' in patch || 'source' in patch) fail('Invalid annotation change');
   const next = { ...project.annotations[i], ...patch };
   if ('start' in patch || 'end' in patch) Object.assign(next, checkRange(project, next.source, next.start, next.end, 'Annotation'));
+  // { follow: undefined, path: undefined } stops a hidden area following.
+  for (const k of ['follow', 'path']) if (next[k] === undefined) delete next[k];
   validateAnnotation(next, project.sources);
   const annotations = project.annotations.slice();
   annotations[i] = next;
