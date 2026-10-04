@@ -13,6 +13,7 @@ import { COLOR_FILTERS } from './look.js';
 import { setKeyframe, removeKeyframe } from './keyframes.js';
 import { clipLength, clipEnd, freeLane, audioName, laneOf, splitPoints, MAX_LANES, MIN_AUDIO_SECONDS } from './audio/clips.js';
 import { FONT_IDS } from './fonts.js';
+import { TEXT_WEIGHTS, TEXT_ALIGNS, TEXT_ANIMATIONS, ANIMATE_SECONDS_MIN, ANIMATE_SECONDS_MAX } from './text-style.js';
 import {
   CAPTION_STYLE_DEFAULTS, CAPTION_PRESET_NAMES, CAPTION_ANIMATIONS, completeCaptionStyle, restyleCaptions
 } from './captions/style.js';
@@ -545,6 +546,16 @@ function validateAnnotation(a, sources) {
   str(a.text, 'Annotation text', { empty: true });
   color(a.color, 'Annotation colour');
   num(a.size, 'Annotation size', 0.1, 10);
+  // Text styling (text-style.js): every field optional, so an annotation
+  // saved before these existed is left exactly as it is.
+  if (a.font !== undefined) oneOf(a.font, FONT_IDS, 'Text font');
+  if (a.weight !== undefined) oneOf(a.weight, TEXT_WEIGHTS, 'Text weight');
+  if (a.align !== undefined) oneOf(a.align, TEXT_ALIGNS, 'Text alignment');
+  if (a.outline !== undefined) num(a.outline, 'Text outline', 0, 1);
+  if (a.background !== undefined && a.background !== null) color(a.background, 'Text background');
+  if (a.animateIn !== undefined) oneOf(a.animateIn, TEXT_ANIMATIONS, 'Text animation in');
+  if (a.animateOut !== undefined) oneOf(a.animateOut, TEXT_ANIMATIONS, 'Text animation out');
+  if (a.animateSeconds !== undefined) num(a.animateSeconds, 'Text animation length', ANIMATE_SECONDS_MIN, ANIMATE_SECONDS_MAX);
   return a;
 }
 

@@ -16,6 +16,7 @@ import { commandFor } from './shortcuts.js';
 import { VIDEO_TABS, panelById } from './panels/index.js';
 import { createInspector } from './inspector.js';
 import { createToolbar } from './toolbar.js';
+import { lowerThird } from '../../core/text-style.js';
 import { createTranscriptPanel } from './transcript-panel.js';
 import { installMusicDrop, addAudioFiles, splitSelectedAudio } from './panels/audio.js';
 import { h, icon } from './ui.js';
@@ -167,8 +168,10 @@ async function start() {
       return added ?? null;
     },
     // A new annotation at the playhead, selected and ready to drag into place.
-    addAnnotation(type) {
-      const draft = newAnnotation(store.project, clipLayout(store.project, store.tl), player.time, type);
+    // `look` (a text template's settings) is laid over the usual starting look.
+    addAnnotation(type, look = null) {
+      const base = newAnnotation(store.project, clipLayout(store.project, store.tl), player.time, type);
+      const draft = base && look ? { ...base, ...look } : base;
       if (!draft) return null;
       player.pause();
       const before = new Set(store.project.annotations.map((a) => a.id));
@@ -344,6 +347,7 @@ async function start() {
     addZoom: () => editor.addZoomAtPlayhead(),
     addText: () => editor.addAnnotation('text'),
     addBlur: () => editor.addAnnotation('blur'),
+    addLowerThird: (id) => editor.addAnnotation('text', lowerThird(id)?.look),
     addAnnotation: (type) => editor.addAnnotation(type),
     // The Audio tab's own recorder, at the playhead.
     recordVoiceover: () => {

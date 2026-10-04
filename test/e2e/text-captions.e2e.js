@@ -14,7 +14,9 @@
 //   - Karaoke shows the spoken word in the spoken-word colour, and a
 //     different word a moment later
 //   - Typewriter shows fewer words early in a caption than late
-//   - a font change changes the pixels
+//   - a font change changes the pixels, of captions and of text
+//   - a ready-made text style from the Text menu, restyled from its settings
+//   - text with a fade in is fainter at its start than a moment later
 //
 // Screenshots go to test/e2e/out/editor/text-*.png to look at.
 
@@ -270,6 +272,7 @@ async function main() {
     });
 
     let karaokeFile;
+    let exported;
     await step('karaoke in the export: the same words at the same moments', async () => {
       karaokeFile = await exportVideo(ed, 'text-04-export-done');
       const first = exportedFrame(karaokeFile, 1.5, 'text-export-karaoke-1.png', CAPTIONS);
@@ -324,7 +327,92 @@ async function main() {
       assert.strictEqual((await style()).color, '#ffffff');
     });
 
+    // ---- text styling: a ready-made style from the Text menu, then its settings
+    let note;
+    const annotation = async () => (await ed.project()).annotations.find((q) => q.id === note.id);
+
+    await step('the Text menu offers three ready-made styles, and picking one adds styled text', async () => {
+      await seek(ed, 5.2);
+      await ed.clickOn('#textBtn');
+      const offered = await ed.js('Array.from(document.querySelectorAll(".tool-menu-item")).filter((b) => b.offsetParent).map((b) => b.id)');
+      assert.deepStrictEqual(offered.slice(0, 4), ['addText', 'addTitle', 'addArrow', 'addBox'], 'the four that were there, first');
+      assert.deepStrictEqual(offered.slice(4), ['addLowerThird-name', 'addLowerThird-chapter', 'addLowerThird-callout']);
+      await ed.shot('text-08-text-menu');
+      await ed.clickOn('#addLowerThird-callout');
+      await ed.settle();
+      note = (await ed.project()).annotations.at(-1);
+      assert.strictEqual(note.type, 'text');
+      assert.deepStrictEqual([note.font, note.weight, note.background, note.animateIn], ['rounded', 'bold', '#ffd60a', 'pop']);
+      assert.ok(note.y > 0.7, 'placed low on the picture');
+      assert.ok(note.start >= 5 - 1e-6, `after the caption (${note.start})`);
+      assert.deepStrictEqual(await ed.js('window.__editor.store.selection'), { kind: 'annotation', id: note.id });
+      // Its settings show what it has.
+      assert.strictEqual(await ed.js('document.getElementById("annoFont").value'), 'rounded');
+      assert.strictEqual(await ed.js('document.getElementById("annoIn").value'), 'pop');
+      assert.strictEqual(await ed.js('document.querySelector("#annoWeight .seg-btn[aria-pressed=true]").dataset.value'), 'bold');
+      assert.strictEqual(await ed.js('document.querySelector("#annoBackground .swatch[aria-pressed=true]").dataset.background'), '#ffd60a');
+      assert.deepStrictEqual(readProject(dir).annotations.at(-1), note, 'saved to project.json');
+      await seek(ed, note.start + 1.5);
+      await ed.shot('text-09-callout');
+    });
+
+    await step('weight, alignment, outline and background are set from the text\'s settings', async () => {
+      await ed.clickOn('#annoWeight .seg-btn[data-value="regular"]');
+      await ed.clickOn('#annoAlign .seg-btn[data-value="left"]');
+      await ed.clickOn('#annoBackground .swatch[data-background="default"]');
+      let a = await annotation();
+      assert.deepStrictEqual([a.weight, a.align, a.background], ['regular', 'left', null]);
+      // The outline slider, dragged: one undo step.
+      await setControl(ed, 'annoOutline', '0.2', ['input']);
+      await setControl(ed, 'annoOutline', '0.45', ['input']);
+      await setControl(ed, 'annoOutline', '0.6', ['input', 'change']);
+      assert.strictEqual((await annotation()).outline, 0.6);
+      await ed.js('document.activeElement?.blur()');
+      await ed.key('z', [MOD]);
+      a = await annotation();
+      assert.strictEqual(a.outline, 0, 'one undo takes the whole drag back');
+      assert.strictEqual(a.background, null, 'and nothing before it');
+      await ed.key('z', [MOD, 'shift']);
+      assert.strictEqual((await annotation()).outline, 0.6);
+      await ed.clickOn('#annoBackground .swatch[data-background="#ffd60a"]');
+      await ed.settle();
+      assert.strictEqual(readProject(dir).annotations.at(-1).background, '#ffd60a');
+    });
+
+    await step('a font change changes the text\'s pixels', async () => {
+      await seek(ed, note.start + 1.5);
+      const before = await previewPixels(ed);
+      await setControl(ed, 'annoFont', 'serif', ['change']);
+      assert.strictEqual((await annotation()).font, 'serif');
+      await sleep(250);
+      const changed = differing(before, await previewPixels(ed));
+      log(`# text font change: ${changed} pixels differ`);
+      assert.ok(changed > 100, `the words are drawn differently (${changed} pixels)`);
+    });
+
+    await step('fade in: fainter at its start than a moment later, in the preview', async () => {
+      await setControl(ed, 'annoIn', 'fade', ['change']);
+      await setControl(ed, 'annoAnimateSeconds', '0.5', ['input']);
+      await setControl(ed, 'annoAnimateSeconds', '1', ['input', 'change']);
+      const a = await annotation();
+      assert.deepStrictEqual([a.animateIn, a.animateSeconds], ['fade', 1]);
+      await ed.settle();
+      assert.strictEqual(readProject(dir).annotations.at(-1).animateSeconds, 1);
+      // Nothing selected, so no handles are drawn over the picture.
+      await ed.js('window.__editor.store.select(null)');
+      await seek(ed, a.start + 0.2);
+      const early = await previewPicture(ed, CAPTIONS);
+      await ed.shot('text-10-fade-early');
+      await seek(ed, a.start + 1.5);
+      const late = await previewPicture(ed, CAPTIONS);
+      await ed.shot('text-11-fade-late');
+      log(`# preview fade: early ${early.away.toFixed(2)}, late ${late.away.toFixed(2)}`);
+      assert.ok(early.away > 0.3, 'already showing a little');
+      assert.ok(early.away < late.away * 0.5, `fainter at its start (${early.away}) than later (${late.away})`);
+    });
+
     await step('typewriter in the export: fewer words early than late', async () => {
+      await ed.clickOn('#tabs [data-panel="captions"]');
       await ed.clickOn('#captionPreset-typewriter');
       const file = await exportVideo(ed);
       assert.notStrictEqual(file, karaokeFile);
@@ -333,6 +421,19 @@ async function main() {
       log(`# export typewriter: early ${JSON.stringify(early)}, late ${JSON.stringify(late)}`);
       assert.ok(early.light > 40, 'the first word is there');
       assert.ok(late.light > early.light * 2.5, `more words late (${late.light}) than early (${early.light})`);
+      exported = file;
+    });
+
+    await step('fade in, in the export: fainter at its start than a moment later', async () => {
+      const a = await annotation();
+      const early = exportedFrame(exported, a.start + 0.2, 'text-export-fade-1.png', CAPTIONS);
+      const late = exportedFrame(exported, a.start + 1.5, 'text-export-fade-2.png', CAPTIONS);
+      // The same part of the picture with nothing on it, from the first export
+      // (made before the text was added): what "not there" measures as.
+      const empty = exportedFrame(karaokeFile, a.start + 1.5, 'text-export-fade-0.png', CAPTIONS).away;
+      log(`# export fade: early ${(early.away - empty).toFixed(2)}, late ${(late.away - empty).toFixed(2)} above the empty picture's ${empty.toFixed(2)}`);
+      assert.ok(early.away - empty > 0.3, 'already showing a little');
+      assert.ok(early.away - empty < (late.away - empty) * 0.5, `fainter at its start (${early.away - empty}) than later (${late.away - empty})`);
     });
 
     const errors = ed.errors.filter((e) => !/Electron Security Warning|willReadFrequently/.test(e));

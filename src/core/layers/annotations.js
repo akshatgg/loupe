@@ -14,15 +14,22 @@
 // source time), fading in and out briefly, except a hidden area, which is
 // fully hidden for every frame it covers.
 //
+// Text and title cards can be styled (font, weight, alignment, an outline, the
+// backing's colour) and can arrive and leave with an animation: see
+// ../text-style.js. One with none of that set draws as it always has.
+//
 // compose.js registers this layer unclipped: title cards cover the whole
 // output, everything else is clipped to the rounded content area here.
 
 import { roundedRectPath } from './frame.js';
+import { fontStack, DEFAULT_FONT } from '../fonts.js';
+import {
+  textAnimationAt, revealLines, isClear, TEXT_FONT_WEIGHT, TITLE_FONT_WEIGHTS, FADE_SECONDS, TITLE_FADE_SECONDS
+} from '../text-style.js';
 
 export const name = 'annotations';
 
-export const FADE_SECONDS = 0.2;
-export const TITLE_FADE_SECONDS = 0.5;
+export { FADE_SECONDS, TITLE_FADE_SECONDS };
 // Reference sizes at 1080p, times the annotation's `size`.
 export const TEXT_PX = 44;
 export const TITLE_PX = 84;
@@ -36,6 +43,7 @@ const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 export function opacityAt(a, t) {
   if (t < a.start || t >= a.end) return 0;
   if (a.type === 'blur') return 1;
+  if (a.type === 'text' || a.type === 'title') return textAnimationAt(a, t).alpha;
   const len = a.end - a.start;
   const fade = Math.min(a.type === 'title' ? TITLE_FADE_SECONDS : FADE_SECONDS, len / 3);
   if (fade <= 0) return 1;
@@ -65,18 +73,26 @@ export function contentFraction(state, px, py) {
   return { x: (px - content.x) / content.w, y: (py - content.y) / content.h };
 }
 
+const familyOf = (a) => (a.font && a.font !== DEFAULT_FONT ? fontStack(a.font) : FONT);
+
+// The ctx.font of a text annotation at `px`.
+export function textFont(a, px) {
+  return `${TEXT_FONT_WEIGHT[a.weight] ?? 600} ${px}px ${familyOf(a)}`;
+}
+
 export function textLines(text) {
   const lines = String(text ?? '').split('\n');
   return lines.length ? lines : [''];
 }
 
-// Measured layout of a text annotation (a centred block of lines on a soft
-// dark backing), in canvas pixels. `ctx` only measures.
+// Measured layout of a text annotation (a block of lines on a soft backing,
+// centred on its point), in canvas pixels. `ctx` only measures. `textX` is
+// where each line is anchored for its alignment.
 export function textLayout(ctx, state, a) {
   const px = Math.max(6, TEXT_PX * state.unit * a.size);
   const lines = textLines(a.text || ' ');
   ctx.save();
-  ctx.font = `600 ${px}px ${FONT}`;
+  ctx.font = textFont(a, px);
   const width = Math.max(px, ...lines.map((l) => ctx.measureText(l).width));
   ctx.restore();
   const lineHeight = px * 1.25;
@@ -86,7 +102,9 @@ export function textLayout(ctx, state, a) {
   const cy = state.content.y + a.y * state.content.h;
   const w = width + 2 * padX;
   const h = lines.length * lineHeight + 2 * padY;
-  return { px, lines, lineHeight, cx, cy, box: { x: cx - w / 2, y: cy - h / 2, w, h } };
+  const align = a.align === 'left' || a.align === 'right' ? a.align : 'center';
+  const textX = align === 'left' ? cx - width / 2 : align === 'right' ? cx + width / 2 : cx;
+  return { px, lines, lineHeight, cx, cy, align, textX, box: { x: cx - w / 2, y: cy - h / 2, w, h } };
 }
 
 // Where an annotation is on the canvas, for drawing and for the editor's
@@ -132,46 +150,91 @@ function softShadow(ctx, unit, strength = 1) {
   ctx.shadowOffsetY = 4 * unit;
 }
 
+// Moves and sizes what follows about (cx, cy) for a slide or a pop. At rest
+// it does nothing at all.
+function animateAbout(ctx, anim, cx, cy, px) {
+  if (anim.slide === 0 && anim.scale === 1) return;
+  ctx.translate(cx, cy + anim.slide * px * 0.9);
+  ctx.scale(anim.scale, anim.scale);
+  ctx.translate(-cx, -cy);
+}
+
+// One line of a block. `part` is what shows of `full`; when the typewriter
+// is part-way through a line, the letters stay where they will end up.
+function putLine(ctx, how, full, part, x, y, align) {
+  if (part === full) {
+    ctx[how](full, x, y);
+    return;
+  }
+  if (!part) return;
+  const w = ctx.measureText(full).width;
+  const left = align === 'left' ? x : align === 'right' ? x - w : x - w / 2;
+  ctx.save();
+  ctx.textAlign = 'left';
+  ctx[how](part, left, y);
+  ctx.restore();
+}
+
 function drawText(ctx, state, a, alpha) {
   const L = textLayout(ctx, state, a);
+  const anim = textAnimationAt(a, state.t);
   ctx.save();
   ctx.globalAlpha = alpha;
+  animateAbout(ctx, anim, L.cx, L.cy, L.px);
   softShadow(ctx, state.unit);
-  ctx.fillStyle = 'rgba(17, 17, 20, 0.72)';
-  roundedRectPath(ctx, L.box, L.px * 0.4);
-  ctx.fill();
-  ctx.shadowColor = 'rgba(0, 0, 0, 0)';
+  // No backing: the words keep the shadow, to stand out on their own.
+  if (!isClear(a.background)) {
+    ctx.fillStyle = a.background ?? 'rgba(17, 17, 20, 0.72)';
+    roundedRectPath(ctx, L.box, L.px * 0.4);
+    ctx.fill();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0)';
+  }
   ctx.fillStyle = a.color;
-  ctx.font = `600 ${L.px}px ${FONT}`;
-  ctx.textAlign = 'center';
+  ctx.font = textFont(a, L.px);
+  ctx.textAlign = L.align;
   ctx.textBaseline = 'middle';
   const top = L.cy - ((L.lines.length - 1) * L.lineHeight) / 2;
-  L.lines.forEach((line, i) => ctx.fillText(line, L.cx, top + i * L.lineHeight));
+  const shown = revealLines(L.lines, anim.reveal);
+  if (a.outline > 0) {
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(1, a.outline * L.px * 0.24);
+    ctx.strokeStyle = inkFor(a.color);
+    L.lines.forEach((line, i) => putLine(ctx, 'strokeText', line, shown[i], L.textX, top + i * L.lineHeight, L.align));
+    ctx.shadowColor = 'rgba(0, 0, 0, 0)';
+  }
+  L.lines.forEach((line, i) => putLine(ctx, 'fillText', line, shown[i], L.textX, top + i * L.lineHeight, L.align));
   ctx.restore();
 }
 
 function drawTitle(ctx, state, a, alpha) {
   const { width, height } = state.size;
+  const anim = textAnimationAt(a, state.t);
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.fillStyle = a.color;
   ctx.fillRect(0, 0, width, height);
   const ink = inkFor(a.color);
-  const [first, ...rest] = textLines(a.text);
+  const lines = textLines(a.text);
+  const shown = revealLines(lines, anim.reveal);
   const big = Math.max(8, TITLE_PX * state.unit * a.size);
   const small = big * 0.45;
-  ctx.textAlign = 'center';
+  const align = a.align === 'left' || a.align === 'right' ? a.align : 'center';
+  const x = align === 'left' ? width * 0.08 : align === 'right' ? width * 0.92 : width / 2;
+  const [heavy, light] = TITLE_FONT_WEIGHTS[a.weight] ?? TITLE_FONT_WEIGHTS.medium;
+  // The card stays put; only the words slide or pop.
+  animateAbout(ctx, anim, width / 2, height / 2, big);
+  ctx.textAlign = align;
   ctx.textBaseline = 'middle';
   ctx.fillStyle = ink;
-  const total = big * 1.2 + rest.length * small * 1.45;
+  const total = big * 1.2 + (lines.length - 1) * small * 1.45;
   let y = height / 2 - total / 2 + big * 0.6;
-  ctx.font = `700 ${big}px ${FONT}`;
-  ctx.fillText(first, width / 2, y);
+  ctx.font = `${heavy} ${big}px ${familyOf(a)}`;
+  putLine(ctx, 'fillText', lines[0], shown[0], x, y, align);
   y += big * 0.6 + small * 0.95;
-  ctx.font = `500 ${small}px ${FONT}`;
+  ctx.font = `${light} ${small}px ${familyOf(a)}`;
   ctx.globalAlpha = alpha * 0.75;
-  for (const line of rest) {
-    ctx.fillText(line, width / 2, y);
+  for (let i = 1; i < lines.length; i++) {
+    putLine(ctx, 'fillText', lines[i], shown[i], x, y, align);
     y += small * 1.45;
   }
   ctx.restore();

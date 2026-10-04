@@ -9,7 +9,7 @@
 // so the preview and every export agree.
 
 export const POP_SECONDS = 0.12;
-export const POP_SCALE = 0.16;
+export const POP_SCALE = 0.1;
 // How much fainter the words still to come are in a highlighted line.
 export const UPCOMING_ALPHA = 0.45;
 
