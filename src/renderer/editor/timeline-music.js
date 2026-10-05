@@ -17,6 +17,7 @@
 //   { x(t), pps, timeAt(clientX, opts), shown(), beginDrag(e, handlers),
 //     snapPoints(), snap(t, points), showGuide(t) }
 
+import { hasItem } from './selection.js';
 import * as P from '../../core/project.js';
 import { clipLength, clipEnd, clipGainAt, shiftPoints, laneOf, MAX_LANES, MIN_AUDIO_SECONDS } from '../../core/audio/clips.js';
 import { h, icon } from './ui.js';
@@ -75,12 +76,12 @@ export function createMusicLanes({ store, player, editor, view }) {
       labelLanes = laneKey;
       label.replaceChildren(...Array.from({ length: rows }, (_, i) => rowLabel(p, i)));
     }
-    const sel = store.selection;
+    const sel = store.selected;
     const els = [];
     for (let i = 0; i < rows; i++) els.push(h('div', { class: 'aclip-row', style: { top: `${i * ROW_HEIGHT}px` } }));
-    for (const clip of p.audio.clips) els.push(block(clip, duration, sel?.kind === 'audio' && sel.id === clip.id));
+    for (const clip of p.audio.clips) els.push(block(clip, duration, hasItem(sel, { kind: 'audio', id: clip.id })));
     if (!p.audio.clips.length) {
-      els.push(h('div', { class: 'tl-hint' }, 'Add songs or sounds with the Audio button, or drop audio files on the window'));
+      els.push(h('div', { class: 'tl-hint' }, 'Add songs or sounds with the Add button, or drop audio files on the window'));
     }
     track.replaceChildren(...els);
   }

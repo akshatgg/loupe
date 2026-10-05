@@ -212,6 +212,25 @@ test('stop() writes a version-2 project.json from the recording', async () => {
   h.cleanup();
 });
 
+test('stop({ discard }) stops the helpers and writes nothing, and the recorder can start again', async () => {
+  const h = harness();
+  await startAt(h);
+  h.deliver('inputtap', { type: 'click', clock: 1001, x: 15, y: 25, button: 'left' }, 1001);
+  h.rec.pause();
+  assert.deepStrictEqual(await h.rec.stop({ discard: true }), { dir: h.dir, discarded: true });
+  assert.deepStrictEqual(fs.readdirSync(h.dir), [], 'no project, cursor track or keys were written');
+  assert.strictEqual(h.rec.state().recording, false);
+  assert.strictEqual(await h.rec.stop(), null, 'a second stop has nothing to do');
+
+  // The next take starts clean: nothing of the thrown-away one is in it.
+  await startAt(h, {}, 2000);
+  h.deliver('capture', { type: 'stopped', duration: 2, now: 2003 }, 2003);
+  const { recording } = await h.rec.stop();
+  assert.deepStrictEqual(recording.sources.main.clicks, []);
+  assert.deepStrictEqual(recording.sources.main.pauses, []);
+  h.cleanup();
+});
+
 test('stop() starts the project from the default preset, and keeps zooms and pauses', async () => {
   const h = harness();
   await startAt(h, {}, 1000);
@@ -252,4 +271,27 @@ test('the microphone chosen in Settings is passed to capture by name, only with 
   await off.rec.start({ source: 'display:1', mic: false, micName: 'USB Mic', dir: off.dir, width: 800, height: 600 });
   assert.ok(!off.argsFor.capture.includes('--mic-name'));
   off.cleanup();
+});
+
+test('toProjectV2 with autoZoom zooms on the clicks and leaves the note; without it, neither', () => {
+  const { toProjectV2: v2 } = require('../src/main/recording-v2');
+  const recording = {
+    zoomKeyframes: [],
+    sources: { main: {
+      dir: '.', kind: 'display', id: '1', title: 'Display', width: 1920, height: 1080, originX: 0, originY: 0,
+      video: 'raw.mov', duration: 20, fps: 60, mic: false, systemAudio: null, webcam: null, cursor: 'cursor.bin', keys: null,
+      clicks: [{ t: 5, x: 10, y: 10, button: 'left' }, { t: 12, x: 500, y: 300, button: 'left' }], pauses: []
+    } }
+  };
+  const plain = v2(recording, { createdAt: 1 });
+  assert.strictEqual(plain.zooms.length, 0);
+  assert.strictEqual('autoZoomNote' in plain, false);
+  const zoomed = v2(recording, { createdAt: 1, autoZoom: true });
+  assert.strictEqual(zoomed.zooms.length, 2);
+  assert.ok(zoomed.zooms.every((z) => z.auto === true));
+  assert.strictEqual(zoomed.autoZoomNote, true);
+  // No clicks: no zooms and no note to answer.
+  const quiet = v2({ ...recording, sources: { main: { ...recording.sources.main, clicks: [] } } }, { createdAt: 1, autoZoom: true });
+  assert.strictEqual(quiet.zooms.length, 0);
+  assert.strictEqual('autoZoomNote' in quiet, false);
 });

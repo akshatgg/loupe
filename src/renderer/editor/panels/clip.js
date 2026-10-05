@@ -12,7 +12,10 @@ import { h, icon, toggle, section, slider, segmented } from '../ui.js';
 import * as P from '../../../core/project.js';
 import { clipTransform, clipColor, COLOR_FILTERS } from '../../../core/look.js';
 import { formatTime, parseTime } from '../timeline-math.js';
-import { valueAt, keyframeAt, neighbours } from '../../../core/keyframes.js';
+import { valueAt, keyframeAt, neighbours, KEYFRAME_EASES } from '../../../core/keyframes.js';
+import { advanced } from '../disclosure.js';
+import { overlayEffects } from '../../../core/overlay-effects.js';
+import { createCurveEditor, createHistogram } from '../colour-tools.js';
 
 const FILTER_LABELS = {
   none: 'None', bw: 'B&W', sepia: 'Sepia', vivid: 'Vivid', warm: 'Warm', cool: 'Cool', faded: 'Faded', dramatic: 'Dramatic'
@@ -51,7 +54,8 @@ export default {
           base: (prop) => clipTransform(s.clip)[prop],
           setBase: (prop, v) => P.setClipLook(store.project, s.clip.id, { transform: { [prop]: v } }),
           setKf: (prop, t, v) => (p) => P.setClipKeyframe(p, s.clip.id, prop, t, v),
-          removeKf: (prop, t) => (p) => P.removeClipKeyframe(p, s.clip.id, prop, t)
+          removeKf: (prop, t) => (p) => P.removeClipKeyframe(p, s.clip.id, prop, t),
+          setEase: (prop, t, ease) => (p) => P.setClipKeyframeEase(p, s.clip.id, prop, t, ease)
         };
       }
       if (sel?.kind === 'overlay') {
@@ -65,7 +69,8 @@ export default {
           base: (prop) => o[prop],
           setBase: (prop, v) => P.updateOverlay(store.project, o.id, { [prop]: v }),
           setKf: (prop, k, v) => (p) => P.setOverlayKeyframe(p, o.id, prop, k, v),
-          removeKf: (prop, k) => (p) => P.removeOverlayKeyframe(p, o.id, prop, k)
+          removeKf: (prop, k) => (p) => P.removeOverlayKeyframe(p, o.id, prop, k),
+          setEase: (prop, k, ease) => (p) => P.setOverlayKeyframeEase(p, o.id, prop, k, ease)
         };
       }
       return null;
@@ -214,7 +219,34 @@ export default {
       }, icon('trash', { size: 16 })));
     const removeLut = lutRow.lastElementChild;
     const lutMix = sl('clipLutMix', 'LUT amount', 0, 1, 0.01, percent, (v) => ({ color: { lutMix: v } }));
-    const colourSection = section('Colour', filters, bright, contrast, saturation, lutRow, lutMix, resetColour);
+    // Advanced: the finer colour tools (core/grade.js), a curve and a histogram.
+    const fine = (id, label, title, min, key) => {
+      const row = sl(id, label, min, 1, 0.01, min < 0 ? signed : percent, (v) => ({ color: { [key]: v } }));
+      row.title = title;
+      return row;
+    };
+    const temperature = fine('clipTemperature', 'Warmth', 'Temperature: left is cooler (bluer), right is warmer', -1, 'temperature');
+    const tint = fine('clipTint', 'Tint', 'Tint: left is greener, right is pinker (magenta)', -1, 'tint');
+    const shadows = fine('clipShadows', 'Brighten shadows', 'Shadows: the dark parts only; left darkens them', -1, 'shadows');
+    const highlights = fine('clipHighlights', 'Brighten highlights', 'Highlights: the bright parts only; left darkens them', -1, 'highlights');
+    const vignette = fine('clipVignette', 'Darken corners', 'Vignette', 0, 'vignette');
+    const sharpen = fine('clipSharpen', 'Sharpen', 'Sharpening: edges made crisper', 0, 'sharpen');
+    const curve = createCurveEditor({ id: 'clipCurve', onInput: (points) => look({ color: { curve: points } }, 'clipCurve'), onChange: done });
+    const curveField = h('div', { class: 'field' },
+      h('span', { class: 'field-row' }, h('span', { class: 'label' }, 'Curve'),
+        h('button', { type: 'button', class: 'btn small', id: 'clipCurveReset', onclick: () => look({ color: { curve: null } }) }, 'Straighten')),
+      curve.el,
+      h('p', { class: 'hint' }, 'Click to add a point, drag it up to brighten or down to darken, double-click it to remove.'));
+    const histo = createHistogram({ id: 'clipHistogram', source: () => document.getElementById('preview') });
+    const histoField = h('div', { class: 'field' }, h('span', { class: 'label' }, 'Brightness of this frame'), histo.el,
+      h('p', { class: 'hint' }, 'Dark on the left, bright on the right.'));
+    const colourAdvanced = advanced('clipColour', { id: 'clipColourAdvanced' }, temperature, tint, shadows, highlights, vignette, sharpen, curveField, histoField);
+    // The histogram follows the preview: at once when this opens, and a few
+    // times a second while it shows (playing or not; it is a small picture).
+    const showing = () => colourAdvanced.open && histo.el.offsetParent !== null;
+    colourAdvanced.addEventListener('toggle', () => { if (showing()) { curve.draw(); histo.draw(); } });
+    setInterval(() => { if (showing()) histo.draw(); }, 250);
+    const colourSection = section('Colour', filters, bright, contrast, saturation, lutRow, lutMix, colourAdvanced, resetColour);
 
     // ---- an overlay: a picture or video over the video
     const oTitle = h('h3', { class: 'clip-title' });
@@ -252,12 +284,117 @@ export default {
       type: 'button', class: 'btn small danger-quiet', id: 'deleteOverlay',
       onclick: () => { const it = item(); if (it) { store.apply((p) => P.removeOverlay(p, it.id)); editor.select(null); } }
     }, icon('trash', { size: 14 }), 'Delete overlay');
-    const overlaySection = section(null, oTitle, oInfo, oX, oY, oScale, oRotate, oOpacity, keyNav, oFadeIn, oFadeOut, oTimes, oDelete);
+    // Advanced: how it mixes with the video, a shape it is cut to, a green screen.
+    const fxNow = () => overlayEffects(item()?.overlay);
+    const chooser = (id, label, title, options, onPick) => {
+      const select = h('select', { id, class: 'select', 'aria-label': label, title },
+        options.map(([value, text]) => h('option', { value }, text)));
+      select.addEventListener('change', () => onPick(select.value));
+      return h('label', { class: 'field chooser' }, h('span', { class: 'label' }, label), select);
+    };
+    const oSlider = (id, label, title, patchOf) => {
+      const row = slider({ label, min: 0, max: 1, step: 0.01, value: 0, format: percent, onInput: (v) => overlayEdit(patchOf(v), id), onChange: () => store.endGesture() });
+      row.querySelector('input').id = id;
+      row.title = title;
+      return row;
+    };
+    const oBlend = chooser('overlayBlend', 'Mix with the video', 'Blend mode',
+      [['normal', 'Normal'], ['multiply', 'Darken (multiply)'], ['screen', 'Lighten (screen)'], ['overlay', 'Overlay'], ['soft-light', 'Soft light'], ['add', 'Glow (add)']],
+      (v) => overlayEdit({ blend: v }));
+    const oMask = chooser('overlayMask', 'Cut to a shape', 'Mask',
+      [['none', 'None'], ['rectangle', 'Rectangle'], ['ellipse', 'Oval']],
+      (v) => overlayEdit({ mask: { ...fxNow().mask, shape: v } }));
+    const oMaskFeather = oSlider('overlayMaskFeather', 'Soften the shape’s edge', 'Feather', (v) => ({ mask: { ...fxNow().mask, feather: v } }));
+    const oKeyOn = toggle({
+      label: 'Green screen', hint: 'Makes one colour see-through, so the video shows where it was.',
+      onChange: (on) => overlayEdit({ key: { ...fxNow().key, on } })
+    });
+    oKeyOn.input.id = 'overlayKeyOn';
+    const oKeyColor = h('input', { type: 'color', id: 'overlayKeyColor', value: '#00ff00', 'aria-label': 'Colour to remove' });
+    oKeyColor.addEventListener('input', () => overlayEdit({ key: { ...fxNow().key, color: oKeyColor.value } }, 'overlayKeyColor'));
+    oKeyColor.addEventListener('change', () => store.endGesture());
+    const oKeyColorRow = h('label', { class: 'field chooser', title: 'Key colour' }, h('span', { class: 'label' }, 'Colour to remove'), oKeyColor);
+    const oKeyTolerance = oSlider('overlayKeyTolerance', 'How much to remove', 'Tolerance: how far from that colour still goes', (v) => ({ key: { ...fxNow().key, tolerance: v } }));
+    const oKeySoftness = oSlider('overlayKeySoftness', 'Soften the cut-out’s edge', 'Softness', (v) => ({ key: { ...fxNow().key, softness: v } }));
+    const overlayAdvanced = advanced('overlay', { id: 'overlayAdvanced' }, oBlend, oMask, oMaskFeather, oKeyOn, oKeyColorRow, oKeyTolerance, oKeySoftness);
+    const overlaySection = section(null, oTitle, oInfo, oX, oY, oScale, oRotate, oOpacity, keyNav, oFadeIn, oFadeOut, oTimes, overlayAdvanced, oDelete);
+
+    // ---- how the keyframe at the playhead is arrived at (Advanced)
+    const EASE_LABELS = { smooth: 'Smoothly', linear: 'At a steady pace', 'ease-in': 'Slow, then fast', 'ease-out': 'Fast, then slow', hold: 'All at once (hold)' };
+    // The properties with a keyframe at the playhead.
+    const keysHere = (it) => (it && it.local !== null
+      ? Object.entries(it.keyframes).filter(([, list]) => keyframeAt(list, it.local)).map(([prop, list]) => ({ prop, k: keyframeAt(list, it.local) }))
+      : []);
+    function easeRow(id) {
+      const select = h('select', { class: 'select', id, 'aria-label': 'How it gets to this keyframe' },
+        KEYFRAME_EASES.map((e) => h('option', { value: e }, EASE_LABELS[e])));
+      select.addEventListener('change', () => {
+        const it = item();
+        const here = keysHere(it);
+        if (!here.length) return;
+        // Every property keyed at this moment, as one undo step.
+        store.apply((p) => here.reduce((q, { prop, k }) => it.setEase(prop, k.t, select.value)(q), p));
+      });
+      const row = h('label', { class: 'field ease-row', hidden: true },
+        h('span', { class: 'label' }, 'Gets to this keyframe'), select);
+      row.refresh = (it) => {
+        const here = keysHere(it);
+        row.hidden = !here.length;
+        if (here.length && document.activeElement !== select) select.value = here[0].k.ease ?? 'smooth';
+      };
+      return row;
+    }
+    const overlayEase = easeRow('overlayKeyEase');
+    const clipEase = easeRow('clipKeyEase');
+
+    // ---- speed: the whole clip at once (⌥-drag on the timeline for a part)
+    const SPEEDS = [0.25, 0.5, 1, 1.5, 2, 3, 4, 8];
+    const speedChips = h('div', { class: 'chips', id: 'clipSpeeds' }, SPEEDS.map((rate) => h('button', {
+      type: 'button', class: 'chip', dataset: { rate: String(rate) },
+      onclick: () => {
+        const s = selected();
+        if (s) apply((p) => P.paintSpeed(p, { source: s.clip.source, start: s.clip.start, end: s.clip.end, rate }));
+      }
+    }, rate === 1 ? 'Normal' : `${rate}×`)));
+    const speedHint = h('p', { class: 'hint' });
+    // How the clip's speed changes begin and end: at once, or eased.
+    const RAMPS = [
+      { value: 'usual', label: 'Usual', title: 'A short ease in and out' },
+      { value: 'sudden', label: 'At once', title: 'Changes speed in an instant' },
+      { value: 'in', label: 'Ease in', title: 'Builds up to the speed' },
+      { value: 'out', label: 'Ease out', title: 'Settles back from the speed' },
+      { value: 'both', label: 'Ease both', title: 'Builds up, then settles back' }
+    ];
+    const rampOf = (seg) => (seg.rampIn === undefined && seg.rampOut === undefined ? 'usual'
+      : !seg.rampIn && !seg.rampOut ? 'sudden' : seg.rampIn && !seg.rampOut ? 'in' : !seg.rampIn && seg.rampOut ? 'out' : 'both');
+    let rampSeconds = 0.8;
+    const setRamp = (kind, gesture = null) => {
+      const s = selected();
+      if (!s) return;
+      const shape = kind === 'usual' ? {} : {
+        rampIn: kind === 'in' || kind === 'both' ? rampSeconds : 0,
+        rampOut: kind === 'out' || kind === 'both' ? rampSeconds : 0
+      };
+      store.apply((p) => P.setSpeedRamp(p, { source: s.clip.source, start: s.clip.start, end: s.clip.end, ...shape }), { gesture });
+    };
+    const ramp = segmented({ label: 'Speeding up and slowing down', options: RAMPS, value: 'usual', onChange: (v) => setRamp(v) });
+    ramp.classList.add('wrap');
+    ramp.id = 'clipRamp';
+    const rampLength = slider({
+      label: 'Takes', min: 0.1, max: P.SPEED_RAMP_MAX, step: 0.05, value: rampSeconds, format: (v) => `${v.toFixed(2).replace(/0$/, '')} s`,
+      onInput: (v) => { rampSeconds = v; setRamp(rampKind, 'clip:ramp'); }, onChange: () => store.endGesture()
+    });
+    rampLength.querySelector('input').id = 'clipRampSeconds';
+    let rampKind = 'usual';
+    const rampBox = h('div', { class: 'ramp-box', hidden: true }, ramp, rampLength);
+    const speedSection = section('Speed', speedChips, speedHint, rampBox);
 
     const settings = section(null, title, length, reverse, holdRow);
     const tools = section(null, freezeBtn,
       h('p', { class: 'hint' }, 'Holds the frame at the playhead for 2 seconds, splitting the clip there.'));
-    container.append(empty, overlaySection, settings, place, colourSection, tools);
+    container.append(empty, overlaySection, settings, speedSection, place, colourSection, tools);
+    keyNav.after(overlayEase);
+    clipKeyNav.after(clipEase);
 
     function update() {
       const s = selected();
@@ -268,6 +405,28 @@ export default {
       settings.hidden = !s;
       place.hidden = !s;
       colourSection.hidden = !s;
+      speedSection.hidden = !s || s.clip.hold > 0;
+      if (s && !(s.clip.hold > 0)) {
+        // The clip's speed changes: one rate over all of it, several, or none.
+        const inside = store.project.speed.filter((q) => q.source === s.clip.source && q.end > s.clip.start + 1e-6 && q.start < s.clip.end - 1e-6);
+        const whole = inside.length === 1 && inside[0].start <= s.clip.start + 1e-6 && inside[0].end >= s.clip.end - 1e-6;
+        const rate = !inside.length ? 1 : whole ? inside[0].rate : null;
+        for (const b of speedChips.children) b.setAttribute('aria-pressed', String(Number(b.dataset.rate) === rate));
+        speedHint.textContent = rate === null
+          ? 'Parts of this clip play at different speeds. Pick one to set the whole clip.'
+          : 'For just a part, hold ⌥ (Alt) and drag across it on the timeline.';
+        // Shaping shows once there is a speed change to shape.
+        rampBox.hidden = !inside.length;
+        if (inside.length) {
+          rampKind = rampOf(inside[0]);
+          ramp.set(rampKind);
+          const eased = rampKind === 'in' || rampKind === 'both' ? inside[0].rampIn : rampKind === 'out' ? inside[0].rampOut : null;
+          rampLength.hidden = eased === null;
+          if (eased !== null) { rampSeconds = eased; rampLength.set(eased); }
+        }
+      }
+      overlayEase.refresh(it);
+      clipEase.refresh(it);
       if (o) {
         oTitle.textContent = o.name || 'Overlay';
         oInfo.textContent = `${o.kind === 'video' ? 'A video' : 'A picture'} on row V${o.lane + 2}, ${formatTime(o.start, { fraction: true })} to ${formatTime(o.start + o.length, { fraction: true })}`;
@@ -276,6 +435,16 @@ export default {
         oFadeOut.set(o.fadeOut);
         if (document.activeElement !== oStart.input) oStart.input.value = formatTime(o.start, { fraction: true });
         if (document.activeElement !== oLength.input) oLength.input.value = formatTime(o.length, { fraction: true });
+        const fx = overlayEffects(o);
+        oBlend.querySelector('select').value = fx.blend;
+        oMask.querySelector('select').value = fx.mask.shape;
+        oMaskFeather.hidden = fx.mask.shape === 'none';
+        oMaskFeather.set(fx.mask.feather);
+        oKeyOn.set(fx.key.on);
+        if (document.activeElement !== oKeyColor) oKeyColor.value = fx.key.color;
+        for (const row of [oKeyColorRow, oKeyTolerance, oKeySoftness]) row.hidden = !fx.key.on;
+        oKeyTolerance.set(fx.key.tolerance);
+        oKeySoftness.set(fx.key.softness);
       }
       if (!s) return;
       const t = clipTransform(s.clip);
@@ -290,6 +459,13 @@ export default {
       lutMix.hidden = !c.lut;
       lutMix.set(c.lutMix);
       removeLut.hidden = !c.lut;
+      temperature.set(c.temperature);
+      tint.set(c.tint);
+      shadows.set(c.shadows);
+      highlights.set(c.highlights);
+      vignette.set(c.vignette);
+      sharpen.set(c.sharpen);
+      curve.set(c.curve);
       const { clip, index, bounds } = s;
       const held = clip.hold > 0;
       title.textContent = held ? `Freeze frame (clip ${index + 1})` : `Clip ${index + 1}`;

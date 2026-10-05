@@ -126,10 +126,16 @@ item is attached to.
     webcam: { show: true, shape: "circle"|"rounded", size: 0.22, corner: "bottom-right" }
   },
   annotations: [{ id, type: "text"|"title"|"arrow"|"box"|"blur", source, start, end,
-                  x, y, w, h, x2, y2, text, color, size }],
+                  x, y, w, h, x2, y2, text, color, size,
+                  font?, weight?, align?, outline?, background?,   // text and title only
+                  animateIn?, animateOut?, animateSeconds? }],
                                  // text: x,y = centre, 0..1 of the content area; arrow/box/blur:
                                  // 0..1 of the recording's picture (they follow zooms); title:
                                  // full frame, `color` is its background
+                                 // a blur may also carry `follow: true` and `path: [{ t, x, y }]`
+                                 // (source seconds; its top-left corner, 0..1 of the recording's
+                                 // picture; in time order, at most 600 points): it is drawn where
+                                 // the path puts it at that moment ("A blur that follows", below)
   transitions: [{ after: clipId, type: "fade"|"crossfade"|"dip", duration: 0.5 }],
   audio: {
     mic:    { volume: 1, muted: false, cleanUp: true, level: true },
@@ -139,13 +145,18 @@ item is attached to.
                                  // songs and sound files on the audio rows; `points` is the
                                  // volume over time, `source` (with file null) the video's
                                  // own sound detached from clips marked `detached: true`
+                                 // mic, system and each clip may also carry (all optional,
+                                 // absent in older projects): pan (-1..1), eq { low, mid, high }
+                                 // (dB, -12..12), compressor { on, threshold, ratio, attack,
+                                 // release, makeup } -- see "Finer audio tools"
     lanes:  [{ muted, solo, locked }],                   // per audio row
                                  // rows (core/audio/clips.js); files copied into music/.
                                  // A project's old `music: {...}` opens as clip a1 (repeating)
     voiceover: [{ id, file, source, t, volume: 1 }]       // anchored to a source moment
   },
-  captions: { show: false, language: "auto", segments: [{ id, source, start, end, text }],
-              style: { size: 1, position: "bottom", box: true } },
+  captions: { show: false, language: "auto", segments: [{ id, source, start, end, text, words? }],
+              style: { size: 1, position: "bottom", box: true, preset: "classic", font: "system",
+                       color: "#ffffff", activeColor: "#ffd60a", animation: "none" } },
   export: { format: "mp4"|"webm"|"gif", resolution: "1080p", quality: "balanced", fps: 60,
             codec: "h264"|"hevc" }
 }
@@ -263,6 +274,13 @@ flushes a pending save first; closing the editor and quitting flush too.
   GPU, `core/look.js`, `core/lut.js`, `layers/lut-gl.js`, `ipc/luts.js`);
   ◆ keyframes (`core/keyframes.js`) on position, scale, rotation (clips, in
   recording time) and opacity (overlays, from their start).
+  Colour > Advanced (`core/grade.js`, all optional, 0 = as recorded):
+  `temperature`, `tint`, `highlights`, `shadows`, `sharpen` and `curve`
+  (2-8 points, a monotone cubic) in the same GPU pass as the LUT, before it
+  (`gradePixel` is the CPU reference and fallback); `vignette` drawn over
+  the picture by `layers/frame.js`; a curve editor and a brightness
+  histogram of the preview (`colour-tools.js`).
+  Check: `test/e2e/effects-colour.e2e.js` (`npm run test:e2e:effects`).
 - Transitions (`layers/transitions.js transitionPlan`): fade, crossfade, dip
   to black / white, blur, wipe left / right / up / down, slide left / right,
   circle, zoom; two-picture ones get the other side's held frame.
@@ -270,6 +288,12 @@ flushes a pending save first; closing the editor and quitting flush too.
   `ipc/media.js`): pictures and videos on rows V2, V3... above the clips
   (the Overlay button), a picture-in-picture until moved, trimmed and moved
   like clips, placed, faded and keyframed in the Clip panel.
+  Advanced (folded; `disclosure.js`, open/closed kept in localStorage):
+  `blend` (normal, multiply, screen, overlay, soft-light, add), `mask`
+  ({ shape: none | rectangle | ellipse, feather }) and `key` (a green
+  screen: { on, color, tolerance, softness }, measured in chroma) --
+  `core/overlay-effects.js` is the reference maths, `layers/key-gl.js` the
+  shader (no GPU: drawn unkeyed). All optional; without them, as before.
   Checks: `test/e2e/clip-effects.e2e.js`, `test/e2e/overlays.e2e.js`.
 - `cut-dialog.js` ("Cut", X): From/To times (`timeline-math.js` `parseTime`,
   `cutRanges`) -> "Remove this part" or "Keep only this part", core
@@ -369,6 +393,21 @@ takes the same result.
   parts with a speed change). A level meter (-60..0 dBFS per side) sits by
   the time while playing (`audio-preview.js levels()`).
   Checks: `test/e2e/audio-clips.e2e.js` (12 cases, export and preview measured).
+- Finer audio tools (`core/audio/tone.js`): the selected audio clip, the
+  Microphone and Computer sound each end with a folded "Advanced" part
+  (`advancedTone` in `panels/audio.js`; open or folded is remembered in
+  localStorage, `loupe.audio.advanced.<clip|mic|system>`): "Left or right"
+  (pan, equal power), Low / Middle / High tones (shelves at 200 Hz and 4 kHz,
+  a wide bell at 1 kHz, ±12 dB), "Even out loud and quiet parts" (a
+  compressor: level, amount, and how much to turn it all up afterwards) and
+  Reset. With everything at its default the samples are passed through
+  untouched, so an older project sounds bit for bit as it did. The mix was
+  already two-channel; pan only turns a one-channel sound into two. A clip's
+  tools run before its fades (`music.js audioClipTrack`); the microphone's
+  and computer sound's run in the mix on each stretch laid along the timeline
+  (`mix.js` `track.tone`), after clean-up and levelling. The preview uses the
+  same renderer, so it sounds the same.
+  Checks: `test/core-audio-tone.test.mjs`, `test/e2e/audio-tools.e2e.js`.
 - `timeline-audio.js`: the "Sound" strip under the clips (recording waveform
   per clip in output time, voiceover takes as draggable blue blocks, a purple
   line when there is music).
@@ -546,6 +585,58 @@ and the whole app recording with every addition on).
   `subtitles` (path) or `subtitlesError`.
 - Check: `npm run test:e2e:captions` also runs `captions-editor.e2e.js`
   (say → recording → editor → export with burned captions + .srt).
+- Styles (2026-10): `captions.style` also has `preset`
+  (`classic | outline | karaoke | pop | typewriter`, or `custom` once the
+  style matches none), `font` (an id from `src/core/fonts.js`: a short fixed
+  list of font stacks present on macOS and Windows, nothing bundled),
+  `color`, `activeColor` and `animation` (`none | highlight | pop |
+  typewriter`). `captions/style.js` holds the preset bundles; `setCaptions`
+  applies a picked preset's bundle and renames the style when a later change
+  stops it matching. A project saved without these loads with defaults that
+  draw exactly what it drew before (`test/core-text-captions-baseline.test.mjs`
+  compares every draw call with a recording of the old code's).
+  `captions/words.js` maps a segment's `words` to output time with the same
+  `tl.toOutput` the segment uses, so cues carry `words` in output time and
+  the layer picks the spoken word from the frame's `outT` alone: cuts and
+  speed changes move the words with the sound, and preview and export agree.
+  A line whose words are missing or no longer its text is drawn whole. The
+  panel's preset tiles are drawn by `drawCaptions` itself.
+  Check: `npm run test:e2e:text`.
+
+### The editor's layout (redesign, 2026-10)
+
+Design: `docs/superpowers/specs/2026-10-04-editor-redesign-design.md`.
+
+- `store.selected` is a list (`selection.js`: `sameItem`, `hasItem`,
+  `toggleItem`, `aliveItems`); `store.selection` is the item when exactly one
+  is selected. `core/project.js` `removeItems` deletes a mix as one edit.
+- `inspector.js` owns the right side: `VIDEO_TABS` (Look, Cursor, Camera,
+  Captions, Audio) with nothing selected, the selected thing's panel
+  otherwise (`panelFor`), `multi` for several. `#sidebar[data-panel]` and
+  `[data-mode=video|item]` say what shows. `editor.showPanel(id)` still shows
+  any panel by id until the selection next changes.
+- `toolbar.js` builds the tools (Split, Zoom, Text menu, Blur, Voice, Add
+  menu, Cut, Delete) and the Transcript / Snap / Close gaps switches
+  (remembered in localStorage). Close gaps off: `deleteClip(..., { leaveGap })`
+  leaves a freeze-frame clip marked `gap`, which `compose.js` draws black.
+- Timeline rows: Overlays, Clips, Zoom, Sound, Audio, Text, Captions; empty
+  Overlay, Audio and Text rows are hidden. Speed is a badge on the clip
+  (Alt-drag, or the Clip inspector's Speed buttons). A zoom's right-click
+  menu switches it off (`zooms[].disabled`, ignored by `solveCamera`).
+- `transcript-panel.js`: the transcript beside the preview (read-only).
+- `core/auto-zoom.js` + `applyAutoZooms` / `removeAutoZooms`: zooms made
+  from a recording's clicks (`zooms[].auto`), made by the recorder when the
+  `autoZoom` setting is on (`recording-v2.js`), remade from the Zoom menu;
+  `autoZoomNote` is the one-time note (`auto-zoom-note.js`).
+- `core/clipboard.js`: `copyItems`, `pasteItems`, `moveItems` (copy / paste /
+  duplicate, and dragging several selected things together).
+- `core/keyframes.js` `KEYFRAME_EASES`; `zooms[].ease` (`camera.js`
+  `ZOOM_EASES`); `speed[].rampIn` / `rampOut` (`timeline.js`).
+- `core/transcript-edit.js`: `cutSource` / `restoreSource`, and the filler
+  and pause switches (`project.transcript.cuts`). A caption cue leaves out
+  words that were cut and joins across a small cut (`captions/timeline.js`).
+- `core/motion-blur.js` + `compose.js` `drawMoving`: `style.motionBlur`.
+- Checks: `npm run test:e2e:redesign`.
 
 ### Visuals (wired)
 
@@ -557,6 +648,20 @@ and the whole app recording with every addition on).
   `layers/transitions.js` (`transitionAt(project, tl, outT)`; fade/dip drawn
   by the layer; crossfade blended in `drawFrame` from a second full frame of
   the other side's held picture, passed as `frames["@transition"]`).
+- Text styling (2026-10): a `text` or `title` annotation may also carry
+  `font` (an id from `core/fonts.js`), `weight` (`regular | medium | bold`),
+  `align` (`left | center | right`), `outline` (0..1), `background` (text
+  only: null for the usual dark backing, a colour, or a fully clear colour
+  for none), `animateIn` / `animateOut` (`none | fade | slide | pop |
+  typewriter`) and `animateSeconds` (0.1..2). All optional: one saved
+  without them is left as it is and draws exactly as before, including its
+  0.2 s fade (0.5 s for a title card); once an animation is chosen it takes
+  `animateSeconds`, 0.4 s unless set. `core/text-style.js` holds the
+  animation arithmetic (`textAnimationAt(a, t)` from the frame's source
+  time, so preview and export agree) and `LOWER_THIRDS`, three ready-made
+  text styles (Name and title, Chapter, Callout) offered at the end of the
+  toolbar's Text menu (`addLowerThird-<id>`). `panels/annotations.js` has
+  the controls. Check: `npm run test:e2e:text`.
 - New recordings: `recorder.stop({ style })` writes the default preset's
   style (main.js reads it with `presets.defaultPresetStyle`); `migrate` takes
   `v1.style`, and the v2 source fields `webcam`, `keys`, `systemAudio`,
@@ -578,6 +683,33 @@ and the whole app recording with every addition on).
   (Notes track in lanes, transition buttons on clip joins);
   `annotation-math.js`; `visuals.css`. Wallpapers: `src/assets/wallpapers`,
   made by `electron packaging/make-wallpapers.js`.
+- A blur that follows what's under it ("Follow what's under it" on a
+  selected blur, `panels/annotations.js`): `core/track.js` (pure) matches the
+  picture under the box from frame to frame -- block matching on brightness,
+  within 48 px a frame of pictures scaled to at most 960 px, the remembered
+  picture refreshed a little with each good match, a score under
+  `LOST_SCORE` meaning it is gone -- and thins the positions to keyframes
+  (`simplifyPath`). The frames come from the exporter's decoder in a hidden
+  window of its own (`renderer/exporter/track.html` + `tracker.js`, preload
+  `preload/tracker.js`), run by `main/ipc/track.js`: `track:start({ id })`
+  builds the job from project.json on disk (after flushing the pending save)
+  and resolves with `{ path, lostAt, start, rect }` or `{ cancelled: true }`;
+  `track:progress` is `{ frame, total }`; `track:cancel` closes the window.
+  Main checks the request and what the page sends back. Nothing is written
+  until the editor stores the path with one `updateAnnotation(id, { follow:
+  true, path })` -- one undo step -- so cancelling or a failure leaves the
+  project as it was. When the match is lost for half a second the path stops
+  there and the panel says at what moment; the box holds its last place.
+  `annotationGeometry` puts a blur at `positionAt(path, state.t)` (straight
+  lines between keyframes, held before the first and after the last), so the
+  preview, the selection frame and the export agree. Dragging or resizing a
+  followed box on the preview shifts every point of the path by as much
+  (`shiftPath`); "Stop following" removes `follow` and `path`. The path is
+  in recording time: after moving the blur along the timeline, follow again.
+  Checks: `test/core-track.test.mjs`, `test/ipc-track.test.js`,
+  `npm run test:e2e:tracking` (a generated recording of a block moving at a
+  known speed: the path, exported pixels, Cancel, undo, a block that
+  vanishes).
 - Checks: `npm run test:e2e:visuals` (export pixels for each feature, then
   the editor driven with the real mouse).
 

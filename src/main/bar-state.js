@@ -20,6 +20,14 @@
 //   paused -----resume-----> recording
 //   paused -----stop-------> closed
 //
+// And Restart, which throws the take away and starts the same source again:
+//
+//   recording --restart----> restarting (capture stopping, its folder deleted)
+//   paused -----restart----> restarting
+//   restarting -countdown--> counting   (the same two ways on as from armed)
+//   restarting -start------> recording
+//   restarting -back-------> closed     (Stop shortcut / quit while starting over)
+//
 // Kept apart from main.js's window/process side effects (creating the bar
 // BrowserWindow, spawning bin/capture, closing the outline, ...) the same
 // way region.js's validateRegion/clampRegionToBounds are pure and unit-
@@ -30,8 +38,9 @@
 const TRANSITIONS = {
   armed: { start: 'recording', countdown: 'counting', back: 'closed' },
   counting: { go: 'recording', cancel: 'armed', back: 'closed' },
-  recording: { stop: 'closed', pause: 'paused' },
-  paused: { resume: 'recording', stop: 'closed' }
+  recording: { stop: 'closed', pause: 'paused', restart: 'restarting' },
+  paused: { resume: 'recording', stop: 'closed', restart: 'restarting' },
+  restarting: { countdown: 'counting', start: 'recording', back: 'closed' }
 };
 
 function transition(state, action) {

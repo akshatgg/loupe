@@ -51,3 +51,30 @@ test('pro editing keys: I/O marks, J/K/L shuttle, M markers, ⌥X clears the mar
   assert.equal(commandFor({ ...key('≈', { altKey: true }), code: 'KeyX' }, 'darwin'), 'clearMarks');
   assert.equal(commandFor({ ...key('x', { altKey: true }), code: 'KeyX' }, 'win32'), 'clearMarks');
 });
+
+test('select all, text and blur have keys, on both platforms', () => {
+  const k = (key, mods = {}) => ({ key, code: `Key${key.toUpperCase()}`, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
+  assert.equal(commandFor(k('a', { metaKey: true }), 'darwin'), 'selectAll');
+  assert.equal(commandFor(k('a', { ctrlKey: true }), 'win32'), 'selectAll');
+  assert.equal(commandFor(k('a', { ctrlKey: true }), 'darwin'), null, 'Ctrl is not the Mac’s shortcut key');
+  assert.equal(commandFor(k('a'), 'darwin'), null);
+  assert.equal(commandFor(k('t'), 'darwin'), 'addText');
+  assert.equal(commandFor(k('b'), 'win32'), 'addBlur');
+  const all = cheatSheet('darwin').flatMap((g) => g.items.map((i) => i.what));
+  for (const what of ['Add text at the playhead', 'Add a blur at the playhead', 'Select everything on the timeline', 'Select several things']) {
+    assert.ok(all.includes(what), what);
+  }
+});
+
+test('copy, cut, paste and duplicate use the platform’s shortcut key; plain X is still the Cut box', () => {
+  const k = (key, mods = {}) => ({ key, code: `Key${key.toUpperCase()}`, metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, ...mods });
+  assert.equal(commandFor(k('c', { metaKey: true }), 'darwin'), 'copy');
+  assert.equal(commandFor(k('x', { metaKey: true }), 'darwin'), 'cutSelection');
+  assert.equal(commandFor(k('v', { ctrlKey: true }), 'win32'), 'paste');
+  assert.equal(commandFor(k('d', { ctrlKey: true }), 'win32'), 'duplicate');
+  assert.equal(commandFor(k('x'), 'darwin'), 'cut');
+  assert.equal(commandFor(k('c'), 'darwin'), null);
+  const all = cheatSheet('win32').flatMap((g) => g.items.map((i) => i.what));
+  assert.ok(all.includes('Copy, cut, and paste at the playhead'));
+  assert.ok(all.includes('Duplicate what’s selected, right after it'));
+});

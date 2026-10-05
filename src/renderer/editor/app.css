@@ -71,3 +71,66 @@
 .first-run li .icon { color: var(--accent); }
 .first-run .btn { margin-left: auto; display: flex; }
 @keyframes first-run-in { from { opacity: 0; transform: translateY(-6px); } }
+
+/* ---- toolbar menus and switches (toolbar.js) */
+.tool-wrap { position: relative; display: inline-flex; }
+.tool-caret { font-size: 9px; color: var(--ink-3); margin-left: -2px; }
+.tool-menu {
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 30;
+  min-width: 220px; padding: 5px; border-radius: 11px; background: #2a2b30; border: 1px solid var(--line-2);
+  box-shadow: 0 12px 30px rgba(0,0,0,.55); display: flex; flex-direction: column; gap: 1px;
+}
+.tool-menu[hidden] { display: none; }
+.tool-menu-item {
+  display: flex; align-items: center; gap: 9px; padding: 7px 10px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--ink-2); cursor: pointer; text-align: left; white-space: nowrap;
+}
+.tool-menu-item:hover, .tool-menu-item:focus-visible { background: var(--hover); color: var(--ink); outline: none; }
+#transport .tl-options { gap: 2px; }
+.tool-switch { padding: 0 9px 0 7px; color: var(--ink-3); }
+.tool-switch[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+@media (max-width: 1280px) {
+  .tool-switch { font-size: 0; gap: 0; padding: 0 7px; }
+}
+
+/* ---- transcript beside the preview (transcript-panel.js) */
+#workspace.with-transcript { grid-template-columns: 270px minmax(0, 1fr) 340px; }
+#transcript {
+  display: flex; flex-direction: column; min-height: 0; min-width: 0; background: var(--surface);
+  border-right: 1px solid var(--line);
+}
+#transcript[hidden] { display: none; }
+.transcript-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 12px 8px 18px; }
+.transcript-body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 18px 20px; line-height: 1.75; color: var(--ink-2); }
+.transcript-line { margin: 0 0 12px; }
+.tw { border-radius: 4px; padding: 1px 2px; margin: 0 -2px; cursor: pointer; }
+.tw:hover { background: var(--hover); color: var(--ink); }
+.tw.now { background: var(--accent-soft); color: var(--accent); }
+.transcript-empty { padding: 6px 18px; color: var(--ink-3); display: grid; gap: 12px; justify-items: start; }
+.transcript-empty p { margin: 0; }
+@media (max-width: 1100px) {
+  #workspace.with-transcript { grid-template-columns: 220px minmax(0, 1fr) 320px; }
+}
+
+.menu-rule { height: 1px; margin: 4px 6px; background: var(--line-2); }
+.menu-rule[hidden] { display: none; }
+
+/* ---- the note on a new recording's automatic zooms (auto-zoom-note.js) */
+.zoom-note {
+  position: absolute; left: 50%; top: 18px; transform: translateX(-50%); z-index: 6; max-width: min(560px, 92%);
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 12px 10px 16px; border-radius: 12px;
+  background: rgba(32, 33, 38, .96); border: 1px solid var(--line-2); box-shadow: 0 10px 30px rgba(0,0,0,.45);
+  animation: first-run-in .22s ease-out;
+}
+.zoom-note p { margin: 0; flex: 1; min-width: 180px; color: var(--ink); }
+.zoom-note .btn-row { flex-wrap: nowrap; gap: 6px; }
+
+.transcript-body:focus-visible { outline: none; }
+.tw.picked { background: rgba(138, 180, 248, .28); color: var(--ink); border-radius: 0; }
+.tw.cut { text-decoration: line-through; color: var(--ink-3); opacity: .75; }
+.tw.cut:hover { color: var(--ink-2); opacity: 1; }
+.transcript-actions { display: flex; gap: 8px; padding: 0 18px; }
+.transcript-actions:has(.btn:not([hidden])) { padding: 8px 18px; border-top: 1px solid var(--line); }
+.transcript-foot { padding: 6px 18px 12px; border-top: 1px solid var(--line); }
+.transcript-foot.disabled { opacity: .5; pointer-events: none; }
+.transcript-foot[hidden] { display: none; }

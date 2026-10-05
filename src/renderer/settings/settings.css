@@ -42,7 +42,7 @@ label.row { cursor: pointer; }
                 text-align: left; }
 .folder .path bdi { direction: ltr; }
 
-/* Zoom shortcuts: the picker's fields, laid out for this window. */
+/* Zoom shortcuts: click a field, then press the button to hold. */
 .shortcuts { display: flex; gap: 12px; flex-wrap: wrap; }
 .shortcut { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 220px; }
 .capture { appearance: none; font: inherit; color: var(--text); background: var(--well);

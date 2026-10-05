@@ -8,6 +8,7 @@
 // `view`: { x(t), timeAt(clientX, opts), pps, beginDrag(e, handlers),
 // snapPoints(), snapped(t, points), snap(t, points) }.
 
+import { hasItem } from './selection.js';
 import { setCaptions } from '../../core/project.js';
 import { setTiming } from '../../core/captions/edit.js';
 import { h, icon } from './ui.js';
@@ -23,9 +24,9 @@ export function createCaptionsTrack({ store, player, editor, view }) {
     track.hidden = !has;
     label.hidden = !has;
     if (!has) { track.replaceChildren(); return; }
-    const sel = store.selection?.kind === 'caption' ? store.selection.id : null;
+    const sel = store.selected;
     track.replaceChildren(...captionPieces(p, layout).map((piece) => h('div', {
-      class: `caption${piece.seg.id === sel ? ' selected' : ''}`,
+      class: `caption${hasItem(sel, { kind: 'caption', id: piece.seg.id }) ? ' selected' : ''}`,
       dataset: { id: piece.seg.id, clip: String(piece.clipIndex) },
       style: { left: `${view.x(piece.outStart)}px`, width: `${Math.max(3, (piece.outEnd - piece.outStart) * view.pps)}px` },
       title: piece.seg.text

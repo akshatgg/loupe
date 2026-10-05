@@ -120,7 +120,7 @@ async function run() {
     assert.deepStrictEqual([o.kind, o.file, o.start, o.length, o.lane], ['image', 'media/green.png', 0.5, 5, 0]);
     assert.deepStrictEqual(await js('window.__editor.store.selection'), { kind: 'overlay', id: o.id });
     assert.strictEqual(await js('!document.querySelector(".oclip").hidden && document.querySelector(".lbl-overlay").textContent'), 'V2');
-    assert.strictEqual(await js('document.querySelector("#tabs [aria-selected=true]").dataset.panel'), 'clip', 'its settings show');
+    assert.strictEqual(await js('document.getElementById("sidebar").dataset.panel'), 'clip', 'its settings show');
     await shot('01-added');
     const g = letters(await exportFile(), 1);
     const b = box(g, 'g');

@@ -19,6 +19,16 @@ const areaModesEl = document.getElementById('areaModes');
 const backBtn = document.getElementById('back');
 const startBtn = document.getElementById('start');
 const stopBtn = document.getElementById('stop');
+const restartBtn = document.getElementById('restart');
+const restartConfirmEl = document.getElementById('restartConfirm');
+const restartQuestionEl = document.getElementById('restartQuestion');
+const keepRecordingBtn = document.getElementById('keepRecording');
+const startOverBtn = document.getElementById('startOver');
+const RESTART_QUESTION = 'Start over? This recording is thrown away.';
+
+// True from pressing Restart until it is answered, and on until the new take
+// (or its countdown) shows: the question takes the recording view's place.
+let askingRestart = false;
 
 let currentAreaMode = 'full';
 let modesBuilt = false;
@@ -56,10 +66,20 @@ function shortcutText(accelerator) {
   return parts.map((p) => mac[p] ?? p).join('');
 }
 
+// Puts the "Start over?" question away, ready to be asked again.
+function closeRestartQuestion() {
+  askingRestart = false;
+  restartConfirmEl.hidden = true;
+  restartQuestionEl.textContent = RESTART_QUESTION;
+  keepRecordingBtn.hidden = false;
+  startOverBtn.hidden = false;
+}
+
 function renderArmed(d) {
   armedEl.hidden = false;
   recordingEl.hidden = true;
   countdownEl.hidden = true;
+  closeRestartQuestion();
   document.getElementById('armedNote').textContent = d.cameraError ? `Camera: ${d.cameraError}` : '';
   sourceLabelEl.textContent = d.sourceLabel || '';
   currentAreaMode = d.areaMode || 'full';
@@ -75,13 +95,16 @@ function renderCountdown(d) {
   armedEl.hidden = true;
   recordingEl.hidden = true;
   countdownEl.hidden = false;
+  closeRestartQuestion();
   document.getElementById('count').textContent = String(d.count ?? '');
 }
 
 function renderRecording(d) {
   armedEl.hidden = true;
   countdownEl.hidden = true;
-  recordingEl.hidden = false;
+  // While "Start over?" is up the recording carries on underneath it.
+  recordingEl.hidden = askingRestart;
+  restartConfirmEl.hidden = !askingRestart;
   document.getElementById('time').textContent = clock(d.elapsed ?? 0);
 
   // Paused: the timer stands still (main leaves paused time out of elapsed).
@@ -120,6 +143,9 @@ window.loupe.onBarUpdate((d) => {
   else if (d.state === 'countdown') renderCountdown(d);
   // A plain status update mid-countdown (no number): the countdown stays.
   else if (d.state === 'counting') return;
+  // The old take is being stopped; what comes next (3-2-1, or the new take)
+  // changes the view.
+  else if (d.state === 'restarting') return;
   else renderArmed(d);
 });
 
@@ -160,3 +186,46 @@ pauseBtn.onclick = () => {
   else window.loupe.pauseRecording();
 };
 cancelCountdownBtn.onclick = () => { window.loupe.cancelCountdown(); };
+
+// Restart asks once, here on the bar (no dialog: nothing may take focus from
+// what is being recorded). Recording carries on until "Start over" is pressed.
+restartBtn.onclick = () => {
+  askingRestart = true;
+  recordingEl.hidden = true;
+  restartConfirmEl.hidden = false;
+};
+keepRecordingBtn.onclick = () => {
+  closeRestartQuestion();
+  recordingEl.hidden = false;
+};
+startOverBtn.onclick = async () => {
+  restartQuestionEl.textContent = 'Starting over…';
+  keepRecordingBtn.hidden = true;
+  startOverBtn.hidden = true;
+  let failure = null;
+  let result = null;
+  try {
+    result = await window.loupe.restartRecording();
+  } catch (err) {
+    failure = String(err.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+  }
+  if (!failure && !result?.cancelled) {
+    // The new take is recording: its first update may already have come.
+    closeRestartQuestion();
+    recordingEl.hidden = false;
+    return;
+  }
+  // Back on the armed view (the countdown was cancelled, or the new take
+  // could not start), where Start had been left pressed by the first take.
+  startBtn.disabled = false;
+  backBtn.disabled = false;
+  setStartLabel('Start recording');
+  if (!failure) return;
+  if (armedEl.hidden) {
+    // Refused before anything was thrown away: the recording is still going.
+    closeRestartQuestion();
+    recordingEl.hidden = false;
+  } else {
+    sourceLabelEl.textContent = `Could not start recording: ${failure}`;
+  }
+};

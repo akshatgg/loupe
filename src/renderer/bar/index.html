@@ -36,6 +36,9 @@
     <span class="mic" id="mic"></span>
     <span class="warn" id="warn"></span>
     <span class="error" id="error"></span>
+    <button id="restart" class="icon plain" type="button" title="Restart" aria-label="Restart">
+      <svg class="line" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 8a4.8 4.8 0 1 0 1.5-3.5"/><path d="M4.4 1.8v2.9h2.9"/></svg>
+    </button>
     <button id="pause" class="icon plain" type="button" title="Pause" aria-label="Pause">
       <svg id="pauseIcon" viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="3" width="3" height="10" rx="1"/><rect x="9.5" y="3" width="3" height="10" rx="1"/></svg>
       <svg id="resumeIcon" viewBox="0 0 16 16" aria-hidden="true" hidden><path d="M5 3.2v9.6a.6.6 0 0 0 .9.5l7.6-4.8a.6.6 0 0 0 0-1L5.9 2.7a.6.6 0 0 0-.9.5z"/></svg>
@@ -43,6 +46,19 @@
     <button id="stop" class="icon" type="button" title="Stop recording" aria-label="Stop recording">
       <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" rx="2"/></svg>
     </button>
+  </div>
+
+  <!-- Restart asks here, on the bar itself: recording carries on until answered. -->
+  <div id="restartConfirm" hidden>
+    <div class="row">
+      <span class="dot rec"></span>
+      <span id="restartQuestion" class="question">Start over? This recording is thrown away.</span>
+    </div>
+    <div class="row">
+      <span class="spacer"></span>
+      <button id="keepRecording" class="ghost" type="button">Keep recording</button>
+      <button id="startOver" class="danger" type="button">Start over</button>
+    </div>
   </div>
 
   <script src="bar.js"></script>

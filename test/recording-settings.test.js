@@ -6,19 +6,19 @@ const {
 } = require('../src/main/recording-settings');
 const { DEFAULT_SETTINGS, applySettingsPatch, normalizeSettings } = require('../src/main/settings');
 
-test('defaults: countdown and shortcuts on; computer sound and camera off', () => {
+test('defaults: countdown, shortcuts and zoom on clicks on; computer sound and camera off', () => {
   assert.deepStrictEqual(RECORDING_DEFAULTS, {
-    countdown: true, systemAudio: false, recordKeys: true, camera: false, cameraDeviceId: null
+    countdown: true, systemAudio: false, recordKeys: true, autoZoom: true, camera: false, cameraDeviceId: null
   });
 });
 
 test('the picker sees settings.json in its own shape', () => {
   const settings = normalizeSettings({
-    countdown: false, systemAudio: true, showKeystrokes: false, recordCamera: true,
+    countdown: false, systemAudio: true, showKeystrokes: false, autoZoom: false, recordCamera: true,
     camera: { id: 'abc123', label: 'FaceTime HD Camera' }
   });
   assert.deepStrictEqual(recordingView(settings), {
-    countdown: false, systemAudio: true, recordKeys: false, camera: true, cameraDeviceId: 'abc123'
+    countdown: false, systemAudio: true, recordKeys: false, autoZoom: false, camera: true, cameraDeviceId: 'abc123'
   });
   assert.deepStrictEqual(recordingView(null), RECORDING_DEFAULTS);
 });

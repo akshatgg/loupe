@@ -3,9 +3,14 @@
 //   Clips  drag an edge to trim, drag a clip to move it, click to select
 //   Zoom   drag across empty space to add one, drag one to move it, drag its
 //          edges to change its length, double-click to open its settings
-//   Speed  drag across a stretch, then pick a speed from the little menu
-//   Notes  annotations, and the transition buttons on each join between
+//          right-click to switch it off, make it manual or remove it
+//   Speed  shown on the clip as a badge: ⌥-drag across a clip, then pick a
+//          speed from the little menu; click a badge to change it
+//   Text   annotations, and the transition buttons on each join between
 //          clips (timeline-visuals.js)
+//
+// ⌘-click or ⇧-click selects several things; dragging across empty space
+// draws a box around them.
 //
 // Everything is laid out in output time (timeline-math.js). Drags edit from
 // the project as it was when the drag began, so the pointer always means the
@@ -14,6 +19,7 @@
 // and other zooms.
 
 import * as P from '../../core/project.js';
+import { moveItems } from '../../core/clipboard.js';
 import { h, icon } from './ui.js';
 import { createAudioLane } from './timeline-audio.js';
 import { createMusicLanes } from './timeline-music.js';
@@ -21,8 +27,10 @@ import { buildTimeline } from '../../core/timeline.js';
 import { createOverlayLanes } from './timeline-overlays.js';
 import {
   clipLayout, zoomPieces, speedPieces, sourceInClip, clipIndexAt, newZoomRange, movedZoom,
-  resizedZoom, snap, snapPoints, insertionIndex, tickStep, formatTime, clamp, stripTiles, thumbStep, outputAtSource, outputInClip
+  resizedZoom, snap, snapPoints, insertionIndex, tickStep, formatTime, clamp, stripTiles, thumbStep, outputAtSource, outputInClip,
+  boxHits
 } from './timeline-math.js';
+import { hasItem } from './selection.js';
 import { createVisualTracks } from './timeline-visuals.js';
 import { createCaptionsTrack } from './captions-track.js';
 
@@ -37,13 +45,14 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
   // Where drags snap: clip edges, zooms and the playhead (timeline-math.js),
   // and the beats of songs showing beat marks (timeline-music.js; only
   // called once a drag begins, after it exists).
-  const snapsWithBeats = (p, layout, opts) => [
+  // With Snap switched off (the toolbar) there is nothing to snap to.
+  let snapOn = true;
+  const snapsWithBeats = (p, layout, opts) => (snapOn ? [
     ...snapPoints(p, layout, opts), ...(musicLanes?.beatTimes() ?? []), ...(p.markers ?? []).map((m) => m.t)
-  ];
+  ] : []);
   const ruler = h('canvas', { class: 'tl-ruler' });
   const clipsTrack = h('div', { class: 'tl-track tl-clips', 'aria-label': 'Clips' });
   const zoomTrack = h('div', { class: 'tl-track tl-zooms', 'aria-label': 'Zooms' });
-  const speedTrack = h('div', { class: 'tl-track tl-speed', 'aria-label': 'Speed' });
   const visuals = createVisualTracks({
     store, player, editor,
     helpers: {
@@ -96,20 +105,23 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
       snap: (t, pts) => snap(t, pts, SNAP_PX / pps), snapped: (t, pts) => snapped(t, pts), showGuide: (t) => showGuide(t)
     }
   });
-  const content = h('div', { class: 'tl-content' }, ruler, overlayLanes.track, clipsTrack, audioLane.track, musicLanes.track, zoomTrack, speedTrack, visuals.track, captions.track, visuals.joins, guide, insert, marksShade, inFlag, outFlag, markersLayer, playhead);
+  // The box drawn by dragging across empty space, to select what it touches.
+  const boxEl = h('div', { class: 'tl-box', hidden: true, 'aria-hidden': 'true' });
+  const content = h('div', { class: 'tl-content' }, ruler, overlayLanes.track, clipsTrack, zoomTrack, audioLane.track, musicLanes.track, visuals.track, captions.track, visuals.joins, guide, insert, marksShade, inFlag, outFlag, markersLayer, boxEl, playhead);
   const scroller = h('div', { class: 'tl-scroll' }, content);
   const labels = h('div', { class: 'tl-labels' },
     h('div', { class: 'tl-label lbl-ruler' }),
     overlayLanes.label,
     h('div', { class: 'tl-label lbl-clips' }, icon('clips', { size: 15 }), 'Clips'),
+    h('div', { class: 'tl-label lbl-zooms' }, icon('zoom', { size: 15 }), 'Zoom'),
     audioLane.label,
     musicLanes.label,
-    h('div', { class: 'tl-label lbl-zooms' }, icon('zoom', { size: 15 }), 'Zoom'),
-    h('div', { class: 'tl-label lbl-speed' }, icon('speed', { size: 15 }), 'Speed'),
     visuals.label,
     captions.label);
   const menu = h('div', { class: 'speed-menu', role: 'menu', hidden: true });
-  root.replaceChildren(labels, scroller, menu, visuals.menu);
+  // A zoom's right-click menu.
+  const zoomMenu = h('div', { class: 'tool-menu ctx-menu', role: 'menu', hidden: true, 'aria-label': 'Zoom' });
+  root.replaceChildren(labels, scroller, menu, zoomMenu, visuals.menu);
 
   let pps = 50;
   let fitted = true;
@@ -160,22 +172,25 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
   }
 
   function renderClips(p, layout) {
-    const sel = store.selection;
+    const sel = store.selected;
     const many = layout.length > 1;
     clipsTrack.replaceChildren(...layout.map((l, i) => {
       const len = l.outEnd - l.outStart;
       const held = l.clip.hold > 0;
+      const gap = P.isGap(l.clip);
       const el = h('div', {
-        class: `clip${sel?.kind === 'clip' && sel.id === l.clip.id ? ' selected' : ''}${p.clips.length > 1 && l.clip.source !== 'main' ? ' other-source' : ''}` +
-          `${held ? ' freeze' : ''}${l.clip.reverse ? ' reversed' : ''}`,
+        class: `clip${hasItem(sel, { kind: 'clip', id: l.clip.id }) ? ' selected' : ''}${p.clips.length > 1 && l.clip.source !== 'main' ? ' other-source' : ''}` +
+          `${gap ? ' gap' : held ? ' freeze' : ''}${l.clip.reverse ? ' reversed' : ''}`,
         dataset: { index: String(i), id: l.clip.id },
         style: { left: `${x(l.outStart)}px`, width: `${Math.max(2, len * pps)}px` },
-        title: 'Drag the edges to trim, or drag the clip to move it'
+        title: gap ? 'A gap: black for this long. Drag its edges to change its length, or delete it to close it.'
+          : 'Drag the edges to trim, or drag the clip to move it'
       },
-      thumbnails ? h('div', { class: 'clip-strip', 'aria-hidden': 'true' }) : null,
+      thumbnails && !gap ? h('div', { class: 'clip-strip', 'aria-hidden': 'true' }) : null,
       h('div', { class: 'handle start', dataset: { edge: 'start' } }),
       h('div', { class: 'clip-label' },
-        held ? h('span', { class: 'clip-name' }, 'Freeze frame')
+        gap ? h('span', { class: 'clip-name' }, 'Gap')
+          : held ? h('span', { class: 'clip-name' }, 'Freeze frame')
           : l.clip.reverse ? h('span', { class: 'clip-name' }, '◀◀ Backwards')
             : many ? h('span', { class: 'clip-name' }, `Clip ${i + 1}`) : null,
         h('span', { class: 'clip-dur' }, formatTime(len, { fraction: true }))),
@@ -185,27 +200,32 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
   }
 
   function renderZooms(p, layout) {
-    const sel = store.selection;
+    const sel = store.selected;
     const pieces = zoomPieces(p, layout);
     const els = pieces.map((piece) => h('div', {
-      class: `zoom${sel?.kind === 'zoom' && sel.id === piece.zoom.id ? ' selected' : ''}${piece.zoom.follow ? '' : ' fixed'}`,
+      class: `zoom${hasItem(sel, { kind: 'zoom', id: piece.zoom.id }) ? ' selected' : ''}${piece.zoom.follow ? '' : ' fixed'}` +
+        `${piece.zoom.disabled ? ' disabled' : ''}${piece.zoom.auto ? ' auto' : ''}`,
       dataset: { id: piece.zoom.id, clip: String(piece.clipIndex) },
       style: { left: `${x(piece.outStart)}px`, width: `${Math.max(3, (piece.outEnd - piece.outStart) * pps)}px` },
-      title: 'Drag to move, drag the edges to resize, double-click for settings'
+      title: piece.zoom.disabled ? 'Switched off: right-click to switch it back on'
+        : 'Drag to move, drag the edges to resize, right-click for more'
     },
     h('div', { class: 'handle start', dataset: { edge: 'start' } }),
-    h('span', { class: 'zoom-label' }, icon('zoom', { size: 12 }), `${Number(piece.zoom.level.toFixed(2))}×`),
+    h('span', { class: 'zoom-label' }, icon('zoom', { size: 12 }),
+      piece.zoom.auto ? h('span', { class: 'zoom-auto' }, 'Auto') : null,
+      piece.zoom.disabled ? 'Off' : `${Number(piece.zoom.level.toFixed(2))}×`),
     h('div', { class: 'handle end', dataset: { edge: 'end' } })));
     if (!pieces.length) els.push(h('div', { class: 'tl-hint' }, 'Drag here to add a zoom'));
     zoomTrack.replaceChildren(...els, h('div', { class: 'ghost zoom-ghost', hidden: true }));
   }
 
+  // Speed changes, as badges along the bottom of the clips they are on.
   function renderSpeed(p, layout) {
-    const sel = store.selection;
+    const sel = store.selected;
     const pieces = speedPieces(p, layout);
     const els = pieces.map((piece) => {
       const s = piece.seg;
-      const chosen = sel?.kind === 'speed' && sel.source === s.source && sel.start === s.start && sel.end === s.end;
+      const chosen = hasItem(sel, { kind: 'speed', source: s.source, start: s.start, end: s.end });
       return h('div', {
         class: `speed ${s.rate > 1 ? 'fast' : 'slow'}${chosen ? ' selected' : ''}`,
         dataset: { source: s.source, start: String(s.start), end: String(s.end), clip: String(piece.clipIndex) },
@@ -213,9 +233,9 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
         title: `${s.rate}× speed — click to change`
       }, `${s.rate}×`);
     });
-    if (!pieces.length && !speedPick) els.push(h('div', { class: 'tl-hint' }, 'Drag across a part to speed it up or slow it down'));
-    speedTrack.replaceChildren(...els, h('div', { class: 'ghost speed-ghost', hidden: !speedPick }));
-    if (speedPick) placeGhost(speedTrack.querySelector('.speed-ghost'), speedPick.outStart, speedPick.outEnd);
+    const ghost = h('div', { class: 'ghost speed-ghost', hidden: !speedPick });
+    clipsTrack.append(...els, ghost);
+    if (speedPick) placeGhost(ghost, speedPick.outStart, speedPick.outEnd);
   }
 
   // The trim in progress over the frozen timeline: the part being cut dimmed
@@ -263,10 +283,14 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     content.style.width = `${Math.max(scroller.clientWidth, x(duration()) + PAD)}px`;
     renderClips(p, layout);
     renderTrim(layout);
-    renderZooms(p, layout);
     renderSpeed(p, layout);
+    renderZooms(p, layout);
     musicLanes.render();
     overlayLanes.render();
+    // Rows with nothing on them stay out of the way until they are needed.
+    overlayLanes.track.hidden = overlayLanes.label.hidden = !(p.overlays ?? []).length;
+    musicLanes.track.hidden = musicLanes.label.hidden = !p.audio.clips.length;
+    visuals.track.hidden = visuals.label.hidden = !p.annotations.length;
     renderMarks();
     renderMarkers(p);
     visuals.render(p, layout, clipsTrack);
@@ -285,7 +309,7 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     const w = scroller.clientWidth;
     const viewStart = scroller.scrollLeft - w;
     const viewEnd = scroller.scrollLeft + 2 * w;
-    for (const el of clipsTrack.children) {
+    for (const el of clipsTrack.querySelectorAll('.clip')) {
       const strip = el.querySelector('.clip-strip');
       const i = Number(el.dataset.index);
       const L = layout[i];
@@ -356,10 +380,10 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
   }
 
   function renderMarkers(p) {
-    const sel = store.selection;
+    const sel = store.selected;
     // The name beside the flag, not in it: the flag's shape would clip it.
     markersLayer.replaceChildren(...(p.markers ?? []).flatMap((m) => [h('div', {
-      class: `marker-flag ${m.color}${sel?.kind === 'marker' && sel.id === m.id ? ' selected' : ''}`,
+      class: `marker-flag ${m.color}${hasItem(sel, { kind: 'marker', id: m.id }) ? ' selected' : ''}`,
       dataset: { id: m.id }, style: { left: `${x(m.t)}px` },
       title: `${m.label || 'Marker'} · ${formatTime(m.t, { fraction: true })}\nClick to go there, drag to move, double-click to name it`
     }), m.label ? h('span', { class: 'marker-label', style: { left: `${x(m.t) + 8}px` } }, m.label) : null].filter(Boolean)));
@@ -628,7 +652,7 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     const i = clipIndexAt(layout0, a);
     const L = layout0[i];
     let b = a;
-    const ghost = speedTrack.querySelector('.speed-ghost');
+    const ghost = clipsTrack.querySelector('.speed-ghost');
     beginDrag(e, {
       move(ev) {
         b = clamp(timeAt(ev.clientX), L.outStart, L.outEnd);
@@ -670,7 +694,7 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     menu.hidden = false;
     render();
     const rootRect = root.getBoundingClientRect();
-    const trackRect = speedTrack.getBoundingClientRect();
+    const trackRect = clipsTrack.getBoundingClientRect();
     const mid = trackRect.left + x((pick.outStart + pick.outEnd) / 2) - scroller.scrollLeft;
     const w = menu.offsetWidth;
     menu.style.left = `${clamp(mid - rootRect.left - w / 2, 8, rootRect.width - w - 8)}px`;
@@ -694,10 +718,148 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     render();
   }
 
+  // ---- selecting several things
+
+  const ITEM_KINDS = [['.clip', 'clip'], ['.zoom', 'zoom'], ['.aclip', 'audio'], ['.oclip', 'overlay'], ['.anno-bar', 'annotation'], ['.caption', 'caption']];
+  // The timeline item an element belongs to, as a selection item, or null.
+  function itemOf(target) {
+    for (const [selector, kind] of ITEM_KINDS) {
+      const el = target.closest?.(selector);
+      if (el?.dataset.id) return { kind, id: el.dataset.id };
+    }
+    return null;
+  }
+
+  // Every item's rectangle on screen (a zoom or annotation cut in two by a
+  // clip join has two).
+  function itemRects() {
+    const rects = [];
+    for (const [selector, kind] of ITEM_KINDS) {
+      for (const el of content.querySelectorAll(selector)) {
+        if (!el.dataset.id) continue;
+        const r = el.getBoundingClientRect();
+        rects.push({ item: { kind, id: el.dataset.id }, x0: r.left, x1: r.right, y0: r.top, y1: r.bottom });
+      }
+    }
+    return rects;
+  }
+
+  // A press on empty space: a click goes there; a drag draws a box and
+  // selects what it touches.
+  function boxSelect(e) {
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    beginDrag(e, {
+      move(ev) {
+        const r = content.getBoundingClientRect();
+        boxEl.hidden = false;
+        boxEl.style.left = `${Math.min(x0, ev.clientX) - r.left}px`;
+        boxEl.style.top = `${Math.min(y0, ev.clientY) - r.top}px`;
+        boxEl.style.width = `${Math.abs(ev.clientX - x0)}px`;
+        boxEl.style.height = `${Math.abs(ev.clientY - y0)}px`;
+        store.selectMany(boxHits(itemRects(), { x0, y0, x1: ev.clientX, y1: ev.clientY }));
+      },
+      end() { boxEl.hidden = true; },
+      click(ev) {
+        editor.select(null);
+        player.seek(timeAt(ev.clientX));
+      }
+    });
+  }
+
+  // Everything selected, slid along the timeline by the same amount. The
+  // edit is made from the project as it was when the drag began; a place
+  // they can't all go keeps them where they last could.
+  function groupDrag(e, pressed) {
+    const p0 = store.project;
+    const items = store.selected.slice();
+    const o0 = timeAt(e.clientX, { clampToVideo: false });
+    let refused = null;
+    beginDrag(e, {
+      move(ev) {
+        const delta = timeAt(ev.clientX, { clampToVideo: false }) - o0;
+        let next;
+        try {
+          next = moveItems(p0, items, delta);
+          refused = null;
+        } catch (err) {
+          refused = err;
+          return;
+        }
+        store.apply(() => next, { gesture: 'group-move' });
+      },
+      end() {
+        if (refused) editor.toast(String(refused.message));
+      },
+      // A click without a drag: just the one pressed.
+      click: () => editor.select(pressed)
+    });
+  }
+
+  // ---- a zoom's right-click menu
+
+  function openZoomMenu(id, clientX, clientY) {
+    const z = store.project.zooms.find((q) => q.id === id);
+    if (!z) return;
+    if (!hasItem(store.selected, { kind: 'zoom', id })) editor.select({ kind: 'zoom', id });
+    const item = (itemId, name, label, run) => h('button', {
+      type: 'button', role: 'menuitem', class: 'tool-menu-item', id: itemId,
+      onclick: () => { closeZoomMenu(); run(); }
+    }, icon(name, { size: 16 }), h('span', {}, label));
+    zoomMenu.replaceChildren(
+      item('zoomToggle', z.disabled ? 'check' : 'close', z.disabled ? 'Switch on' : 'Switch off',
+        () => store.apply((p) => P.updateZoom(p, id, { disabled: !z.disabled }))),
+      z.auto ? item('zoomManual', 'target', 'Make it mine (keep when zooms are remade)',
+        () => store.apply((p) => P.updateZoom(p, id, { auto: false }))) : null,
+      item('zoomRemove', 'trash', 'Remove', () => store.apply((p) => P.removeZoom(p, id))));
+    zoomMenu.hidden = false;
+    const r = root.getBoundingClientRect();
+    zoomMenu.style.left = `${clamp(clientX - r.left, 8, r.width - zoomMenu.offsetWidth - 8)}px`;
+    zoomMenu.style.top = `${Math.max(8, clientY - r.top - zoomMenu.offsetHeight - 6)}px`;
+  }
+
+  function closeZoomMenu() {
+    zoomMenu.hidden = true;
+  }
+
+  // Everything on the timeline (⌘A).
+  function selectAll() {
+    const p = store.project;
+    store.selectMany([
+      ...p.clips.map((c) => ({ kind: 'clip', id: c.id })),
+      ...p.zooms.map((z) => ({ kind: 'zoom', id: z.id })),
+      ...p.annotations.map((a) => ({ kind: 'annotation', id: a.id })),
+      ...p.overlays.map((o) => ({ kind: 'overlay', id: o.id })),
+      ...p.audio.clips.map((c) => ({ kind: 'audio', id: c.id })),
+      ...p.captions.segments.map((c) => ({ kind: 'caption', id: c.id }))
+    ]);
+  }
+
   // ---- events
 
   content.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
+    closeZoomMenu();
+    // ⌘-click (Ctrl on Windows) or ⇧-click: this one as well as the others.
+    if ((e.metaKey || e.ctrlKey || e.shiftKey) && !e.altKey && !e.target.dataset?.edge) {
+      const item = itemOf(e.target);
+      if (item) {
+        e.preventDefault();
+        visuals.closeMenu();
+        closeMenu();
+        store.select(item, { toggle: true });
+        return;
+      }
+    }
+    // A press on one of several selected things drags them all together.
+    if (!e.altKey && store.selected.length > 1 && !e.target.closest('.handle, .fade-knob, .tl-join')) {
+      const item = itemOf(e.target);
+      if (item && item.kind !== 'clip' && hasItem(store.selected, item)) {
+        visuals.closeMenu();
+        groupDrag(e, item);
+        return;
+      }
+    }
     if (visuals.pointerdown(e)) return;
     visuals.closeMenu();
     if (musicLanes.pointerdown(e)) return;
@@ -708,12 +870,20 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     const zoom = e.target.closest('.zoom');
     const speed = e.target.closest('.speed');
     if (e.target === ruler || e.target.closest('.tl-playhead')) scrub(e);
+    else if (speed) speedDrag(e, speed);
+    // ⌥-drag across a clip speeds that part up or slows it down.
+    else if (clip && e.altKey && !P.isGap(store.project.clips[Number(clip.dataset.index)])) speedDrag(e, null);
     else if (clip) clipDrag(e, clip);
     else if (zoom) zoomDrag(e, zoom);
     else if (e.target.closest('.tl-zooms')) zoomCreate(e);
-    else if (e.target.closest('.tl-speed')) speedDrag(e, speed);
     else if (e.target.closest('.caption')) captions.pointerdown(e);
-    else scrub(e);
+    else boxSelect(e);
+  });
+  content.addEventListener('contextmenu', (e) => {
+    const zoom = e.target.closest('.zoom');
+    if (!zoom) return;
+    e.preventDefault();
+    openZoomMenu(zoom.dataset.id, e.clientX, e.clientY);
   });
   const finish = (e) => {
     const d = drag;
@@ -743,10 +913,10 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     const zoom = e.target.closest('.zoom');
     if (!zoom) return;
     editor.select({ kind: 'zoom', id: zoom.dataset.id });
-    editor.showPanel('zoom', { focus: true });
   });
   document.addEventListener('pointerdown', (e) => {
-    if (!menu.hidden && !menu.contains(e.target) && !speedTrack.contains(e.target)) closeMenu();
+    if (!menu.hidden && !menu.contains(e.target) && !e.target.closest?.('.speed, .clip')) closeMenu();
+    if (!zoomMenu.hidden && !zoomMenu.contains(e.target)) closeZoomMenu();
   });
   scroller.addEventListener('scroll', () => { drawRuler(); drawStripsSoon(); });
   scroller.addEventListener('wheel', (e) => {
@@ -782,11 +952,15 @@ export function createTimeline({ root, store, player, editor, thumbnails = null 
     zoomIn: () => setScale(pps * 1.5),
     zoomOut: () => setScale(pps / 1.5),
     fit: () => { fitted = true; setScale(fitPps()); scroller.scrollLeft = 0; },
-    closeMenu: () => { closeMenu(); visuals.closeMenu(); },
-    get menuOpen() { return !menu.hidden || visuals.menuOpen; },
+    closeMenu: () => { closeMenu(); closeZoomMenu(); visuals.closeMenu(); },
+    get menuOpen() { return !menu.hidden || !zoomMenu.hidden || visuals.menuOpen; },
+    openZoomMenu,
     visuals,
     redrawPictures: drawStripsSoon,
     get pxPerSecond() { return pps; },
+    setSnap(on) { snapOn = Boolean(on); },
+    get snap() { return snapOn; },
+    selectAll,
     // In/Out marks: { in, out } in output seconds (null when not set).
     get marks() { return { ...marks }; },
     setMark(which, t) {

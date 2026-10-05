@@ -10,12 +10,24 @@
 
 import { buildTimeline } from './timeline.js';
 import { COLOR_FILTERS } from './look.js';
-import { setKeyframe, removeKeyframe } from './keyframes.js';
+import { MAX_CURVE_POINTS } from './grade.js';
+import { OVERLAY_BLENDS, MASK_SHAPES, defaultMask, defaultKey } from './overlay-effects.js';
+import { setKeyframe, removeKeyframe, setKeyframeEase, KEYFRAME_EASES } from './keyframes.js';
+import { ZOOM_EASES } from './camera.js';
+import { autoZoomRanges } from './auto-zoom.js';
+import { MAX_PATH_POINTS } from './track.js';
 import { clipLength, clipEnd, freeLane, audioName, laneOf, splitPoints, MAX_LANES, MIN_AUDIO_SECONDS } from './audio/clips.js';
+import { FONT_IDS } from './fonts.js';
+import { TEXT_WEIGHTS, TEXT_ALIGNS, TEXT_ANIMATIONS, ANIMATE_SECONDS_MIN, ANIMATE_SECONDS_MAX } from './text-style.js';
+import {
+  CAPTION_STYLE_DEFAULTS, CAPTION_PRESET_NAMES, CAPTION_ANIMATIONS, completeCaptionStyle, restyleCaptions
+} from './captions/style.js';
 
 export const VERSION = 2;
 export const SPEED_MIN = 0.25;
 export const SPEED_MAX = 8;
+export const SPEED_RAMP_MAX = 2;
+export const NEW_MOTION_BLUR = 0.3;
 export const ZOOM_LEVEL_MIN = 1;
 export const ZOOM_LEVEL_MAX = 8;
 // Shorter than this and a clip, zoom or speed stretch can't be grabbed in
@@ -106,6 +118,11 @@ export function defaultStyle() {
     padding: 0.06,
     radius: 12,
     shadow: 0.5,
+    // How much movement Loupe makes (the view, the cursor) is smeared
+    // (motion-blur.js). 0 here, so a project from before it looks as it did;
+    // a new recording starts with NEW_MOTION_BLUR.
+    motionBlur: 0,
+    motionBlurCursor: true,
     aspect: 'source',
     cursor: { show: true, size: 1, hideWhenIdle: false, smooth: true, highlight: 'none', clicks: true },
     keystrokes: { show: false, position: 'bottom' },
@@ -126,13 +143,13 @@ export function defaultAudio() {
 }
 
 export function defaultCaptions() {
-  return { show: false, language: 'auto', segments: [], style: { size: 1, position: 'bottom', box: true } };
+  return { show: false, language: 'auto', segments: [], style: { size: 1, position: 'bottom', box: true, ...CAPTION_STYLE_DEFAULTS } };
 }
 
 // A project saved before a caption style setting existed gets its default.
 function mergeCaptions(c) {
   const d = defaultCaptions();
-  return { ...d, ...c, style: isObj(c.style) ? { ...d.style, ...c.style } : c.style ?? d.style };
+  return { ...d, ...c, style: isObj(c.style) ? completeCaptionStyle({ ...d.style, ...c.style, preset: c.style.preset }) : c.style ?? d.style };
 }
 
 export function defaultExport() {
@@ -174,7 +191,8 @@ export function createProject({ main, title, createdAt = null, style } = {}) {
     clips: clipsAround(source, 'main', []),
     speed: [],
     zooms: [],
-    style: style ? mergeStyle(defaultStyle(), style) : defaultStyle(),
+    // A new video gets a little motion blur unless its style says otherwise.
+    style: { ...mergeStyle(defaultStyle(), style ?? {}), ...(isNum(style?.motionBlur) ? {} : { motionBlur: NEW_MOTION_BLUR }) },
     annotations: [],
     markers: [],
     overlays: [],
@@ -402,6 +420,11 @@ function validateClip(clip, sources) {
   if (clip.hold !== undefined) num(clip.hold, 'Freeze frame length', EPS, MAX_HOLD);
   if (clip.reverse !== undefined) bool(clip.reverse, `Clip ${clip.id} reverse`);
   if (clip.hold !== undefined && clip.reverse) fail('A freeze frame can\u2019t be reversed');
+  // A gap left where a clip was deleted: black for its `hold` seconds.
+  if (clip.gap !== undefined) {
+    bool(clip.gap, `Clip ${clip.id} gap`);
+    if (clip.gap && !(clip.hold > 0)) fail('A gap needs a length');
+  }
   if (clip.transform !== undefined) validateTransform(clip.transform);
   if (clip.keyframes !== undefined) validateKeyframes(clip.keyframes, CLIP_ANIMATABLE);
   if (clip.color !== undefined) validateColor(clip.color);
@@ -437,6 +460,26 @@ function validateColor(c) {
     if (!/^luts\/[^/\\]+\.cube$/i.test(c.lut) || c.lut.includes('..')) fail('A LUT must be a .cube file in the project\u2019s luts folder');
   }
   if (c.lutMix !== undefined) num(c.lutMix, 'LUT amount', 0, 1);
+  // The finer tools (grade.js); every one optional.
+  if (c.temperature !== undefined) num(c.temperature, 'Warmth', -1, 1);
+  if (c.tint !== undefined) num(c.tint, 'Tint', -1, 1);
+  if (c.highlights !== undefined) num(c.highlights, 'Highlights', -1, 1);
+  if (c.shadows !== undefined) num(c.shadows, 'Shadows', -1, 1);
+  if (c.vignette !== undefined) num(c.vignette, 'Dark corners', 0, 1);
+  if (c.sharpen !== undefined) num(c.sharpen, 'Sharpen', 0, 1);
+  if (c.curve !== undefined && c.curve !== null) {
+    if (!Array.isArray(c.curve) || c.curve.length < 2 || c.curve.length > MAX_CURVE_POINTS) {
+      fail(`A colour curve must be a list of 2 to ${MAX_CURVE_POINTS} points`);
+    }
+    let last = -Infinity;
+    for (const pt of c.curve) {
+      if (!isObj(pt)) fail('A colour curve point is not an object');
+      num(pt.x, 'Curve point position', 0, 1);
+      num(pt.y, 'Curve point height', 0, 1);
+      if (pt.x <= last) fail('A colour curve\u2019s points must go from left to right');
+      last = pt.x;
+    }
+  }
 }
 
 function validateSpeedSegment(s, sources) {
@@ -445,6 +488,9 @@ function validateSpeedSegment(s, sources) {
   num(s.end, 'Speed end', 0);
   num(s.rate, 'Speed', SPEED_MIN, SPEED_MAX);
   if (s.end <= s.start) fail('A speed stretch ends before it starts');
+  // Seconds to reach the speed and to leave it (timeline.js); none = the usual.
+  if (s.rampIn !== undefined) num(s.rampIn, 'Speed ramp in', 0, SPEED_RAMP_MAX);
+  if (s.rampOut !== undefined) num(s.rampOut, 'Speed ramp out', 0, SPEED_RAMP_MAX);
   return s;
 }
 
@@ -461,6 +507,12 @@ function validateZoom(z, sources) {
   num(z.x, 'Zoom x');
   num(z.y, 'Zoom y');
   bool(z.recorded, 'Zoom recorded');
+  // Switched off: kept on the timeline, without effect on the picture.
+  if (z.disabled !== undefined) bool(z.disabled, 'Zoom disabled');
+  // Made by Loupe from the clicks, not by hand.
+  if (z.auto !== undefined) bool(z.auto, 'Zoom auto');
+  // How quickly it moves in and out (camera.js); none = smooth.
+  if (z.ease !== undefined) oneOf(z.ease, ZOOM_EASES, 'Zoom easing');
   if (z.keyframes !== undefined) {
     if (!Array.isArray(z.keyframes)) fail('Zoom keyframes must be a list');
     for (const k of z.keyframes) { num(k?.t, 'Zoom keyframe time'); num(k?.zoom, 'Zoom keyframe level', 0.01, 100); }
@@ -499,6 +551,8 @@ function validateStyle(style) {
   num(style.padding, 'Padding', 0, 0.4);
   num(style.radius, 'Corner radius', 0, 200);
   num(style.shadow, 'Shadow', 0, 1);
+  num(style.motionBlur, 'Motion blur', 0, 1);
+  bool(style.motionBlurCursor, 'Motion blur on the cursor');
   oneOf(style.aspect, ASPECTS, 'Aspect ratio');
   const c = style.cursor;
   if (!isObj(c)) fail('Cursor style must be an object');
@@ -520,6 +574,25 @@ function validateStyle(style) {
   return style;
 }
 
+// A hidden area that follows what is under it (core/track.js): `path` is
+// where its top-left corner is over time, [{ t, x, y }] in source seconds and
+// fractions of the recording, in time order.
+function validateFollow(a) {
+  if (a.type !== 'blur') fail('Only a hidden area can follow what is under it (follow, path)');
+  if (a.follow !== undefined) bool(a.follow, 'Annotation follow');
+  if (a.path === undefined) return;
+  if (!Array.isArray(a.path) || a.path.length < 1 || a.path.length > MAX_PATH_POINTS) {
+    fail(`An annotation's path must be a list of 1 to ${MAX_PATH_POINTS} points`);
+  }
+  a.path.forEach((pt, i) => {
+    if (!isObj(pt)) fail("A point of an annotation's path is not an object");
+    num(pt.t, 'Annotation path time', 0);
+    num(pt.x, 'Annotation path x', -1, 2);
+    num(pt.y, 'Annotation path y', -1, 2);
+    if (i > 0 && pt.t <= a.path[i - 1].t) fail("An annotation's path must be in time order");
+  });
+}
+
 function validateAnnotation(a, sources) {
   if (!isObj(a)) fail('An annotation is not an object');
   str(a.id, 'Annotation id', { max: 64 });
@@ -532,6 +605,17 @@ function validateAnnotation(a, sources) {
   str(a.text, 'Annotation text', { empty: true });
   color(a.color, 'Annotation colour');
   num(a.size, 'Annotation size', 0.1, 10);
+  if (a.follow !== undefined || a.path !== undefined) validateFollow(a);
+  // Text styling (text-style.js): every field optional, so an annotation
+  // saved before these existed is left exactly as it is.
+  if (a.font !== undefined) oneOf(a.font, FONT_IDS, 'Text font');
+  if (a.weight !== undefined) oneOf(a.weight, TEXT_WEIGHTS, 'Text weight');
+  if (a.align !== undefined) oneOf(a.align, TEXT_ALIGNS, 'Text alignment');
+  if (a.outline !== undefined) num(a.outline, 'Text outline', 0, 1);
+  if (a.background !== undefined && a.background !== null) color(a.background, 'Text background');
+  if (a.animateIn !== undefined) oneOf(a.animateIn, TEXT_ANIMATIONS, 'Text animation in');
+  if (a.animateOut !== undefined) oneOf(a.animateOut, TEXT_ANIMATIONS, 'Text animation out');
+  if (a.animateSeconds !== undefined) num(a.animateSeconds, 'Text animation length', ANIMATE_SECONDS_MIN, ANIMATE_SECONDS_MAX);
   return a;
 }
 
@@ -570,6 +654,29 @@ export function defaultAudioClip() {
 
 const MAX_POINTS = 500;
 
+// The finer tools of a clip, the microphone or the computer sound
+// (audio/tone.js): pan, a three-band equalizer and a compressor. All
+// optional -- a project saved before them has none and sounds as it did.
+function validateTone(t, what) {
+  if (t.pan !== undefined) num(t.pan, `${what} pan`, -1, 1);
+  if (t.eq !== undefined) {
+    if (!isObj(t.eq)) fail(`${what} tone settings must be an object`);
+    for (const [k, name] of [['low', 'low'], ['mid', 'middle'], ['high', 'high']]) {
+      if (t.eq[k] !== undefined) num(t.eq[k], `${what} ${name} tones`, -12, 12);
+    }
+  }
+  if (t.compressor !== undefined) {
+    const c = t.compressor;
+    if (!isObj(c)) fail(`${what} evening out settings must be an object`);
+    if (c.on !== undefined) bool(c.on, `${what} even out loud and quiet parts`);
+    if (c.threshold !== undefined) num(c.threshold, `${what} evening out level`, -60, 0);
+    if (c.ratio !== undefined) num(c.ratio, `${what} evening out amount`, 1, 20);
+    if (c.attack !== undefined) num(c.attack, `${what} evening out attack`, 0.001, 0.5);
+    if (c.release !== undefined) num(c.release, `${what} evening out release`, 0.01, 2);
+    if (c.makeup !== undefined) num(c.makeup, `${what} evening out boost`, 0, 24);
+  }
+}
+
 function validateAudioClip(c, sources) {
   if (!isObj(c)) fail('An audio clip is not an object');
   str(c.id, 'Audio clip id', { max: 64 });
@@ -606,6 +713,7 @@ function validateAudioClip(c, sources) {
     last = pt.t;
   }
   if (!Number.isInteger(c.lane) || c.lane < 0 || c.lane >= MAX_LANES) fail(`Audio row must be 0 to ${MAX_LANES - 1}`);
+  validateTone(c, 'Audio');
 }
 
 function validateAudio(audio, sources) {
@@ -616,9 +724,11 @@ function validateAudio(audio, sources) {
   bool(mic.muted, 'Microphone muted');
   bool(mic.cleanUp, 'Clean up microphone');
   bool(mic.level, 'Even out microphone volume');
+  validateTone(mic, 'Microphone');
   if (!isObj(system)) fail('System audio settings must be an object');
   num(system.volume, 'System audio volume', 0, 2);
   bool(system.muted, 'System audio muted');
+  validateTone(system, 'System audio');
   if (!Array.isArray(clips)) fail('Audio clips must be a list');
   if (clips.length > 500) fail('Too many audio clips');
   clips.forEach((c) => validateAudioClip(c, sources));
@@ -658,6 +768,11 @@ function validateCaptions(c, sources) {
   num(c.style.size, 'Caption size', 0.25, 4);
   oneOf(c.style.position, POSITIONS, 'Caption position');
   bool(c.style.box, 'Caption background box');
+  oneOf(c.style.preset, CAPTION_PRESET_NAMES, 'Caption style');
+  oneOf(c.style.font, FONT_IDS, 'Caption font');
+  color(c.style.color, 'Caption colour');
+  color(c.style.activeColor, 'Spoken word colour');
+  oneOf(c.style.animation, CAPTION_ANIMATIONS, 'Caption animation');
   return c;
 }
 
@@ -710,6 +825,15 @@ export function validateProject(p) {
     captions: p.captions ? mergeCaptions(p.captions) : defaultCaptions(),
     export: p.export ? { ...defaultExport(), ...p.export } : defaultExport()
   };
+  if (out.autoZoomNote !== undefined && out.autoZoomNote !== true) delete out.autoZoomNote;
+  // What the transcript's switches cut (transcript-edit.js); anything that
+  // isn't a list of ranges is dropped rather than refused.
+  if (out.transcript !== undefined) {
+    const cuts = Array.isArray(out.transcript?.cuts) ? out.transcript.cuts.filter((c) => isObj(c) && sources[c.source] &&
+      isNum(c.start) && isNum(c.end) && c.end > c.start && ['filler', 'silence'].includes(c.reason)).slice(0, 5000) : [];
+    if (cuts.length) out.transcript = { cuts };
+    else delete out.transcript;
+  }
   if (!Array.isArray(p.clips) || p.clips.length === 0) fail('The project has no clips');
   p.clips.forEach((c) => validateClip(c, sources));
   if (new Set(p.clips.map((c) => c.id)).size !== p.clips.length) fail('Two clips have the same id');
@@ -934,10 +1058,53 @@ export function moveClip(project, from, to) {
   return { ...project, clips };
 }
 
-export function deleteClip(project, clipId) {
+export const isGap = (clip) => Boolean(clip?.gap) && clip.hold > 0;
+
+// Removes a clip, the later ones closing up -- or with `leaveGap`, leaving
+// black for as long as it played, so nothing after it moves.
+export function deleteClip(project, clipId, { leaveGap = false } = {}) {
   const i = clipIndex(project, clipId);
+  if (leaveGap) {
+    const clip = project.clips[i];
+    if (isGap(clip)) return project;
+    const b = buildTimeline(project).clipBounds()[i];
+    const hold = b.outEnd - b.outStart;
+    if (hold < MIN_CLIP_SECONDS) fail('That clip is too short to leave a gap');
+    const clips = project.clips.slice();
+    clips[i] = { id: clip.id, source: clip.source, start: clip.start, end: clip.start, hold, gap: true };
+    // A gap is the only thing a video can't be made of.
+    if (clips.every(isGap)) fail('A video needs at least one clip');
+    return withClips(project, clips);
+  }
   if (project.clips.length === 1) fail('A video needs at least one clip');
   return withClips(project, project.clips.filter((_, k) => k !== i));
+}
+
+// Removes everything in `items` (the editor's selection: { kind, id }, or a
+// speed stretch { kind: 'speed', source, start, end }) as one edit.
+export function removeItems(project, items, { leaveGap = false } = {}) {
+  if (!Array.isArray(items) || !items.length) fail('Select something to delete first');
+  let p = project;
+  const clips = [];
+  for (const it of items) {
+    switch (it?.kind) {
+      case 'clip': clips.push(it.id); break;
+      case 'zoom': p = removeZoom(p, it.id); break;
+      case 'annotation': p = removeAnnotation(p, it.id); break;
+      case 'caption':
+        if (!p.captions.segments.some((c) => c.id === it.id)) fail(`No caption ${JSON.stringify(it.id)}`);
+        p = setCaptions(p, { segments: p.captions.segments.filter((c) => c.id !== it.id) });
+        break;
+      case 'audio': p = removeAudioClip(p, it.id); break;
+      case 'overlay': p = removeOverlay(p, it.id); break;
+      case 'marker': p = removeMarker(p, it.id); break;
+      case 'speed': p = paintSpeed(p, { source: it.source, start: it.start, end: it.end, rate: 1 }); break;
+      default: fail(`Can\u2019t delete ${JSON.stringify(it?.kind)}`);
+    }
+  }
+  if (!leaveGap && clips.length >= p.clips.length) fail('A video needs at least one clip. Drag its edges to trim it instead.');
+  for (const id of clips) p = deleteClip(p, id, { leaveGap });
+  return p;
 }
 
 // Adds another recording to the end of the video. `sourceKey` must be new.
@@ -986,7 +1153,7 @@ export function addZoom(project, { source = 'main', start, end, level = 2, follo
   return withZooms(project, zooms);
 }
 
-const ZOOM_PATCH_KEYS = ['start', 'end', 'level', 'follow', 'x', 'y'];
+const ZOOM_PATCH_KEYS = ['start', 'end', 'level', 'follow', 'x', 'y', 'disabled', 'auto', 'ease'];
 
 export function updateZoom(project, zoomId, patch) {
   const i = project.zooms.findIndex((z) => z.id === zoomId);
@@ -1015,6 +1182,52 @@ export function removeZoom(project, zoomId) {
   return { ...project, zooms: project.zooms.filter((z) => z.id !== zoomId) };
 }
 
+// ---- zooms made from clicks (auto-zoom.js)
+
+// Whether any recording in the project has clicks to zoom on.
+export function hasClicks(project) {
+  return Object.values(project.sources).some((s) => s.clicks?.length > 0);
+}
+
+// Replaces the automatic zooms with ones made from the clicks, at `strength`
+// (subtle, moderate, intense). Zooms made by hand are left alone and keep
+// their place: no automatic zoom is put over one.
+export function applyAutoZooms(project, { strength = 'moderate' } = {}) {
+  const kept = project.zooms.filter((z) => !z.auto);
+  const made = [];
+  for (const [key, meta] of Object.entries(project.sources)) {
+    const taken = kept.filter((z) => z.source === key);
+    for (const r of autoZoomRanges(meta.clicks, meta.duration, { strength, taken })) {
+      made.push(validateZoom({
+        id: nextId('z', [...kept, ...made]), source: key, start: r.start, end: r.end, level: r.level,
+        follow: true, x: meta.width / 2, y: meta.height / 2, recorded: false, auto: true
+      }, project.sources));
+    }
+  }
+  const zooms = [...kept, ...made].sort((a, b) => (a.source === b.source ? a.start - b.start : 0));
+  const next = withZooms(project, zooms);
+  delete next.autoZoomNote;
+  return next;
+}
+
+// How many zooms are automatic.
+export const autoZoomCount = (project) => project.zooms.filter((z) => z.auto).length;
+
+export function removeAutoZooms(project) {
+  const next = { ...project, zooms: project.zooms.filter((z) => !z.auto) };
+  delete next.autoZoomNote;
+  return next;
+}
+
+// The one-time note a new recording carries ("Loupe added 6 zooms where you
+// clicked"): set when the recorder made them, gone once it is answered.
+export function setAutoZoomNote(project, on) {
+  const next = { ...project };
+  if (on) next.autoZoomNote = true;
+  else delete next.autoZoomNote;
+  return next;
+}
+
 // ---------------------------------------------------------------- speed
 
 // Paints `rate` over a source range, replacing whatever was there (as
@@ -1037,10 +1250,33 @@ export function paintSpeed(project, { source = 'main', start, end, rate } = {}) 
   for (const s of mine) {
     if (s.end - s.start < MIN_RANGE_SECONDS - EPS) continue;
     const prev = merged.at(-1);
-    if (prev && prev.rate === s.rate && s.start - prev.end <= 1e-6) prev.end = s.end;
+    if (prev && prev.rate === s.rate && prev.rampIn === s.rampIn && prev.rampOut === s.rampOut &&
+        s.start - prev.end <= 1e-6) prev.end = s.end;
     else merged.push(s);
   }
   return { ...project, speed: [...others, ...merged] };
+}
+
+// How the speed stretches inside a source range reach and leave their
+// speed: { rampIn, rampOut } in seconds, 0 for at once; undefined puts that
+// one back to the usual short ease.
+export function setSpeedRamp(project, { source = 'main', start, end, rampIn, rampOut } = {}) {
+  if (!project.sources[source]) fail(`Speed uses unknown recording ${JSON.stringify(source)}`);
+  num(start, 'Speed start');
+  num(end, 'Speed end');
+  if (rampIn !== undefined) num(rampIn, 'Speed ramp in', 0, SPEED_RAMP_MAX);
+  if (rampOut !== undefined) num(rampOut, 'Speed ramp out', 0, SPEED_RAMP_MAX);
+  let touched = false;
+  const speed = project.speed.map((s) => {
+    if (s.source !== source || s.end <= start + 1e-6 || s.start >= end - 1e-6) return s;
+    touched = true;
+    const next = { ...s };
+    if (rampIn === undefined) delete next.rampIn; else next.rampIn = rampIn;
+    if (rampOut === undefined) delete next.rampOut; else next.rampOut = rampOut;
+    return next;
+  });
+  if (!touched) fail('There is no speed change there to shape');
+  return { ...project, speed };
 }
 
 // ---------------------------------------------------------------- annotations
@@ -1063,6 +1299,8 @@ export function updateAnnotation(project, id, patch) {
   if (!isObj(patch) || 'id' in patch || 'source' in patch) fail('Invalid annotation change');
   const next = { ...project.annotations[i], ...patch };
   if ('start' in patch || 'end' in patch) Object.assign(next, checkRange(project, next.source, next.start, next.end, 'Annotation'));
+  // { follow: undefined, path: undefined } stops a hidden area following.
+  for (const k of ['follow', 'path']) if (next[k] === undefined) delete next[k];
   validateAnnotation(next, project.sources);
   const annotations = project.annotations.slice();
   annotations[i] = next;
@@ -1131,7 +1369,7 @@ function validateKeyframes(kf, allowed) {
       if (!isObj(k)) fail('A keyframe is not an object');
       num(k.t, 'Keyframe time', 0);
       num(k.v, 'Keyframe value', -360, 360);
-      if (k.ease !== undefined) oneOf(k.ease, ['linear'], 'Keyframe easing');
+      if (k.ease !== undefined) oneOf(k.ease, KEYFRAME_EASES, 'Keyframe easing');
       if (k.t < last) fail('Keyframes must be in time order');
       last = k.t;
     }
@@ -1143,8 +1381,30 @@ export function defaultOverlay() {
     name: '', start: 0, from: 0, length: DEFAULT_PICTURE_SECONDS, fileDuration: null, lane: 0,
     x: 0.3, y: 0.3, scale: 0.35, rotate: 0, opacity: 1, fadeIn: 0, fadeOut: 0, keyframes: {},
     // A video file's own quarter turn (a phone video), as video-probe.js reads it.
-    mediaRotation: 0
+    mediaRotation: 0,
+    // Effects (overlay-effects.js): how it mixes with the video, a shape it
+    // is cut to, a green screen.
+    blend: 'normal', mask: defaultMask(), key: defaultKey()
   };
+}
+
+// An overlay's effects; every one optional (a project from before them).
+function validateOverlayEffects(o) {
+  if (o.blend !== undefined) oneOf(o.blend, OVERLAY_BLENDS, 'Blend');
+  if (o.mask !== undefined) {
+    if (!isObj(o.mask)) fail('An overlay\u2019s mask must be an object');
+    if (o.mask.shape !== undefined) oneOf(o.mask.shape, MASK_SHAPES, 'Mask shape');
+    if (o.mask.feather !== undefined) num(o.mask.feather, 'Mask edge softness', 0, 1);
+  }
+  if (o.key !== undefined) {
+    if (!isObj(o.key)) fail('An overlay\u2019s green screen must be an object');
+    if (o.key.on !== undefined) bool(o.key.on, 'Green screen on');
+    if (o.key.color !== undefined && (typeof o.key.color !== 'string' || !/^#[0-9a-f]{6}$/i.test(o.key.color))) {
+      fail(`Green screen colour must be a colour like #00ff00, got ${JSON.stringify(o.key.color)}`);
+    }
+    if (o.key.tolerance !== undefined) num(o.key.tolerance, 'Green screen tolerance', 0, 1);
+    if (o.key.softness !== undefined) num(o.key.softness, 'Green screen softness', 0, 1);
+  }
 }
 
 function validateOverlay(o) {
@@ -1168,6 +1428,7 @@ function validateOverlay(o) {
   num(o.fadeOut, 'Overlay fade out', 0);
   validateKeyframes(o.keyframes, OVERLAY_ANIMATABLE);
   if (![0, 90, 180, 270].includes(o.mediaRotation)) fail('An overlay\u2019s turn must be 0, 90, 180 or 270');
+  validateOverlayEffects(o);
 }
 
 function overlayAt(project, id) {
@@ -1225,6 +1486,14 @@ export function setOverlayKeyframe(project, id, prop, t, v) {
   return updateOverlay(project, id, { keyframes: { ...o.keyframes, [prop]: setKeyframe(o.keyframes[prop], clamp(t, 0, o.length), v) } });
 }
 
+// How an overlay's property arrives at its keyframe at `t` (KEYFRAME_EASES).
+export function setOverlayKeyframeEase(project, id, prop, t, ease) {
+  oneOf(ease, KEYFRAME_EASES, 'Keyframe easing');
+  const o = project.overlays[overlayAt(project, id)];
+  if (!o.keyframes[prop]?.length) fail('There is no keyframe there');
+  return updateOverlay(project, id, { keyframes: { ...o.keyframes, [prop]: setKeyframeEase(o.keyframes[prop], t, ease) } });
+}
+
 export function removeOverlayKeyframe(project, id, prop, t) {
   const o = project.overlays[overlayAt(project, id)];
   const list = removeKeyframe(o.keyframes[prop], t);
@@ -1242,6 +1511,17 @@ export function setClipKeyframe(project, clipId, prop, t, v) {
   if (t < clip.start - 1e-6 || t > clip.end + 1e-6) fail('Put the playhead inside the clip to set a keyframe');
   const clips = project.clips.slice();
   clips[i] = { ...clip, keyframes: { ...(clip.keyframes ?? {}), [prop]: setKeyframe(clip.keyframes?.[prop], t, v) } };
+  validateClip(clips[i], project.sources);
+  return { ...project, clips };
+}
+
+export function setClipKeyframeEase(project, clipId, prop, t, ease) {
+  oneOf(ease, KEYFRAME_EASES, 'Keyframe easing');
+  const i = clipIndex(project, clipId);
+  const clip = project.clips[i];
+  if (!clip.keyframes?.[prop]?.length) fail('There is no keyframe there');
+  const clips = project.clips.slice();
+  clips[i] = { ...clip, keyframes: { ...clip.keyframes, [prop]: setKeyframeEase(clip.keyframes[prop], t, ease) } };
   validateClip(clips[i], project.sources);
   return { ...project, clips };
 }
@@ -1489,7 +1769,11 @@ export function setAudio(project, patch) {
 }
 
 export function setCaptions(project, patch) {
-  const captions = validateCaptions(mergeKnown(project.captions, patch, 'Captions'), project.sources);
+  const merged = mergeKnown(project.captions, patch, 'Captions');
+  // A preset sets its bundle of style settings; any other style change
+  // keeps the preset's name only while the style still matches it.
+  if (isObj(patch.style) && isObj(project.captions.style)) merged.style = restyleCaptions(project.captions.style, patch.style);
+  const captions = validateCaptions(merged, project.sources);
   return { ...project, captions };
 }
 

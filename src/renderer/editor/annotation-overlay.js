@@ -15,6 +15,7 @@ import {
   annotationGeometry, visibleAnnotations, recordingFraction, contentFraction
 } from '../../core/layers/annotations.js';
 import { movedBy, resizedBox } from './annotation-math.js';
+import { positionAt, shiftPath } from '../../core/track.js';
 
 const HIT_PX = 8;
 const ORDER = { title: 4, text: 3, arrow: 2, box: 1, blur: 0 };
@@ -177,8 +178,11 @@ export function createAnnotationOverlay({ canvas, stage, store, player, editor }
     e.preventDefault();
     if (player.playing) player.pause();
     editor.select({ kind: 'annotation', id: hit.a.id });
-    const a0 = hit.a;
     const s0 = state;
+    // A hidden area that follows something is dragged from where it is now;
+    // the whole path then moves by as much (below).
+    const followed = hit.a.type === 'blur' && hit.a.path?.length ? hit.a : null;
+    const a0 = followed ? { ...followed, ...positionAt(followed.path, s0.t) } : hit.a;
     const p0 = p;
     const inContent = a0.type === 'text';
     const frac = (q) => (inContent ? contentFraction(s0, q.x, q.y) : recordingFraction(s0, q.x, q.y));
@@ -210,6 +214,14 @@ export function createAnnotationOverlay({ canvas, stage, store, player, editor }
           patch = resizedBox(a0, hit.handle, f.x, f.y);
         }
         for (const k of ['x', 'y', 'x2', 'y2']) if (k in patch) patch[k] = Math.max(-0.99, Math.min(1.99, patch[k]));
+        if (followed && ('x' in patch || 'y' in patch)) {
+          const dx = (patch.x ?? a0.x) - a0.x;
+          const dy = (patch.y ?? a0.y) - a0.y;
+          const keep = (v) => Math.max(-0.99, Math.min(1.99, v));
+          patch.path = shiftPath(followed.path, dx, dy).map((pt) => ({ t: pt.t, x: keep(pt.x), y: keep(pt.y) }));
+          patch.x = keep(followed.x + dx);
+          patch.y = keep(followed.y + dy);
+        }
         store.apply((pr) => updateAnnotation(pr, a0.id, patch), { gesture: `annotation:drag:${a0.id}` });
       },
       end() { store.endGesture(); }

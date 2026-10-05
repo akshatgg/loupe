@@ -119,6 +119,81 @@ async function barChecks() {
   // Computer sound that failed shows as a short warning.
   send({ ...recording, warnings: ['computer sound stopped recording'] });
   await waitFor(win, `${text('warn')} === 'computer sound off'`, 'the computer sound warning');
+
+  // Restart sits beside Pause and Stop, and asks on the bar itself first.
+  send(recording);
+  await waitFor(win, `${text('warn')} === ''`, 'the plain recording view');
+  const order = await js('[...document.querySelectorAll("#recording button")].map((b) => b.id)');
+  assert.deepStrictEqual(order, ['restart', 'pause', 'stop']);
+  assert.strictEqual(await js('document.getElementById("restart").title'), 'Restart');
+  await js('document.getElementById("restart").click()');
+  await waitFor(win, visible('restartConfirm'), 'the question');
+  assert.ok(!(await js(visible('recording'))), 'the question takes the place of the recording view');
+  assert.strictEqual(await js(text('restartQuestion')), 'Start over? This recording is thrown away.');
+  assert.deepStrictEqual(await js('[...document.querySelectorAll("#restartConfirm button")].map((b) => b.textContent)'),
+    ['Keep recording', 'Start over']);
+  // The recording carries on underneath: updates do not put the question away.
+  send({ ...recording, elapsed: 70 });
+  await sleep(100);
+  assert.ok(await js(visible('restartConfirm')), 'still asking');
+  await shot(win, 'bar-restart-question');
+  assert.ok(!calls.some((c) => c.channel === 'bar:restart'), 'nothing is thrown away before the answer');
+
+  // Keep recording: back to the recording view, and main never hears of it.
+  await js('document.getElementById("keepRecording").click()');
+  await waitFor(win, visible('recording'), 'the recording view again');
+  assert.ok(!(await js(visible('restartConfirm'))));
+  assert.strictEqual(await js(text('time')), '1:10');
+  assert.ok(!calls.some((c) => c.channel === 'bar:restart'));
+
+  // Start over, countdown on: main is asked once, 3-2-1 shows, then the new take.
+  let finishRestart;
+  restartAnswer = () => new Promise((resolve) => { finishRestart = resolve; });
+  await js('document.getElementById("restart").click()');
+  await js('document.getElementById("startOver").click()');
+  await waitFor(win, `${text('restartQuestion')} === 'Starting over…'`, 'starting over');
+  assert.strictEqual(calls.filter((c) => c.channel === 'bar:restart').length, 1);
+  assert.ok(await js('document.getElementById("startOver").hidden && document.getElementById("keepRecording").hidden'));
+  send({ ...armed, state: 'restarting' });
+  await sleep(50);
+  assert.ok(await js(visible('restartConfirm')), 'nothing changes while the old take stops');
+  await shot(win, 'bar-restart-starting-over');
+  send({ ...armed, state: 'countdown', count: 3 });
+  await waitFor(win, visible('countdown'), 'the countdown after Restart');
+  assert.ok(!(await js(visible('restartConfirm'))));
+  send({ ...recording, elapsed: 0 });
+  finishRestart({ dir: '/tmp/new-take' });
+  await waitFor(win, visible('recording'), 'the new take');
+  assert.strictEqual(await js(text('time')), '0:00');
+  assert.ok(!(await js(visible('restartConfirm'))) && !(await js(visible('countdown'))));
+
+  // The question can be asked again, and reads as it did the first time.
+  await js('document.getElementById("restart").click()');
+  assert.strictEqual(await js(text('restartQuestion')), 'Start over? This recording is thrown away.');
+  assert.ok(await js('!document.getElementById("startOver").hidden && !document.getElementById("keepRecording").hidden'));
+
+  // Start over, then Esc in the countdown: the armed bar, with Start usable.
+  await js('document.getElementById("start").disabled = true'); // as the first Start left it
+  restartAnswer = () => new Promise((resolve) => { finishRestart = resolve; });
+  await js('document.getElementById("startOver").click()');
+  await waitFor(win, `${text('restartQuestion')} === 'Starting over…'`, 'starting over again');
+  send({ ...armed, state: 'countdown', count: 3 });
+  await waitFor(win, visible('countdown'), 'the countdown');
+  send(armed);
+  finishRestart({ cancelled: true });
+  await waitFor(win, `${visible('armed')} && !document.getElementById("start").disabled`, 'the armed bar with Start ready');
+  assert.ok(!(await js(visible('restartConfirm'))) && !(await js(visible('recording'))));
+
+  // The new take could not start: the armed bar says why.
+  send(recording);
+  await waitFor(win, visible('recording'), 'recording once more');
+  restartAnswer = () => { throw new Error('Screen Recording permission is required'); };
+  await js('document.getElementById("restart").click()');
+  send(armed);
+  await js('document.getElementById("startOver").click()');
+  await waitFor(win, `${text('sourceLabel')}.startsWith('Could not start recording')`, 'the reason');
+  assert.strictEqual(await js(text('sourceLabel')), 'Could not start recording: Screen Recording permission is required');
+  assert.ok(await js(visible('armed')));
   await closeWindow(win);
 }
 
@@ -134,11 +209,38 @@ async function pickerChecks() {
   assert.strictEqual(await checked('systemAudio'), false);
   assert.strictEqual(await checked('recordKeys'), true);
   assert.strictEqual(await checked('camera'), false);
-  const labels = await js('[...document.querySelectorAll(".optionrow label")].map((l) => l.textContent.trim())');
-  for (const want of ['Record computer sound', 'Camera', 'Show keyboard shortcuts I press (never what I type)',
-    'Count down 3, 2, 1 before recording']) {
-    assert.ok(labels.some((l) => l.endsWith(want)), `row "${want}" in ${JSON.stringify(labels)}`);
-  }
+  // One row of six on/off buttons: a short label each, the full wording as
+  // the tooltip.
+  const toggles = await js(`[...document.querySelectorAll('.options .toggle')].map((l) => ({
+    id: l.querySelector('input').id, label: l.textContent.trim(), title: l.title,
+    top: Math.round(l.getBoundingClientRect().top) }))`);
+  assert.deepStrictEqual(toggles.map((t) => [t.id, t.label, t.title]), [
+    ['mic', 'Microphone', 'Record microphone'],
+    ['systemAudio', 'Computer sound', 'Record computer sound'],
+    ['camera', 'Camera', 'Add yourself to the recording with the camera'],
+    ['recordKeys', 'Shortcuts', 'Show keyboard shortcuts I press (never what I type)'],
+    ['autoZoom', 'Zoom on clicks', 'Zoom in where I click, once the recording is done. Change or remove the zooms afterwards.'],
+    ['countdown', 'Countdown', 'Count down 3, 2, 1 before recording']
+  ]);
+  assert.strictEqual(new Set(toggles.map((t) => t.top)).size, 1, `all on one row: ${JSON.stringify(toggles)}`);
+  // On looks on: the button itself changes, not only the checkbox inside it.
+  const background = (id) => `getComputedStyle(document.getElementById(${JSON.stringify(id)}).closest('.toggle')).backgroundColor`;
+  await waitFor(win, `${background('countdown')} === 'rgb(138, 180, 248)'`, 'Countdown drawn as on');
+  assert.strictEqual(await js(background('systemAudio')), 'rgba(255, 255, 255, 0.1)', 'Computer sound drawn as off');
+  // The freed height goes to the sources: the strip is one line, and the
+  // list and preview take most of the window.
+  const heights = await js(`({ strip: document.querySelector('.options').offsetHeight,
+    panel: document.querySelector('.panel').offsetHeight, page: innerHeight })`);
+  assert.ok(heights.strip < 50, `a one-line strip: ${JSON.stringify(heights)}`);
+  assert.ok(heights.panel > heights.page * 0.6, `the sources fill the window: ${JSON.stringify(heights)}`);
+  // The zoom shortcuts are chosen in Settings now; the hint still names them.
+  assert.strictEqual(await js('document.querySelectorAll(".capture, .clear").length'), 0);
+  const expectedHint = process.platform === 'win32' ? /^Hold Alt or a mouse side button and scroll while recording/
+    : /^Hold ⌥ or a mouse side button and scroll while recording/;
+  assert.match(await js(text('zoomHelp')), expectedHint);
+  await js('document.getElementById("changeZoom").click()');
+  await sleep(100);
+  assert.deepStrictEqual(calls.find((c) => c.channel === 'shell:openSettings')?.args, ['recording']);
 
   // Each switch is saved as soon as it changes.
   await js('document.getElementById("systemAudio").click()');
@@ -174,6 +276,8 @@ async function pickerChecks() {
 }
 
 let cameraAllowed = true;
+// What main answers the bar's Restart with, set by the check in hand.
+let restartAnswer = () => ({ dir: '/tmp/new-take' });
 
 async function run() {
   fs.mkdirSync(OUT, { recursive: true });
@@ -184,6 +288,7 @@ async function run() {
     screenRecording: true, accessibility: true, microphone: 'granted', canRecord: true, canZoom: true
   }));
   handle('permissions:open');
+  handle('shell:openSettings');
   handle('settings:get', () => ({ ...DEFAULT_SETTINGS }));
   handle('settings:set', (patch) => ({ ...DEFAULT_SETTINGS, ...patch }));
   handle('recordingSettings:get', () => recordingSettings);
@@ -192,6 +297,7 @@ async function run() {
     return recordingSettings;
   });
   handle('permissions:requestCamera', () => cameraAllowed);
+  handle('bar:restart', () => restartAnswer());
   for (const c of ['bar:pause', 'bar:resume', 'bar:cancelCountdown', 'bar:start', 'record:stop',
     'bar:setAreaMode', 'bar:arm']) handle(c);
 

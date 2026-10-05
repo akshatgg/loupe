@@ -15,6 +15,7 @@
 
 import { followPlan } from './follow.js';
 import { mixTracks, MIX_RATE } from './mix.js';
+import { toneOf, isNeutralTone } from './tone.js';
 
 const KINDS = ['mic', 'system'];
 
@@ -27,8 +28,11 @@ export function recordingTracks(project, tl, decoded = {}) {
     if (settings.muted) continue;
     const pcm = decoded[kind];
     if (!pcm || !Object.keys(pcm).length) continue;
+    // The microphone's or computer sound's pan, equalizer and compressor
+    // (tone.js), applied by the mix to each stretch of it.
+    const tone = isNeutralTone(settings) ? null : toneOf(settings);
     tracks.push(...followPlan(plan, pcm, {
-      track: { kind, volume: settings.volume ?? 1, muted: false }
+      track: { kind, volume: settings.volume ?? 1, muted: false, ...(tone ? { tone } : {}) }
     }));
   }
   return tracks;

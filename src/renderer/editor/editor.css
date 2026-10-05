@@ -99,28 +99,28 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .stage-notice .icon { color: #fdd663; margin-top: 1px; }
 
 #sidebar {
-  display: flex; min-height: 0; background: var(--surface); border-left: 1px solid var(--line);
+  display: flex; flex-direction: column; min-height: 0; background: var(--surface); border-left: 1px solid var(--line);
 }
-.panel-wrap { flex: 1; min-width: 0; overflow-y: auto; overflow-x: hidden; padding: 14px 18px 24px; }
-.panel-title { font-size: 15px; font-weight: 650; margin: 2px 0 10px; }
-/* Seven panels: the rail scrolls rather than hiding a tab off its end, and
-   in a short window the tabs drop their names (the tooltip still says). */
+.panel-wrap { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 14px 18px 24px; }
+.panel-head { display: flex; align-items: center; gap: 6px; margin: 0 0 10px -4px; min-height: 26px; }
+.panel-head:has(#panelTitle[hidden]):has(#inspectorBack[hidden]) { display: none; }
+.panel-title { font-size: 15px; font-weight: 650; margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#inspectorBack[hidden] + .panel-title { margin-left: 4px; }
+/* The video's settings, one tab each along the top; a selected thing's
+   settings take their place (inspector.js). */
 #tabs {
-  width: 68px; flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; padding: 10px 6px;
-  border-left: 1px solid var(--line); background: var(--bg); min-height: 0; overflow-y: auto; scrollbar-width: none;
+  flex-shrink: 0; display: flex; gap: 2px; padding: 8px 8px 0; border-bottom: 1px solid var(--line); background: var(--bg);
 }
-#tabs::-webkit-scrollbar { display: none; }
+#tabs[hidden] { display: none; }
 .tab {
-  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 2px 6px; flex-shrink: 0;
-  border: 0; border-radius: 9px; background: transparent; color: var(--ink-3); cursor: pointer;
-  font-size: 10.5px;
+  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 7px 2px 8px;
+  border: 0; border-radius: 8px 8px 0 0; background: transparent; color: var(--ink-3); cursor: pointer;
+  font-size: 10.5px; border-bottom: 2px solid transparent;
 }
-@media (max-height: 860px) {
-  .tab { padding: 9px 2px; }
-  .tab span { display: none; }
-}
+.tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 .tab:hover { background: var(--raised); color: var(--ink); }
-.tab[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); }
+.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
 
 /* ---- panel controls */
 .panel-section { padding: 14px 0; border-top: 1px solid var(--line); }
@@ -504,6 +504,21 @@ kbd {
 .track-head.muted-track .track-name { color: var(--ink-3); }
 .mute-btn[aria-pressed="true"] { color: var(--red); }
 .panel-section .toggle { margin-top: 14px; }
+/* The folded "Advanced" part at the end of a sound's settings. */
+.advanced { margin-top: 14px; }
+.advanced > summary {
+  display: flex; align-items: center; gap: 7px; padding: 3px 0; list-style: none; cursor: pointer; user-select: none;
+  font-size: 12.5px; font-weight: 600; color: var(--ink-2); border-radius: 6px;
+}
+.advanced > summary::-webkit-details-marker { display: none; }
+.advanced > summary::before {
+  content: ''; width: 5px; height: 5px; margin: 0 2px 0 3px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg); transition: transform .12s;
+}
+.advanced[open] > summary::before { transform: rotate(45deg); }
+.advanced > summary:hover { color: var(--ink); }
+.advanced-note { margin-left: auto; font-size: 11.5px; font-weight: 500; color: var(--accent); }
+.advanced-body { padding-top: 12px; }
 /* Where the music starts in the video, and where in the song it plays from. */
 .music-times {
   display: grid; grid-template-columns: 1fr 84px auto; align-items: center; gap: 8px 8px; margin: 4px 0 14px;
@@ -701,6 +716,30 @@ kbd {
 .filter-grid .segmented { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .filter-grid .seg-btn { justify-content: center; }
 
+/* ---- a folded "Advanced" part of an inspector (disclosure.js) */
+.advanced { margin: 12px 0; border-top: 1px solid var(--line); padding-top: 10px; }
+.advanced > summary {
+  cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; border-radius: 5px;
+  font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3);
+}
+.advanced > summary::-webkit-details-marker { display: none; }
+.advanced > summary::before { content: '▸'; font-size: 10px; }
+.advanced[open] > summary::before { content: '▾'; }
+.advanced > summary:hover { color: var(--ink); }
+.advanced > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.advanced-body { padding-top: 12px; }
+.field.chooser { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.field.chooser[hidden], .advanced .field[hidden] { display: none; }
+.field.chooser .select { width: auto; max-width: 60%; }
+.curve-editor, .histogram {
+  display: block; width: 100%; margin: 6px 0; border: 1px solid var(--line); border-radius: 6px;
+  background: rgba(0, 0, 0, .22); color: var(--ink);
+}
+.curve-editor { height: 150px; cursor: crosshair; touch-action: none; }
+.histogram { height: 56px; color: var(--ink-3); }
+.advanced .field-row .btn.small { margin-left: auto; }
+.field.chooser input[type="color"] { width: 44px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: transparent; cursor: pointer; }
+
 /* ---- overlay rows (timeline-overlays.js), above the clips */
 .tl-overlay-labels .tl-label { height: 30px; margin-top: 0; }
 .tl-overlay-labels + .tl-label { margin-top: 2px; }
@@ -733,3 +772,33 @@ kbd {
 .field-row .value { margin-left: auto; }
 .key-nav { margin: 2px 0 10px; }
 .panel-section .clip-title + .hint { margin-bottom: 12px; }
+
+/* ---- several selected, zoom states, speed on the clip, gaps */
+.tl-box {
+  position: absolute; z-index: 8; pointer-events: none; border: 1px solid var(--accent);
+  background: rgba(138, 180, 248, .14); border-radius: 3px;
+}
+.zoom.disabled { background: transparent; border-style: dashed; color: var(--ink-3); opacity: .8; }
+.zoom.disabled.selected { background: transparent; border-color: var(--accent); color: var(--accent); }
+.zoom-auto {
+  font-size: 9.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; padding: 1px 4px;
+  border-radius: 4px; background: rgba(255,255,255,.16);
+}
+.tl-clips .speed {
+  position: absolute; top: auto; bottom: 3px; height: 15px; line-height: 15px; z-index: 3; font-size: 10px;
+  border-radius: 4px; padding: 0 5px; overflow: hidden; cursor: pointer; opacity: .95;
+}
+.tl-clips .speed-ghost {
+  position: absolute; top: 0; bottom: 0; z-index: 3; pointer-events: none; border-radius: 6px;
+  background: rgba(253, 214, 99, .22); border: 1px dashed rgba(253, 214, 99, .8);
+}
+.tl-clips .speed-ghost[hidden] { display: none; }
+.clip.gap {
+  background: repeating-linear-gradient(135deg, #17181b 0 8px, #1f2024 8px 16px); border-style: dashed; color: var(--ink-3);
+}
+.ctx-menu { bottom: auto; left: 0; transform: none; min-width: 190px; }
+.chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.ease-row { margin-top: 10px; }
+.ease-row[hidden], .ramp-box[hidden] { display: none; }
+.ramp-box { margin-top: 12px; display: grid; gap: 10px; }
+.segmented.wrap, .field.wrap .segmented { flex-wrap: wrap; }

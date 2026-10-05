@@ -101,22 +101,23 @@ async function openEditor(dir, { width = 1280, height = 840 } = {}) {
       win.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers });
       await sleep(60);
     },
-    async click(x, y, { clickCount = 1 } = {}) {
-      win.webContents.sendInputEvent({ type: 'mouseMove', x, y });
-      win.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount });
-      win.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount });
+    // `modifiers`: keys held meanwhile, e.g. ['meta'], ['shift'], ['alt'].
+    async click(x, y, { clickCount = 1, modifiers = [], button = 'left' } = {}) {
+      win.webContents.sendInputEvent({ type: 'mouseMove', x, y, modifiers });
+      win.webContents.sendInputEvent({ type: 'mouseDown', x, y, button, clickCount, modifiers });
+      win.webContents.sendInputEvent({ type: 'mouseUp', x, y, button, clickCount, modifiers });
       await sleep(80);
     },
-    async drag(x0, y0, x1, y1, steps = 12) {
-      win.webContents.sendInputEvent({ type: 'mouseMove', x: x0, y: y0 });
-      win.webContents.sendInputEvent({ type: 'mouseDown', x: x0, y: y0, button: 'left', clickCount: 1 });
+    async drag(x0, y0, x1, y1, steps = 12, { modifiers = [] } = {}) {
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: x0, y: y0, modifiers });
+      win.webContents.sendInputEvent({ type: 'mouseDown', x: x0, y: y0, button: 'left', clickCount: 1, modifiers });
       for (let i = 1; i <= steps; i++) {
         const x = Math.round(x0 + ((x1 - x0) * i) / steps);
         const y = Math.round(y0 + ((y1 - y0) * i) / steps);
-        win.webContents.sendInputEvent({ type: 'mouseMove', x, y, modifiers: ['leftButtonDown'] });
+        win.webContents.sendInputEvent({ type: 'mouseMove', x, y, modifiers: ['leftButtonDown', ...modifiers] });
         await sleep(16);
       }
-      win.webContents.sendInputEvent({ type: 'mouseUp', x: x1, y: y1, button: 'left', clickCount: 1 });
+      win.webContents.sendInputEvent({ type: 'mouseUp', x: x1, y: y1, button: 'left', clickCount: 1, modifiers });
       await sleep(120);
     },
     // Centre (or a point) of the first element matching a selector, in window coordinates.

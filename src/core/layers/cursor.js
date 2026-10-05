@@ -86,6 +86,16 @@ function drawHighlight(ctx, state, x, y, alpha) {
   }
 }
 
+// Where the cursor is drawn on the canvas for this state, or null when it
+// isn't shown (for motion blur: compose.js compares two moments).
+export function cursorPoint(state) {
+  const style = state.project.style.cursor;
+  const track = state.assets.cursors?.[state.source];
+  if (!style.show || !track || track.length === 0) return null;
+  const pos = cursorPosition(preparedFor(track), state.t, style.smooth);
+  return pos ? state.toCanvas(pos.x, pos.y) : null;
+}
+
 export function draw(ctx, state) {
   const style = state.project.style.cursor;
   const { t, meta, toCanvas, pointScale } = state;

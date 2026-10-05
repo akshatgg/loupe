@@ -10,6 +10,7 @@
 // It reuses the timeline's drag machinery (`t.beginDrag`, snapping) through
 // the helpers object, so drags feel and undo the same as clips and zooms.
 
+import { hasItem } from './selection.js';
 import * as P from '../../core/project.js';
 import { h, icon } from './ui.js';
 import { clipLayout, sourceInClip, clamp } from './timeline-math.js';
@@ -40,7 +41,7 @@ const LANE_PX = 28;
 //            snapPoints(), snap(t, points), showGuide(t|null), rootEl, scroller }
 export function createVisualTracks({ store, player, editor, helpers: t }) {
   const track = h('div', { class: 'tl-track tl-annotations', 'aria-label': 'Annotations' });
-  const label = h('div', { class: 'tl-label lbl-annotations' }, icon('annotations', { size: 15 }), 'Notes');
+  const label = h('div', { class: 'tl-label lbl-annotations' }, icon('text', { size: 15 }), 'Text');
   const joins = h('div', { class: 'tl-joins' });
   const menu = h('div', { class: 'speed-menu join-menu', role: 'menu', hidden: true });
   let picking = null; // the clip id whose join menu is open
@@ -48,7 +49,7 @@ export function createVisualTracks({ store, player, editor, helpers: t }) {
   // ---- rendering
 
   function renderAnnotations(p, layout) {
-    const sel = store.selection;
+    const sel = store.selected;
     const pieces = annotationPieces(p, layout);
     // The track grows a lane for each annotation overlapping another.
     const lanes = Math.min(4, stackLanes(pieces));
@@ -59,7 +60,7 @@ export function createVisualTracks({ store, player, editor, helpers: t }) {
       const a = piece.annotation;
       const lane = Math.min(lanes - 1, piece.lane);
       return h('div', {
-        class: `anno-bar kind-${a.type}${sel?.kind === 'annotation' && sel.id === a.id ? ' selected' : ''}`,
+        class: `anno-bar kind-${a.type}${hasItem(sel, { kind: 'annotation', id: a.id }) ? ' selected' : ''}`,
         dataset: { id: a.id, clip: String(piece.clipIndex) },
         style: {
           left: `${t.x(piece.outStart)}px`, width: `${Math.max(4, (piece.outEnd - piece.outStart) * t.pps())}px`,
@@ -71,7 +72,7 @@ export function createVisualTracks({ store, player, editor, helpers: t }) {
       h('span', { class: 'anno-bar-label' }, icon(kindOf(a.type).icon, { size: 12 }), annotationLabel(a)),
       h('div', { class: 'handle end', dataset: { edge: 'end' } }));
     });
-    if (!pieces.length) els.push(h('div', { class: 'tl-hint' }, 'Text, arrows and title cards you add show here'));
+    if (!pieces.length) els.push(h('div', { class: 'tl-hint' }, 'Text, arrows, boxes and blurs you add show here'));
     track.replaceChildren(...els);
   }
 

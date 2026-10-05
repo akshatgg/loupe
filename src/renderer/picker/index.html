@@ -8,7 +8,10 @@
   <header>
     <div>
       <h1>Choose what to record</h1>
-      <p class="sub" id="zoomHelp">Hold <kbd>⌥</kbd> and scroll while recording to zoom in.</p>
+      <p class="sub">
+        <span id="zoomHelp">Hold <kbd>⌥</kbd> and scroll while recording to zoom in.</span>
+        <button id="changeZoom" type="button" class="link" title="Choose the zoom shortcuts in Settings">Change</button>
+      </p>
     </div>
     <div class="actions">
       <button id="importVideo" type="button" class="ghost" title="Open an MP4 or MOV video to edit">Import video</button>
@@ -26,65 +29,42 @@
     <div id="preview"><div class="ph">Select a source to record</div></div>
   </div>
 
-  <div class="options">
-    <div class="optionrow">
-      <label for="mic">
-        <span class="glyph" aria-hidden="true">🎙</span>
-        Record microphone
-      </label>
-      <div class="rowcontrols">
-        <select id="micDevice" aria-label="Which microphone" hidden></select>
-        <input type="checkbox" id="mic" class="switch">
-      </div>
-    </div>
-    <div class="optionrow">
-      <label for="systemAudio">
-        <span class="glyph" aria-hidden="true">🔊</span>
-        Record computer sound
-      </label>
-      <input type="checkbox" id="systemAudio" class="switch">
-    </div>
-    <div class="optionrow">
-      <label for="camera">
-        <span class="glyph" aria-hidden="true">📷</span>
-        Camera
-      </label>
-      <div class="rowcontrols">
-        <select id="cameraDevice" aria-label="Which camera" hidden></select>
-        <span id="cameraNote" class="note" hidden></span>
-        <input type="checkbox" id="camera" class="switch">
-      </div>
-    </div>
-    <div class="optionrow">
-      <label for="recordKeys">
-        <span class="glyph" aria-hidden="true">⌨️</span>
-        Show keyboard shortcuts I press (never what I type)
-      </label>
-      <input type="checkbox" id="recordKeys" class="switch">
-    </div>
-    <div class="optionrow">
-      <label for="countdown">
-        <span class="glyph" aria-hidden="true">⏱</span>
-        Count down 3, 2, 1 before recording
-      </label>
-      <input type="checkbox" id="countdown" class="switch">
-    </div>
-    <div class="optionrow">
-      <span class="rowlabel" id="zoomLabel">
-        <span class="glyph" aria-hidden="true">🔍</span>
-        Zoom shortcuts — hold one and scroll
-      </span>
-      <div class="shortcuts" role="group" aria-labelledby="zoomLabel">
-        <div class="shortcut">
-          <button type="button" class="capture" data-slot="0"></button>
-          <button type="button" class="clear" data-slot="0" aria-label="Remove this shortcut">×</button>
-        </div>
-        <div class="shortcut">
-          <button type="button" class="capture" data-slot="1"></button>
-          <button type="button" class="clear" data-slot="1" aria-label="Remove this shortcut">×</button>
-        </div>
-      </div>
-    </div>
+  <!-- What gets recorded with the screen: one row of on/off buttons. Each is a
+       real checkbox, drawn as a button; the full wording is its tooltip. -->
+  <div class="options" role="group" aria-label="Also record">
+    <label class="toggle" title="Record microphone">
+      <input type="checkbox" id="mic">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0v-5a3 3 0 0 0-3-3zM5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/></svg>
+      <span>Microphone</span>
+    </label>
+    <select id="micDevice" aria-label="Which microphone" hidden></select>
+    <label class="toggle" title="Record computer sound">
+      <input type="checkbox" id="systemAudio">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9.5v5h3.5L12 18V6L7.5 9.5zM15.5 9.5a3.5 3.5 0 0 1 0 5M18 7a7 7 0 0 1 0 10"/></svg>
+      <span>Computer sound</span>
+    </label>
+    <label class="toggle" title="Add yourself to the recording with the camera">
+      <input type="checkbox" id="camera">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 7.5h11v9h-11zM14.5 10.5l6-3v9l-6-3"/></svg>
+      <span>Camera</span>
+    </label>
+    <select id="cameraDevice" aria-label="Which camera" hidden></select>
+    <span id="cameraNote" class="note" hidden></span>
+    <label class="toggle" title="Show keyboard shortcuts I press (never what I type)">
+      <input type="checkbox" id="recordKeys">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 6.5h19v11h-19zM6.5 10.5h.01M10 10.5h.01M14 10.5h.01M17.5 10.5h.01M8 14h8"/></svg>
+      <span>Shortcuts</span>
+    </label>
+    <label class="toggle" title="Zoom in where I click, once the recording is done. Change or remove the zooms afterwards.">
+      <input type="checkbox" id="autoZoom">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13zM15.2 15.2L20 20M10.5 8v5M8 10.5h5"/></svg>
+      <span>Zoom on clicks</span>
+    </label>
+    <label class="toggle" title="Count down 3, 2, 1 before recording">
+      <input type="checkbox" id="countdown">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6.5a7 7 0 1 0 0 14a7 7 0 0 0 0-14zM12 10v3.5M9.5 3.5h5"/></svg>
+      <span>Countdown</span>
+    </label>
   </div>
 
   <footer>

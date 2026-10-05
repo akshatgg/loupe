@@ -51,9 +51,10 @@ export function viewSize(z, width, height, aspect = null) {
 }
 
 // One step of the zoom spring, mutating `spring` ({position, velocity}).
-export function springStep(spring, target, dt) {
+// `tau`: how long the spring takes (a zoom's own pace; TAU when not given).
+export function springStep(spring, target, dt, tau = TAU) {
   // Semi-implicit Euler: update velocity first, then position with it.
-  const accel = (target - spring.position) / (TAU * TAU) - (2 * spring.velocity) / TAU;
+  const accel = (target - spring.position) / (tau * tau) - (2 * spring.velocity) / tau;
   spring.velocity += accel * dt;
   spring.position += spring.velocity * dt;
 }
@@ -79,6 +80,10 @@ export function followStep(cam, z, mx, my, { width, height, aspect = null }) {
 // keyframe list ({t, zoom}) the spring follows: each zoom's level from its
 // start, back to 1x at its end. A recorded zoom that still has the keyframes
 // it was migrated from replays those instead, so it moves exactly as v1 did.
+// How quickly a zoom moves in and out: the spring's time, times this.
+export const ZOOM_EASES = ['smooth', 'snappy', 'gentle'];
+const ZOOM_PACE = { snappy: 0.5, gentle: 2.2 };
+
 export function zoomTargets(zooms, duration) {
   const out = [];
   const sorted = [...zooms].sort((a, b) => a.start - b.start);
@@ -90,7 +95,10 @@ export function zoomTargets(zooms, duration) {
       // the last sample.
       if (z.keyframes.at(-1).zoom > 1 && z.end < duration - 1e-9) out.push({ t: z.end, zoom: 1 });
     } else {
-      out.push({ t: z.start, zoom: z.level }, { t: z.end, zoom: 1 });
+      // A zoom's own pace in and out (ZOOM_EASES); the usual one has none.
+      const pace = ZOOM_PACE[z.ease];
+      out.push(pace ? { t: z.start, zoom: z.level, pace } : { t: z.start, zoom: z.level },
+        pace ? { t: z.end, zoom: 1, pace } : { t: z.end, zoom: 1 });
     }
   }
   // Stable: a zoom's return to 1x sorts before a zoom starting at that moment.
@@ -103,15 +111,17 @@ export function easeZoom(keyframes, duration, sampleRate = SAMPLE_RATE) {
   const out = new Float64Array(n);
   const spring = { position: 1, velocity: 0 };
   let target = 1;
+  let tau = TAU;
   let next = 0;
 
   for (let i = 0; i < n; i++) {
     const t = i * dt;
     while (next < keyframes.length && keyframes[next].t <= t) {
       target = keyframes[next].zoom;
+      tau = TAU * (keyframes[next].pace ?? 1);
       next++;
     }
-    springStep(spring, target, dt);
+    springStep(spring, target, dt, tau);
     out[i] = spring.position;
   }
   return out;
@@ -188,7 +198,9 @@ function activeZoomIndex(sorted, n, sampleRate) {
 //  - aspect: the output's width / height, or null for the source's shape.
 // With the source's shape, no fixed zooms and a migrated project's zooms,
 // this is exactly src/main/camera.js's solveCamera.
-export function solveCamera({ zooms = [], cursorTrack = [], duration, width, height, aspect = null, sampleRate = SAMPLE_RATE }) {
+export function solveCamera({ zooms: allZooms = [], cursorTrack = [], duration, width, height, aspect = null, sampleRate = SAMPLE_RATE }) {
+  // A zoom that is switched off stays in the project and moves nothing.
+  const zooms = allZooms.some((z) => z.disabled) ? allZooms.filter((z) => !z.disabled) : allZooms;
   const bounds = { width, height, aspect };
   const zoom = easeZoom(zoomTargets(zooms, duration), duration, sampleRate);
   const cursor = resampleCursor(cursorTrack, duration, sampleRate);

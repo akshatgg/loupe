@@ -9,6 +9,7 @@
 //
 // `view`: { x(t), pps, shown(), beginDrag(e, handlers), snapPoints(), snap(t, points), showGuide(t) }
 
+import { hasItem } from './selection.js';
 import * as P from '../../core/project.js';
 import { MAX_LANES } from '../../core/audio/clips.js';
 import { h, icon } from './ui.js';
@@ -37,14 +38,14 @@ export function createOverlayLanes({ store, editor, view }) {
       label.replaceChildren(...Array.from({ length: rows }, (_, i) =>
         h('div', { class: 'tl-label lbl-overlay' }, icon('image', { size: 14 }), `V${rows - i + 1}`)));
     }
-    const sel = store.selection;
+    const sel = store.selected;
     const els = [];
     for (let i = 0; i < rows; i++) els.push(h('div', { class: 'aclip-row', style: { top: `${i * ROW_HEIGHT}px`, height: `${ROW_HEIGHT}px` } }));
     for (const o of p.overlays ?? []) {
       const width = Math.max(4, o.length * view.pps);
       const times = new Set(Object.values(o.keyframes ?? {}).flat().map((k) => k.t));
       els.push(h('div', {
-        class: `oclip ${o.kind}${sel?.kind === 'overlay' && sel.id === o.id ? ' selected' : ''}`,
+        class: `oclip ${o.kind}${hasItem(sel, { kind: 'overlay', id: o.id }) ? ' selected' : ''}`,
         dataset: { id: o.id },
         style: { left: `${view.x(o.start)}px`, width: `${width}px`, top: `${topOf(o.lane, rows) + 2}px`, height: `${ROW_HEIGHT - 4}px` },
         title: `${o.name || 'Overlay'} · ${formatTime(o.start, { fraction: true })}–${formatTime(o.start + o.length, { fraction: true })}\nDrag to move, drag the ends to trim`
@@ -54,7 +55,7 @@ export function createOverlayLanes({ store, editor, view }) {
       h('div', { class: 'handle start', dataset: { edge: 'start' } }),
       h('div', { class: 'handle end', dataset: { edge: 'end' } })));
     }
-    if (!p.overlays?.length) els.push(h('div', { class: 'tl-hint' }, 'Overlay a logo, picture or video: the Overlay button'));
+    if (!p.overlays?.length) els.push(h('div', { class: 'tl-hint' }, 'Put a logo, picture or video on top: the Add button'));
     track.replaceChildren(...els);
   }
 

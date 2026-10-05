@@ -13,6 +13,7 @@
 //     duration,                   // seconds to use (default: to its end)
 //     volume: 1,                  // linear
 //     gain: null,                 // optional gain curve, see below
+//     tone: null,                 // optional pan / equalizer / compressor (tone.js)
 //     muted: false
 //   }
 //
@@ -28,6 +29,7 @@
 // returned untouched, bit for bit.
 
 import { limit, resample } from './util.js';
+import { applyTone } from './tone.js';
 
 export const MIX_RATE = 48000;
 
@@ -92,6 +94,9 @@ export function mixTracks(tracks, {
       : Math.max(from, Math.min(srcLen, from + Math.round(t.duration * rate)));
     let chans = t.channels.map((c) => c.subarray(from, to));
     if (rate !== sampleRate) chans = chans.map((c) => resample(c, rate, sampleRate));
+    // Its own pan, equalizer and compressor, before its volume. With none
+    // set the samples are the very same ones.
+    if (t.tone) chans = applyTone(chans, sampleRate, t.tone);
     const left = chans[0];
     const right = chans.length > 1 ? chans[1] : chans[0];
     const len = left.length;

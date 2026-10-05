@@ -125,7 +125,7 @@ async function run() {
     assert.deepStrictEqual(clips.map((c) => c.hold ?? null), [null, 2, null]);
     assert.ok(Math.abs((await js('window.__editor.store.tl.duration')) - 8) < 1e-6, '2 seconds longer');
     assert.strictEqual(await js('document.querySelector(".clip.freeze .clip-name").textContent'), 'Freeze frame');
-    assert.strictEqual(await js('document.querySelector("#tabs [aria-selected=true]").dataset.panel'), 'clip', 'the Clip panel shows it');
+    assert.strictEqual(await js('document.getElementById("sidebar").dataset.panel'), 'clip', 'the Clip panel shows it');
     assert.strictEqual(await js('document.getElementById("holdLength").value'), '0:02.0');
     await shot('01-freeze');
     const file = await exportFile();

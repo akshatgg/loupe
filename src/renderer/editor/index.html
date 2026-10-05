@@ -24,17 +24,21 @@
     </header>
 
     <main id="workspace">
+      <aside id="transcript" aria-label="Transcript" hidden></aside>
       <section id="stage">
         <div id="canvasBox"><canvas id="preview"></canvas></div>
         <div id="stageNotice" class="stage-notice" hidden></div>
         <div id="toast" class="toast" role="status" hidden></div>
             </section>
       <aside id="sidebar">
+        <nav id="tabs" role="tablist" aria-label="Video settings"></nav>
         <div class="panel-wrap">
-          <h2 id="panelTitle" class="panel-title"></h2>
+          <div class="panel-head">
+            <button id="inspectorBack" type="button" class="icon-btn small" title="Back to the video's settings (Esc)" aria-label="Back to the video's settings" hidden></button>
+            <h2 id="panelTitle" class="panel-title"></h2>
+          </div>
           <div id="panel"></div>
         </div>
-        <nav id="tabs" role="tablist" aria-label="Settings"></nav>
       </aside>
     </main>
 
@@ -47,16 +51,8 @@
           <div class="meter-row"><span class="meter-fill"></span><span class="meter-peak"></span></div>
         </div>
       </div>
-      <div class="group tools">
-        <button id="splitBtn" type="button" class="tool" title="Split at the playhead (S)"></button>
-        <button id="cutBtn" type="button" class="tool" title="Cut by typing times (X)"></button>
-        <button id="zoomBtn" type="button" class="tool" title="Add a zoom at the playhead (Z)"></button>
-        <button id="deleteBtn" type="button" class="tool" title="Delete what’s selected (Delete)" disabled></button>
-        <span class="tool-sep" aria-hidden="true"></span>
-        <button id="addRecBtn" type="button" class="tool" title="Add another recording after this one"></button>
-        <button id="addAudioBtn" type="button" class="tool" title="Add songs or sound files: each becomes a clip on the audio rows"></button>
-        <button id="addOverlayBtn" type="button" class="tool" title="Put a logo, picture or video over the video"></button>
-      </div>
+      <div class="group tools" id="tools"></div>
+      <div class="group tl-options" id="tlOptions"></div>
       <div class="group tl-zoom">
         <button id="tlOut" type="button" class="icon-btn small" aria-label="Zoom the timeline out"></button>
         <button id="tlFit" type="button" class="icon-btn small" aria-label="Fit the whole video"></button>

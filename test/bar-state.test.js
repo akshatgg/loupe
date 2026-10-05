@@ -68,3 +68,27 @@ test('an unrecognised action in a valid state is rejected', () => {
   assert.throws(() => transition('armed', 'stop'), /Cannot 'stop' from bar state 'armed'/);
   assert.throws(() => transition('recording', 'back'), /Cannot 'back' from bar state 'recording'/);
 });
+
+// ---- restart ----------------------------------------------------------------
+
+test('Restart while recording or paused throws the take away, then starts like a normal start', () => {
+  assert.strictEqual(transition('recording', 'restart'), 'restarting');
+  assert.strictEqual(transition('paused', 'restart'), 'restarting');
+  // Countdown on: 3-2-1 again, then recording. Countdown off: straight to recording.
+  assert.strictEqual(transition('restarting', 'countdown'), 'counting');
+  assert.strictEqual(transition(transition('restarting', 'countdown'), 'go'), 'recording');
+  assert.strictEqual(transition('restarting', 'start'), 'recording');
+});
+
+test('Restart is refused when nothing is recording', () => {
+  assert.throws(() => transition('armed', 'restart'), /Cannot 'restart' from bar state 'armed'/);
+  assert.throws(() => transition('counting', 'restart'), /Cannot 'restart' from bar state 'counting'/);
+  assert.throws(() => transition('restarting', 'restart'), /Cannot 'restart' from bar state 'restarting'/);
+  assert.throws(() => transition('closed', 'restart'), /Unknown bar state/);
+});
+
+test('while starting over, Stop or quit closes the bar, and the old take cannot be paused or saved', () => {
+  assert.strictEqual(transition('restarting', 'back'), 'closed');
+  assert.throws(() => transition('restarting', 'pause'), /Cannot 'pause' from bar state 'restarting'/);
+  assert.throws(() => transition('restarting', 'stop'), /Cannot 'stop' from bar state 'restarting'/);
+});

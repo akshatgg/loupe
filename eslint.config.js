@@ -1,8 +1,10 @@
 'use strict';
 module.exports = [
+  // Hidden folders hold tools' own files, not this project's code.
+  { ignores: ['.*/**'] },
   {
     files: ['**/*.js'],
-    ignores: ['src/renderer/**', 'web/**', 'src/core/**', 'test/e2e/lab.js', 'test/e2e/visuals-lab.js', 'test/e2e/export-lab.js'],
+    ignores: ['src/renderer/**', 'web/**', 'src/core/**', 'test/e2e/lab.js', 'test/e2e/visuals-lab.js', 'test/e2e/export-lab.js', 'test/e2e/tracking-lab.js'],
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'commonjs',
@@ -142,7 +144,7 @@ module.exports = [
   // hidden, sandboxed page: browser and WebCodecs globals, no Node. The e2e
   // lab page is the same kind of page.
   {
-    files: ['src/renderer/exporter/**/*.js', 'test/e2e/lab.js', 'test/e2e/visuals-lab.js', 'test/e2e/export-lab.js'],
+    files: ['src/renderer/exporter/**/*.js', 'test/e2e/lab.js', 'test/e2e/visuals-lab.js', 'test/e2e/export-lab.js', 'test/e2e/tracking-lab.js'],
     languageOptions: {
       ecmaVersion: 2024,
       sourceType: 'module',
