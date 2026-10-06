@@ -203,6 +203,7 @@ test('with the camera chosen, arming opens the bubble, kept out of the capture',
 
 function fakeHelpers() {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'loupe-fakebin-'));
+  // inputtap reports a click whenever a test creates inputtap.click.
   fs.writeFileSync(path.join(bin, 'capture'), `#!/bin/sh
 trap 'echo "{\\"type\\":\\"stopped\\",\\"duration\\":1,\\"now\\":2}"; exit 0' TERM
 echo '{"type":"started","clock":1,"now":1}'
@@ -211,7 +212,10 @@ while true; do sleep 0.02; done
 `);
   fs.writeFileSync(path.join(bin, 'inputtap'), `#!/bin/sh
 trap 'exit 0' TERM
-while true; do sleep 0.02; done
+while true; do
+  if [ -f "$0.click" ]; then rm -f "$0.click"; echo '{"type":"click","clock":5,"x":300,"y":200,"button":"left"}'; fi
+  sleep 0.02
+done
 `);
   for (const name of ['capture', 'inputtap']) fs.chmodSync(path.join(bin, name), 0o755);
   return bin;
@@ -246,7 +250,8 @@ async function withRecordingMain(settings, fn) {
   // also works while a test has setTimeout mocked.
   const captureRunning = async (n) => { while (captureArgs().length < n) await tick(); };
   try {
-    await fn({ ...harness, recordings, captureArgs, captureRunning });
+    const click = () => fs.writeFileSync(path.join(bin, 'inputtap.click'), '');
+    await fn({ ...harness, recordings, captureArgs, captureRunning, click });
   } finally {
     await harness.ipcHandlers['record:stop']().catch(() => {});
     for (const dir of [bin, recordings, userData]) fs.rmSync(dir, { recursive: true, force: true });
@@ -351,4 +356,42 @@ test('Stop while Restart is still throwing the take away closes the bar and keep
     assert.deepStrictEqual(fs.readdirSync(recordings), []);
     assert.ok(!windows.some(isPage('editor')));
     assert.strictEqual(captureArgs().length, 1, 'no second take was started');
+  }));
+
+// ---- the "what's in shot" frame and zooms on clicks ---------------------------
+
+const sleepMs = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// The zoom the frame was last told to show.
+const shownZoom = (windows) => windows.find(isPage('shot'))?.sent.filter((m) => m.channel === 'shot:update').at(-1)?.data.zoom ?? 1;
+async function waitForZoom(windows, test, what, ms = 3000) {
+  const end = Date.now() + ms;
+  while (!test(shownZoom(windows))) {
+    if (Date.now() > end) assert.fail(`${what}: the frame shows ${shownZoom(windows)}`);
+    await sleepMs(20);
+  }
+}
+
+test('with Zoom on clicks, a click while recording shows the frame at the zoom the video will have, and it goes a moment later', unix, () =>
+  withRecordingMain({ countdown: false, autoZoom: true }, async ({ ipcHandlers, windows, captureRunning, click }) => {
+    ipcHandlers['bar:arm']({}, SOURCE);
+    await ipcHandlers['bar:start']();
+    await captureRunning(1);
+    await sleepMs(150);
+    assert.ok(shownZoom(windows) < 1.02, 'no frame before any click');
+    click();
+    // It glides in, and settles at 2x: the level the video zooms to.
+    await waitForZoom(windows, (z) => z > 1.98, 'zoomed in to 2x after the click');
+    assert.ok(shownZoom(windows) <= 2.0001, `never past 2x: ${shownZoom(windows)}`);
+    // About 1.2 s after the click the video zooms back out, and so does the frame.
+    await waitForZoom(windows, (z) => z < 1.02, 'back out after the click', 2500);
+  }));
+
+test('with Zoom on clicks off, a click while recording shows no frame', unix, () =>
+  withRecordingMain({ countdown: false, autoZoom: false }, async ({ ipcHandlers, windows, captureRunning, click }) => {
+    ipcHandlers['bar:arm']({}, SOURCE);
+    await ipcHandlers['bar:start']();
+    await captureRunning(1);
+    click();
+    await sleepMs(600);
+    assert.ok(shownZoom(windows) < 1.02, `no zoom: ${shownZoom(windows)}`);
   }));

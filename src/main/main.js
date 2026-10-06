@@ -247,13 +247,26 @@ function startShotFrame(area) {
   const live = createLiveCamera(area);
   let last = performance.now();
   let lastSent = '';
+  // Zooms on clicks are made when the recording stops (core/auto-zoom.js);
+  // meanwhile the frame shows each one as the video will have it: in at the
+  // click, out a moment after the last. A zoom made by hand wins, as it does
+  // in the video.
+  const clickZoom = appShell.settings.get().autoZoom !== false ? require('../core/auto-zoom.js').liveClickZoom : null;
+  let seenClicks = 0;
+  let lastClickAt = -Infinity;
   shotTimer = setInterval(() => {
     const now = performance.now();
     // Capped so a stalled main process doesn't jump the spring in one go.
     const dt = Math.min((now - last) / 1000, 0.25);
     last = now;
     const s = recorder.state();
-    const view = stepLiveCamera(live, { target: s.zoom, cursor: s.cursorTrack.at(-1) ?? null, dt });
+    if (s.clicks.length > seenClicks) {
+      seenClicks = s.clicks.length;
+      lastClickAt = now;
+    }
+    const byHand = s.zoom > 1 + 1e-3;
+    const target = byHand || !clickZoom ? s.zoom : clickZoom((now - lastClickAt) / 1000);
+    const view = stepLiveCamera(live, { target, cursor: s.cursorTrack.at(-1) ?? null, dt });
     const { zoom, rect } = view;
     // At rest this settles to identical values -- don't re-send those 60x/s.
     const key = [zoom.toFixed(3), rect.x.toFixed(1), rect.y.toFixed(1)].join();

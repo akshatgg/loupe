@@ -103,7 +103,7 @@ function toProjectV2(recording, { createdAt = null, style = null, autoZoom = fal
     const zooms = P.zoomsFromKeyframes(recording.zoomKeyframes, main.duration);
     let out = P.validateProject({ ...project, zooms });
     if (autoZoom) {
-      const zoomed = P.applyAutoZooms(out, { strength: 'moderate' });
+      const zoomed = P.applyAutoZooms(out, { strength: require('../core/auto-zoom.js').RECORDING_STRENGTH });
       if (P.autoZoomCount(zoomed) > 0) out = P.validateProject(P.setAutoZoomNote(zoomed, true));
     }
     return out;
