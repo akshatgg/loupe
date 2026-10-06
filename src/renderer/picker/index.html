@@ -8,10 +8,6 @@
   <header>
     <div>
       <h1>Choose what to record</h1>
-      <p class="sub">
-        <span id="zoomHelp">Hold <kbd>⌥</kbd> and scroll while recording to zoom in.</span>
-        <button id="changeZoom" type="button" class="link" title="Choose the zoom shortcuts in Settings">Change</button>
-      </p>
     </div>
     <div class="actions">
       <button id="importVideo" type="button" class="ghost" title="Open an MP4 or MOV video to edit">Import video</button>
@@ -55,17 +51,42 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 6.5h19v11h-19zM6.5 10.5h.01M10 10.5h.01M14 10.5h.01M17.5 10.5h.01M8 14h8"/></svg>
       <span>Shortcuts</span>
     </label>
-    <label class="toggle" title="Zoom in where I click, once the recording is done. Change or remove the zooms afterwards.">
-      <input type="checkbox" id="autoZoom">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13zM15.2 15.2L20 20M10.5 8v5M8 10.5h5"/></svg>
-      <span>Zoom on clicks</span>
-    </label>
     <label class="toggle" title="Count down 3, 2, 1 before recording">
       <input type="checkbox" id="countdown">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6.5a7 7 0 1 0 0 14a7 7 0 0 0 0-14zM12 10v3.5M9.5 3.5h5"/></svg>
       <span>Countdown</span>
     </label>
   </div>
+
+  <!-- How to zoom while recording: the shortcuts to hold while scrolling
+       (set right here: click a box, then press the button), and the
+       double-click switch for anyone without a mouse. -->
+  <section class="zoom" aria-labelledby="zoomTitle">
+    <div class="zoom-way">
+      <div class="zoom-text">
+        <h2 id="zoomTitle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 0 0 0-13zM15.2 15.2L20 20M10.5 8v5M8 10.5h5"/></svg>Zoom while recording</h2>
+        <p id="zoomHelp">Hold a shortcut and scroll: up to zoom in, down to zoom out.</p>
+      </div>
+      <div class="shortcuts" role="group" aria-label="Zoom shortcuts: click one, then press the key or mouse button to hold">
+        <div class="shortcut">
+          <button type="button" class="capture" data-slot="0" title="Click, then press the key or mouse button to hold while scrolling"></button>
+          <button type="button" class="clear" data-slot="0" aria-label="Remove this shortcut" title="Remove this shortcut">×</button>
+        </div>
+        <div class="shortcut">
+          <button type="button" class="capture" data-slot="1" title="Click, then press the key or mouse button to hold while scrolling"></button>
+          <button type="button" class="clear" data-slot="1" aria-label="Remove this shortcut" title="Remove this shortcut">×</button>
+        </div>
+      </div>
+    </div>
+    <label class="zoom-way dblclick">
+      <span class="zoom-text">
+        <span class="dbl-title">Double-click to zoom</span>
+        <span class="dbl-help">No mouse side button? Double-click to zoom in on that spot. It stays in until you double-click again.</span>
+      </span>
+      <input type="checkbox" id="doubleClickZoom" role="switch">
+      <span class="switch" aria-hidden="true"></span>
+    </label>
+  </section>
 
   <footer>
     <button id="recordings" class="ghost" title="Your recordings">Recordings</button>

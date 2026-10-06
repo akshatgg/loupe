@@ -46,8 +46,9 @@ const DEFAULT_SETTINGS = deepFreeze({
   // Records shortcuts only (a key with a modifier, Esc, arrows...), never
   // typing, so it is on unless turned off.
   showKeystrokes: true,
-  // Zoom in where the person clicked, when a new recording opens.
-  autoZoom: true,
+  // While recording, a double-click zooms in there and the next zooms out
+  // (for anyone without a mouse side button to hold while scrolling).
+  doubleClickZoom: true,
   exportDefaults: { format: 'mp4', resolution: '1080p', quality: 'balanced' },
   checkForUpdates: true,
   lastUpdateCheck: 0,       // ms; written by updates.js, not the renderer
@@ -151,7 +152,7 @@ const VALIDATORS = {
   recordCamera: isBool,
   systemAudio: isBool,
   showKeystrokes: isBool,
-  autoZoom: isBool,
+  doubleClickZoom: isBool,
   exportDefaults: validExportDefaults,
   checkForUpdates: isBool,
   lastUpdateCheck: (v) => Number.isFinite(v) && v >= 0,
@@ -167,7 +168,7 @@ const VALIDATORS = {
 // renderer can't point recordings at an arbitrary path or corrupt presets.
 const RENDERER_KEYS = [
   'zoomTriggers', 'countdown', 'openAtLogin', 'microphone', 'camera', 'recordCamera', 'systemAudio',
-  'showKeystrokes', 'autoZoom', 'exportDefaults', 'checkForUpdates', 'saveCrashReports'
+  'showKeystrokes', 'doubleClickZoom', 'exportDefaults', 'checkForUpdates', 'saveCrashReports'
 ];
 
 // The first version of this setting (a key dropdown plus a side-button

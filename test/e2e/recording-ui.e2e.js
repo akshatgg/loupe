@@ -209,7 +209,7 @@ async function pickerChecks() {
   assert.strictEqual(await checked('systemAudio'), false);
   assert.strictEqual(await checked('recordKeys'), true);
   assert.strictEqual(await checked('camera'), false);
-  // One row of six on/off buttons: a short label each, the full wording as
+  // One row of five on/off buttons: a short label each, the full wording as
   // the tooltip.
   const toggles = await js(`[...document.querySelectorAll('.options .toggle')].map((l) => ({
     id: l.querySelector('input').id, label: l.textContent.trim(), title: l.title,
@@ -219,7 +219,6 @@ async function pickerChecks() {
     ['systemAudio', 'Computer sound', 'Record computer sound'],
     ['camera', 'Camera', 'Add yourself to the recording with the camera'],
     ['recordKeys', 'Shortcuts', 'Show keyboard shortcuts I press (never what I type)'],
-    ['autoZoom', 'Zoom on clicks', 'Zoom in where I click, once the recording is done. Change or remove the zooms afterwards.'],
     ['countdown', 'Countdown', 'Count down 3, 2, 1 before recording']
   ]);
   assert.strictEqual(new Set(toggles.map((t) => t.top)).size, 1, `all on one row: ${JSON.stringify(toggles)}`);
@@ -227,20 +226,37 @@ async function pickerChecks() {
   const background = (id) => `getComputedStyle(document.getElementById(${JSON.stringify(id)}).closest('.toggle')).backgroundColor`;
   await waitFor(win, `${background('countdown')} === 'rgb(138, 180, 248)'`, 'Countdown drawn as on');
   assert.strictEqual(await js(background('systemAudio')), 'rgba(255, 255, 255, 0.1)', 'Computer sound drawn as off');
-  // The freed height goes to the sources: the strip is one line, and the
-  // list and preview take most of the window.
+  // The sources still get most of the window: the strip is one line, and
+  // the zoom row under it is short.
   const heights = await js(`({ strip: document.querySelector('.options').offsetHeight,
+    zoom: document.querySelector('.zoom').offsetHeight,
     panel: document.querySelector('.panel').offsetHeight, page: innerHeight })`);
   assert.ok(heights.strip < 50, `a one-line strip: ${JSON.stringify(heights)}`);
-  assert.ok(heights.panel > heights.page * 0.6, `the sources fill the window: ${JSON.stringify(heights)}`);
-  // The zoom shortcuts are chosen in Settings now; the hint still names them.
-  assert.strictEqual(await js('document.querySelectorAll(".capture, .clear").length'), 0);
-  const expectedHint = process.platform === 'win32' ? /^Hold Alt or a mouse side button and scroll while recording/
-    : /^Hold ⌥ or a mouse side button and scroll while recording/;
+  assert.ok(heights.zoom < 130, `a short zoom row: ${JSON.stringify(heights)}`);
+  assert.ok(heights.panel > heights.page * 0.45, `the sources fill most of the window: ${JSON.stringify(heights)}`);
+
+  // Zoom while recording, on this first screen: the shortcuts to hold while
+  // scrolling, shown and changeable here, and the double-click switch.
+  const expectedHint = process.platform === 'win32' ? /^Hold Alt or a mouse side button and scroll: up to zoom in, down to zoom out/
+    : /^Hold ⌥ or a mouse side button and scroll: up to zoom in, down to zoom out/;
+  await waitFor(win, `document.querySelector('.zoom .capture[data-slot="1"]').textContent.includes('Mouse side button')`, 'the shortcuts shown');
   assert.match(await js(text('zoomHelp')), expectedHint);
-  await js('document.getElementById("changeZoom").click()');
-  await sleep(100);
-  assert.deepStrictEqual(calls.find((c) => c.channel === 'shell:openSettings')?.args, ['recording']);
+  await js(`document.querySelector('.zoom .capture[data-slot="1"]').click()`);
+  assert.strictEqual(await js(`document.querySelector('.zoom .capture[data-slot="1"]').textContent`), 'Press a key or mouse button…');
+  await js(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }))`);
+  await sleep(150);
+  assert.deepStrictEqual(calls.filter((c) => c.channel === 'settings:set').at(-1)?.args[0], { zoomTriggers: ['option', 'shift'] },
+    'a shortcut changed here is saved');
+  assert.match(await js(`document.querySelector('.zoom .capture[data-slot="1"]').textContent`), /Shift/);
+  // Double-click to zoom: explained, on by default, saved when switched.
+  assert.match(await js(`document.querySelector('.dblclick').textContent`), /Double-click to zoom.*double-click again/s);
+  assert.strictEqual(await checked('doubleClickZoom'), true);
+  await js('document.getElementById("doubleClickZoom").click()');
+  await sleep(150);
+  assert.strictEqual(recordingSettings.doubleClickZoom, false);
+  await js('document.getElementById("doubleClickZoom").click()');
+  await sleep(150);
+  assert.strictEqual(recordingSettings.doubleClickZoom, true);
 
   // Each switch is saved as soon as it changes.
   await js('document.getElementById("systemAudio").click()');

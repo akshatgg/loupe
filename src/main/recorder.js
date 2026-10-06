@@ -2,7 +2,7 @@
 
 const path = require('node:path');
 const { performance } = require('node:perf_hooks');
-const { createZoomState, applyScroll } = require('./zoom');
+const { createZoomState, applyScroll, isDoubleClick, toggleZoom } = require('./zoom');
 const { createProject, saveProject, writeCursorTrack } = require('./project');
 const { buildExcludeWindowArgs } = require('./exclude-args');
 const { helperCommand, captureFileName } = require('./platform');
@@ -71,6 +71,10 @@ function createRecorder({
 
   let zoomState = createZoomState();
   let clicks = [];
+  // Double-click to zoom (zoom.js): on for this recording, and the click
+  // that might be the first of a double-click.
+  let doubleClickZoom = false;
+  let lastClick = null;
   let cursorTrack = [];
   // Recording additions (docs/EDITOR-V2.md section 7): shortcut presses,
   // pause ranges, the computer-sound file capture reports writing, and
@@ -99,9 +103,19 @@ function createRecorder({
           });
         }
         break;
-      case 'click':
-        clicks.push({ t, x: msg.x - sourceOriginX, y: msg.y - sourceOriginY, button: msg.button });
+      case 'click': {
+        const click = { t, x: msg.x - sourceOriginX, y: msg.y - sourceOriginY, button: msg.button };
+        clicks.push(click);
+        // Double-click to zoom in, double-click again to zoom out. The click
+        // after a double-click starts afresh, so three quick clicks are one.
+        if (zoomEnabled && doubleClickZoom && isDoubleClick(lastClick, click)) {
+          toggleZoom(zoomState, click);
+          lastClick = null;
+        } else {
+          lastClick = click;
+        }
         break;
+      }
       case 'cursor':
         cursorTrack.push({ t, x: msg.x - sourceOriginX, y: msg.y - sourceOriginY, shape: msg.shape });
         break;
@@ -239,6 +253,8 @@ function createRecorder({
     captureClock = null;
     zoomState = createZoomState();
     clicks = [];
+    doubleClickZoom = Boolean(opts.doubleClickZoom);
+    lastClick = null;
     cursorTrack = [];
     pending.length = 0;
     tapReenables = 0;
@@ -348,7 +364,7 @@ function createRecorder({
   // `discard` is the bar's Restart: the helpers are stopped the same way, but
   // the take is being thrown away, so no project is written and the caller
   // removes the folder. Resolves { dir, discarded: true }.
-  async function stop({ webcam = null, style = null, discard = false, autoZoom = false } = {}) {
+  async function stop({ webcam = null, style = null, discard = false } = {}) {
     // stop() can be reached from a stop button or a global hotkey, either of
     // which may fire with no recording ever started (source is still null).
     // Rather than throwing out of an async function, resolve to null: a
@@ -440,7 +456,7 @@ function createRecorder({
     // The folder is named by the moment recording started (main.js).
     const folderTime = Number(path.basename(dir));
     const createdAt = Number.isSafeInteger(folderTime) && folderTime > 1e12 ? folderTime : Date.now();
-    const v2 = toProjectV2(project, { createdAt, style, autoZoom });
+    const v2 = toProjectV2(project, { createdAt, style });
     saveProject(dir, v2 ?? project);
     writeCursorTrack(dir, cursorTrack);
     if (keysEnabled) writeKeys(dir, keys);

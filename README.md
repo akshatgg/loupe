@@ -39,9 +39,9 @@ the zoom key is Alt by default.
 ## What it does
 
 - **Record** the entire screen, one window, or part of one (drag a rectangle — e.g. a browser window without its toolbar).
-- **Zoom while recording:** hold a zoom key (⌥ by default; pick ⌃ ⌘ or ⇧ instead) or a mouse side button and scroll — up to zoom in, back to zoom out, up to 4×. The view follows your cursor smoothly.
+- **Zoom while recording:** hold a zoom key (⌥ by default; pick ⌃ ⌘ or ⇧ instead) or a mouse side button and scroll — up to zoom in, back to zoom out, up to 4×. The view follows your cursor smoothly. The shortcuts are shown, and can be changed, right on the first screen.
 - **See what's in shot:** while zoomed, a frame on your screen shows exactly what the video will show, and its zoom level. It is never recorded, and neither is the control bar.
-- **Zoom on your clicks:** a new recording is zoomed in wherever you clicked; keep the zooms, ask for fewer, or remove them, and switch any one off.
+- **Double-click to zoom:** no mouse side button? Double-click while recording to zoom in on that spot; it stays in until you double-click again. Switch it off on the first screen if you'd rather not.
 - **Edit:** split, trim, cut, reorder and freeze clips; copy, paste and duplicate anything; speed up or slow down any stretch (0.25×–8×, voices keep a natural pitch) and choose how it eases in and out; text with fonts and animation, arrows, boxes, and blurs that follow what they hide; music, voiceover and captions written on your computer.
 - **Edit by the words:** the transcript sits beside the preview. Pick words and delete them to cut the video, put them back, remove filler words, and shorten long pauses.
 - **One place for settings:** click anything on the timeline and its settings show on the right; click away and the video's own (Look, Cursor, Camera, Captions, Audio) come back. Select several things with ⌘-click, ⇧-click or a box, and move or delete them together.

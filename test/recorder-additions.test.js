@@ -273,25 +273,36 @@ test('the microphone chosen in Settings is passed to capture by name, only with 
   off.cleanup();
 });
 
-test('toProjectV2 with autoZoom zooms on the clicks and leaves the note; without it, neither', () => {
-  const { toProjectV2: v2 } = require('../src/main/recording-v2');
-  const recording = {
-    zoomKeyframes: [],
-    sources: { main: {
-      dir: '.', kind: 'display', id: '1', title: 'Display', width: 1920, height: 1080, originX: 0, originY: 0,
-      video: 'raw.mov', duration: 20, fps: 60, mic: false, systemAudio: null, webcam: null, cursor: 'cursor.bin', keys: null,
-      clicks: [{ t: 5, x: 10, y: 10, button: 'left' }, { t: 12, x: 500, y: 300, button: 'left' }], pauses: []
-    } }
-  };
-  const plain = v2(recording, { createdAt: 1 });
-  assert.strictEqual(plain.zooms.length, 0);
-  assert.strictEqual('autoZoomNote' in plain, false);
-  const zoomed = v2(recording, { createdAt: 1, autoZoom: true });
-  assert.strictEqual(zoomed.zooms.length, 2);
-  assert.ok(zoomed.zooms.every((z) => z.auto === true));
-  assert.strictEqual(zoomed.autoZoomNote, true);
-  // No clicks: no zooms and no note to answer.
-  const quiet = v2({ ...recording, sources: { main: { ...recording.sources.main, clicks: [] } } }, { createdAt: 1, autoZoom: true });
-  assert.strictEqual(quiet.zooms.length, 0);
-  assert.strictEqual('autoZoomNote' in quiet, false);
+test('double-click to zoom: a double-click zooms in and stays, a single click does nothing, the next double-click zooms out', async () => {
+  const h = harness();
+  await startAt(h, { doubleClickZoom: true });
+  const click = (clock, x = 300, y = 200) => h.deliver('inputtap', { type: 'click', clock, x, y, button: 'left' }, clock);
+  click(1002);
+  assert.strictEqual(h.rec.state().zoom, 1, 'one click: no zoom');
+  click(1002.25);
+  assert.strictEqual(h.rec.state().zoom, 2, 'double-click: zoomed in');
+  click(1004);
+  assert.strictEqual(h.rec.state().zoom, 2, 'a single click later: still zoomed in');
+  // A third quick click after a double-click is not another double-click.
+  click(1004.2, 600, 400);
+  click(1004.35, 600, 400);
+  assert.strictEqual(h.rec.state().zoom, 1, 'the next double-click zooms out');
+  h.deliver('capture', { type: 'stopped', duration: 6, now: 1006 }, 1006);
+  const { project } = await h.rec.stop();
+  assert.strictEqual(project.zooms.length, 1);
+  assert.ok(Math.abs(project.zooms[0].start - 2.25) < 1e-6 && Math.abs(project.zooms[0].end - 4.35) < 1e-6,
+    `the zoom in the video runs from one double-click to the next: ${project.zooms[0].start}..${project.zooms[0].end}`);
+  h.cleanup();
+});
+
+test('double-click to zoom off: double-clicks change nothing', async () => {
+  const h = harness();
+  await startAt(h, { doubleClickZoom: false });
+  h.deliver('inputtap', { type: 'click', clock: 1002, x: 300, y: 200, button: 'left' }, 1002);
+  h.deliver('inputtap', { type: 'click', clock: 1002.2, x: 300, y: 200, button: 'left' }, 1002.2);
+  assert.strictEqual(h.rec.state().zoom, 1);
+  h.deliver('capture', { type: 'stopped', duration: 3, now: 1003 }, 1003);
+  const { project } = await h.rec.stop();
+  assert.strictEqual(project.zooms.length, 0);
+  h.cleanup();
 });

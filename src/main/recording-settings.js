@@ -14,7 +14,7 @@ const { DEFAULT_SETTINGS } = require('./settings');
 //   countdown         countdown
 //   systemAudio       systemAudio
 //   recordKeys        showKeystrokes
-//   autoZoom          autoZoom              (zoom in on clicks afterwards)
+//   doubleClickZoom   doubleClickZoom       (double-click to zoom in and out)
 //   camera            recordCamera          (the bubble on or off)
 //   cameraDeviceId    camera.id             (camera: { id, label } | null)
 const isBoolean = (v) => typeof v === 'boolean';
@@ -25,7 +25,7 @@ const VALIDATORS = {
   countdown: isBoolean,
   systemAudio: isBoolean,
   recordKeys: isBoolean,
-  autoZoom: isBoolean,
+  doubleClickZoom: isBoolean,
   camera: isBoolean,
   cameraDeviceId: validDeviceId
 };
@@ -38,7 +38,7 @@ function recordingView(settings) {
     countdown: pick('countdown'),
     systemAudio: pick('systemAudio'),
     recordKeys: pick('showKeystrokes'),
-    autoZoom: pick('autoZoom'),
+    doubleClickZoom: pick('doubleClickZoom'),
     camera: pick('recordCamera'),
     cameraDeviceId: validDeviceId(id) ? id : null
   };
@@ -73,7 +73,7 @@ function toSettingsPatch(patch, settings) {
   if ('countdown' in patch) out.countdown = patch.countdown;
   if ('systemAudio' in patch) out.systemAudio = patch.systemAudio;
   if ('recordKeys' in patch) out.showKeystrokes = patch.recordKeys;
-  if ('autoZoom' in patch) out.autoZoom = patch.autoZoom;
+  if ('doubleClickZoom' in patch) out.doubleClickZoom = patch.doubleClickZoom;
   if ('camera' in patch) out.recordCamera = patch.camera;
   if ('cameraDeviceId' in patch) {
     const id = patch.cameraDeviceId;

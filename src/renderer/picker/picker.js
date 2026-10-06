@@ -266,21 +266,24 @@ recordButton.onclick = async () => {
 };
 
 // ---- zoom shortcuts ---------------------------------------------------------
-// Chosen in Settings > Recording. Here, only the header line that says which
-// to hold (src/renderer/shared/zoom-shortcuts.js writes it the same way in
-// both windows).
-function renderZoomHelp(triggers) {
-  const help = document.getElementById('zoomHelp');
-  const any = window.loupeZoomShortcuts.describe(help, Array.isArray(triggers) ? triggers : [], {
-    after: ' and scroll while recording: scroll up to zoom in, back down to zoom out.'
-  });
-  if (!any) help.textContent = 'Zoom is off — choose a zoom shortcut in Settings to turn it on.';
-}
-
-window.loupe.getSettings().then((s) => renderZoomHelp(s.zoomTriggers));
+// Chosen right here, as in Settings > Recording (the same fields, from
+// src/renderer/shared/zoom-shortcuts.js): click a box, then press the key or
+// mouse button to hold while scrolling.
+const zoomShortcuts = window.loupeZoomShortcuts.mount({
+  captureEls: [...document.querySelectorAll('.zoom .capture')],
+  clearEls: [...document.querySelectorAll('.zoom .clear')],
+  onRender: (triggers) => {
+    const help = document.getElementById('zoomHelp');
+    const any = window.loupeZoomShortcuts.describe(help, triggers, {
+      after: ' and scroll: up to zoom in, down to zoom out. The smoothest way to zoom.'
+    });
+    if (!any) help.textContent = 'No shortcut set. Click a box, then press the key or mouse button you want to hold while scrolling.';
+  },
+  onError: (err) => showBanner(`That shortcut couldn’t be saved: ${err.message}`)
+});
+window.loupe.getSettings().then((s) => zoomShortcuts.set(s.zoomTriggers));
 // Changed in the Settings window while this one is open.
-window.loupe.onSettingsChanged?.((s) => renderZoomHelp(s.zoomTriggers));
-document.getElementById('changeZoom').onclick = () => window.loupe.openSettings('recording');
+window.loupe.onSettingsChanged?.((s) => zoomShortcuts.set(s.zoomTriggers));
 
 document.getElementById('recordings').onclick = () => window.loupe.openLibrary();
 
@@ -310,11 +313,12 @@ importButton.onclick = async () => {
 };
 
 // ---- recording additions ------------------------------------------------------
-// Computer sound, the camera bubble, keyboard shortcuts and the countdown.
+// Computer sound, the camera bubble, keyboard shortcuts, double-click zoom
+// and the countdown.
 // Saved as soon as they change (main.js, recording-settings.js) and read by
 // main when recording starts, so nothing here has to be passed along.
 
-const recordingSwitches = ['systemAudio', 'recordKeys', 'autoZoom', 'countdown'];
+const recordingSwitches = ['systemAudio', 'recordKeys', 'doubleClickZoom', 'countdown'];
 const cameraSwitch = document.getElementById('camera');
 const cameraSelect = document.getElementById('cameraDevice');
 const cameraNote = document.getElementById('cameraNote');

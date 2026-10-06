@@ -16,18 +16,6 @@ export const CLUSTER_GAP = 2.5;
 export const LEAD_IN = 0.4;
 export const HOLD_AFTER = 1.2;
 export const MIN_SECONDS = 1;
-// The strength a new recording's zooms are made at (recording-v2.js).
-export const RECORDING_STRENGTH = 'moderate';
-
-// The zoom the on-screen "in shot" frame shows `sinceLastClick` seconds
-// after the latest click, while recording: the level the video will zoom to,
-// held until the video zooms back out; 1 when there is no zoom to show.
-// (The video also starts zooming a moment before the click; the frame can
-// only start at it.)
-export function liveClickZoom(sinceLastClick, strength = RECORDING_STRENGTH) {
-  return sinceLastClick >= 0 && sinceLastClick <= HOLD_AFTER ? LEVEL[strength] : 1;
-}
-
 // [{ start, end, level, clicks }] for one recording's clicks ([{ t }], any
 // order), kept clear of `taken` ([{ start, end }]: zooms made by hand).
 export function autoZoomRanges(clicks, duration, { strength = 'moderate', taken = [] } = {}) {

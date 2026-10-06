@@ -59,4 +59,35 @@ function applyScroll(state, { t, dy, x, y }) {
   return true;
 }
 
-module.exports = { createZoomState, applyScroll, ZOOM_MIN, ZOOM_MAX, SENSITIVITY };
+// ---- double-click to zoom
+// For anyone without a mouse side button to hold: a double-click zooms in on
+// that spot, and stays in until the next double-click zooms back out.
+const DOUBLE_CLICK_LEVEL = 2;
+// The usual double-click speed on macOS and Windows, and how far the second
+// click may land from the first (points).
+const DOUBLE_CLICK_SECONDS = 0.5;
+const DOUBLE_CLICK_DISTANCE = 8;
+
+// Whether `click` is the second click of a double-click after `prev`.
+function isDoubleClick(prev, click) {
+  if (!prev || prev.button !== 'left' || click.button !== 'left') return false;
+  const dt = click.t - prev.t;
+  return dt >= 0 && dt <= DOUBLE_CLICK_SECONDS &&
+    Math.hypot(click.x - prev.x, click.y - prev.y) <= DOUBLE_CLICK_DISTANCE;
+}
+
+// Zooms in to DOUBLE_CLICK_LEVEL at (x, y) -- or, zoomed in at all (by a
+// double-click or by scrolling), all the way out. A keyframe, like a scroll.
+function toggleZoom(state, { t, x, y }) {
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+  const next = state.target > ZOOM_MIN + 1e-3 ? ZOOM_MIN : DOUBLE_CLICK_LEVEL;
+  state.target = next;
+  state.lastCursor = { x, y };
+  state.keyframes.push({ t, zoom: next, cx: x, cy: y });
+  return true;
+}
+
+module.exports = {
+  createZoomState, applyScroll, isDoubleClick, toggleZoom,
+  ZOOM_MIN, ZOOM_MAX, SENSITIVITY, DOUBLE_CLICK_LEVEL, DOUBLE_CLICK_SECONDS, DOUBLE_CLICK_DISTANCE
+};

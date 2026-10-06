@@ -74,6 +74,43 @@ nav button[aria-selected="true"] { color: #8ab4f8; border-bottom-color: #8ab4f8;
 .toggle:has(input:checked) { background: #8ab4f8; color: #202124; }
 .toggle:has(input:focus-visible) { box-shadow: 0 0 0 2px #2a2b2e, 0 0 0 4px #8ab4f8; }
 
+/* Zoom while recording: the shortcuts, set right here, and double-click. */
+.zoom { margin: 12px 24px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.zoom-way { display: flex; flex-direction: column; gap: 9px; padding: 12px 14px;
+            background: #3c3d40; border-radius: 10px; min-width: 0; }
+.zoom-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.zoom h2 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 13px; font-weight: 600; }
+.zoom h2 svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6;
+               stroke-linecap: round; flex: none; }
+#zoomHelp, .dbl-help { margin: 0; color: #9aa0a6; font-size: 12px; line-height: 1.4; }
+.dbl-title { font-weight: 600; }
+.shortcuts { display: flex; gap: 8px; }
+.shortcut { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; }
+.capture { appearance: none; font: inherit; color: #e8eaed; background: #2a2b2e;
+           border: 1px solid rgba(255,255,255,.18); border-radius: 7px; padding: 6px 10px;
+           flex: 1; min-width: 0; text-align: left; cursor: pointer;
+           white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.capture:hover { border-color: rgba(255,255,255,.32); }
+.capture.empty { color: #9aa0a6; }
+.capture.capturing { color: #8ab4f8; border-color: #8ab4f8; box-shadow: 0 0 0 2px rgba(138,180,248,.3); }
+.capture.refused { color: #fbbf24; border-color: #fbbf24; }
+.clear { appearance: none; background: none; border: 0; color: #9aa0a6; font-size: 16px; line-height: 1;
+         padding: 2px 5px; cursor: pointer; border-radius: 4px; }
+.clear:hover { color: #e8eaed; background: rgba(255,255,255,.08); }
+.clear[hidden] { display: block !important; visibility: hidden; }
+/* Double-click: the whole box is the switch. */
+.dblclick { flex-direction: row; align-items: center; gap: 14px; cursor: pointer; position: relative; }
+.dblclick .zoom-text { flex: 1; }
+.dblclick input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.dblclick .switch { flex: none; width: 36px; height: 20px; border-radius: 10px; background: rgba(255,255,255,.22);
+                    position: relative; transition: background .15s; }
+.dblclick .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+                           border-radius: 50%; background: #e8eaed; transition: transform .15s; }
+.dblclick input:checked + .switch { background: #8ab4f8; }
+.dblclick input:checked + .switch::after { transform: translateX(16px); background: #202124; }
+.dblclick input:focus-visible + .switch { box-shadow: 0 0 0 2px #2a2b2e, 0 0 0 4px #8ab4f8; }
+@media (max-width: 760px) { .zoom { grid-template-columns: 1fr; } }
+
 footer { display: flex; align-items: center; gap: 14px; padding: 16px 24px 20px; }
 .hint { margin: 0; color: #9aa0a6; font-size: 12px; flex: 1; line-height: 1.35; }
 .ghost { appearance: none; border: 1px solid rgba(255,255,255,.22); font: inherit;

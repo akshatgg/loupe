@@ -203,7 +203,7 @@ test('with the camera chosen, arming opens the bubble, kept out of the capture',
 
 function fakeHelpers() {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'loupe-fakebin-'));
-  // inputtap reports a click whenever a test creates inputtap.click.
+  // inputtap reports the clicks a test writes to inputtap.click.
   fs.writeFileSync(path.join(bin, 'capture'), `#!/bin/sh
 trap 'echo "{\\"type\\":\\"stopped\\",\\"duration\\":1,\\"now\\":2}"; exit 0' TERM
 echo '{"type":"started","clock":1,"now":1}'
@@ -213,7 +213,7 @@ while true; do sleep 0.02; done
   fs.writeFileSync(path.join(bin, 'inputtap'), `#!/bin/sh
 trap 'exit 0' TERM
 while true; do
-  if [ -f "$0.click" ]; then rm -f "$0.click"; echo '{"type":"click","clock":5,"x":300,"y":200,"button":"left"}'; fi
+  if [ -f "$0.click" ]; then cat "$0.click"; rm -f "$0.click"; fi
   sleep 0.02
 done
 `);
@@ -250,7 +250,9 @@ async function withRecordingMain(settings, fn) {
   // also works while a test has setTimeout mocked.
   const captureRunning = async (n) => { while (captureArgs().length < n) await tick(); };
   try {
-    const click = () => fs.writeFileSync(path.join(bin, 'inputtap.click'), '');
+    // Left clicks at these capture-clock times (capture starts at 1).
+    const click = (...clocks) => fs.writeFileSync(path.join(bin, 'inputtap.click'),
+      clocks.map((clock) => `${JSON.stringify({ type: 'click', clock, x: 300, y: 200, button: 'left' })}\n`).join(''));
     await fn({ ...harness, recordings, captureArgs, captureRunning, click });
   } finally {
     await harness.ipcHandlers['record:stop']().catch(() => {});
@@ -371,27 +373,32 @@ async function waitForZoom(windows, test, what, ms = 3000) {
   }
 }
 
-test('with Zoom on clicks, a click while recording shows the frame at the zoom the video will have, and it goes a moment later', unix, () =>
-  withRecordingMain({ countdown: false, autoZoom: true }, async ({ ipcHandlers, windows, captureRunning, click }) => {
+test('a double-click while recording zooms the frame in and it stays; a single click does nothing; the next double-click zooms out', unix, () =>
+  withRecordingMain({ countdown: false, doubleClickZoom: true }, async ({ ipcHandlers, windows, captureRunning, click }) => {
     ipcHandlers['bar:arm']({}, SOURCE);
     await ipcHandlers['bar:start']();
     await captureRunning(1);
-    await sleepMs(150);
-    assert.ok(shownZoom(windows) < 1.02, 'no frame before any click');
-    click();
-    // It glides in, and settles at 2x: the level the video zooms to.
-    await waitForZoom(windows, (z) => z > 1.98, 'zoomed in to 2x after the click');
-    assert.ok(shownZoom(windows) <= 2.0001, `never past 2x: ${shownZoom(windows)}`);
-    // About 1.2 s after the click the video zooms back out, and so does the frame.
-    await waitForZoom(windows, (z) => z < 1.02, 'back out after the click', 2500);
+    click(5);
+    await sleepMs(500);
+    assert.ok(shownZoom(windows) < 1.02, `one click: no zoom (${shownZoom(windows)})`);
+    click(6, 6.25);
+    await waitForZoom(windows, (z) => z > 1.98, 'zoomed in to 2x after the double-click');
+    // It stays: no zooming out on its own.
+    await sleepMs(2000);
+    assert.ok(shownZoom(windows) > 1.98, `still zoomed in two seconds later: ${shownZoom(windows)}`);
+    click(9);
+    await sleepMs(400);
+    assert.ok(shownZoom(windows) > 1.98, `a single click leaves it zoomed in: ${shownZoom(windows)}`);
+    click(10, 10.2);
+    await waitForZoom(windows, (z) => z < 1.02, 'zoomed out after the next double-click');
   }));
 
-test('with Zoom on clicks off, a click while recording shows no frame', unix, () =>
-  withRecordingMain({ countdown: false, autoZoom: false }, async ({ ipcHandlers, windows, captureRunning, click }) => {
+test('with double-click to zoom off, a double-click shows no frame', unix, () =>
+  withRecordingMain({ countdown: false, doubleClickZoom: false }, async ({ ipcHandlers, windows, captureRunning, click }) => {
     ipcHandlers['bar:arm']({}, SOURCE);
     await ipcHandlers['bar:start']();
     await captureRunning(1);
-    click();
+    click(5, 5.2);
     await sleepMs(600);
     assert.ok(shownZoom(windows) < 1.02, `no zoom: ${shownZoom(windows)}`);
   }));

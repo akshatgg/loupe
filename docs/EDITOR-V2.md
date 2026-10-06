@@ -625,9 +625,14 @@ Design: `docs/superpowers/specs/2026-10-04-editor-redesign-design.md`.
   menu switches it off (`zooms[].disabled`, ignored by `solveCamera`).
 - `transcript-panel.js`: the transcript beside the preview (read-only).
 - `core/auto-zoom.js` + `applyAutoZooms` / `removeAutoZooms`: zooms made
-  from a recording's clicks (`zooms[].auto`), made by the recorder when the
-  `autoZoom` setting is on (`recording-v2.js`), remade from the Zoom menu;
-  `autoZoomNote` is the one-time note (`auto-zoom-note.js`).
+  from a recording's clicks (`zooms[].auto`), from the editor's Zoom menu;
+  `autoZoomNote` is the one-time note (`auto-zoom-note.js`) on projects made
+  by 2.1.3, whose recorder made them on its own.
+- While recording, `doubleClickZoom` (setting, on by default): a
+  double-click zooms in to 2x and the next zooms out (`main/zoom.js`
+  `isDoubleClick` / `toggleZoom`, detected in `recorder.js`), recorded as
+  zoom keyframes like the scroll gesture, so the frame on screen and the
+  video agree.
 - `core/clipboard.js`: `copyItems`, `pasteItems`, `moveItems` (copy / paste /
   duplicate, and dragging several selected things together).
 - `core/keyframes.js` `KEYFRAME_EASES`; `zooms[].ease` (`camera.js`

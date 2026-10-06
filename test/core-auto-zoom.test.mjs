@@ -111,13 +111,3 @@ test('the note counts in plain words', () => {
   assert.equal(noteText(1), 'Loupe added 1 zoom where you clicked.');
   assert.equal(noteText(6), 'Loupe added 6 zooms where you clicked.');
 });
-
-test('while recording, a click zooms the frame in at once, held until a moment after it', async () => {
-  const { liveClickZoom, RECORDING_STRENGTH } = await import('../src/core/auto-zoom.js');
-  assert.equal(RECORDING_STRENGTH, 'moderate');
-  assert.equal(liveClickZoom(0), 2, 'at the click: the level the video will zoom to');
-  assert.equal(liveClickZoom(HOLD_AFTER - 0.01), 2, 'still in just before the zoom ends');
-  assert.equal(liveClickZoom(HOLD_AFTER + 0.01), 1, 'out once the video zooms out');
-  assert.equal(liveClickZoom(Infinity), 1, 'no click yet');
-  assert.equal(liveClickZoom(-0.5), 1, 'a click from the future is no click');
-});

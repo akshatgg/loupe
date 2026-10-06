@@ -1,9 +1,9 @@
 'use strict';
 // ---- zoom shortcuts ---------------------------------------------------------
-// Shared by the Settings window, where the shortcuts are chosen (mount), and
-// the picker, whose header line says which to hold (describe): a plain script
-// (not a module) so the picker's classic script can use it too. Defines
-// window.loupeZoomShortcuts.
+// Shared by the Settings window and the picker, where the shortcuts are
+// chosen (mount) and the line above them says which to hold (describe): a
+// plain script (not a module) so the picker's classic script can use it too.
+// Defines window.loupeZoomShortcuts.
 //
 // Two slots, each set by clicking it and then pressing the button you want.
 // Saved in main (settings.js) and handed to bin/inputtap at record time.

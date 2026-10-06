@@ -152,3 +152,36 @@ test('a skipped non-finite-coordinate event does not corrupt lastCursor', () => 
   assert.strictEqual(result, false);
   assert.strictEqual(s.keyframes.length, 1);
 });
+
+// ---- double-click to zoom ------------------------------------------------------
+const { isDoubleClick, toggleZoom, DOUBLE_CLICK_LEVEL, DOUBLE_CLICK_SECONDS } = require('../src/main/zoom');
+const left = (t, x = 100, y = 100) => ({ t, x, y, button: 'left' });
+
+test('a double-click is two left clicks, quick and in the same place', () => {
+  assert.strictEqual(isDoubleClick(left(1), left(1.3)), true);
+  assert.strictEqual(isDoubleClick(left(1), left(1 + DOUBLE_CLICK_SECONDS + 0.05)), false, 'too slow');
+  assert.strictEqual(isDoubleClick(left(1), left(1.2, 140, 100)), false, 'moved too far');
+  assert.strictEqual(isDoubleClick(left(1), { ...left(1.2), button: 'right' }), false, 'right button');
+  assert.strictEqual(isDoubleClick(null, left(1)), false, 'one click');
+});
+
+test('a double-click zooms in on the spot, and the next zooms all the way out', () => {
+  const s = createZoomState();
+  assert.strictEqual(toggleZoom(s, { t: 2, x: 300, y: 200 }), true);
+  assert.strictEqual(s.target, DOUBLE_CLICK_LEVEL);
+  assert.strictEqual(DOUBLE_CLICK_LEVEL, 2);
+  assert.deepStrictEqual(s.keyframes.at(-1), { t: 2, zoom: 2, cx: 300, cy: 200 });
+  toggleZoom(s, { t: 6, x: 310, y: 210 });
+  assert.strictEqual(s.target, ZOOM_MIN);
+  assert.deepStrictEqual(s.keyframes.at(-1), { t: 6, zoom: 1, cx: 310, cy: 210 });
+});
+
+test('zoomed in by scrolling, a double-click zooms out; a bad position is ignored', () => {
+  const s = createZoomState();
+  applyScroll(s, { t: 1, dy: 60, x: 100, y: 100 });
+  assert.ok(s.target > 2);
+  toggleZoom(s, { t: 2, x: 100, y: 100 });
+  assert.strictEqual(s.target, ZOOM_MIN);
+  assert.strictEqual(toggleZoom(s, { t: 3, x: NaN, y: 100 }), false);
+  assert.strictEqual(s.target, ZOOM_MIN);
+});

@@ -91,26 +91,17 @@ function loadCore() {
 // -- over the new-project look. Returns null when the facts don't make a
 // project (a capture that never produced a frame); the caller then keeps the
 // v1 file, which the editor migrates.
-//
-// `autoZoom`: also zoom in where the person clicked (core/auto-zoom.js),
-// around the zooms they made themselves; the project then carries the note
-// the editor shows once ("Loupe added 6 zooms where you clicked").
-function toProjectV2(recording, { createdAt = null, style = null, autoZoom = false } = {}) {
+function toProjectV2(recording, { createdAt = null, style = null } = {}) {
   const P = loadCore();
   try {
     const main = recording.sources.main;
     const project = P.createProject({ main, createdAt, style: style ?? undefined });
     const zooms = P.zoomsFromKeyframes(recording.zoomKeyframes, main.duration);
-    let out = P.validateProject({ ...project, zooms });
-    if (autoZoom) {
-      const zoomed = P.applyAutoZooms(out, { strength: require('../core/auto-zoom.js').RECORDING_STRENGTH });
-      if (P.autoZoomCount(zoomed) > 0) out = P.validateProject(P.setAutoZoomNote(zoomed, true));
-    }
-    return out;
+    return P.validateProject({ ...project, zooms });
   } catch {
     // A preset saved by another version may not validate; the recording
     // matters more than its look.
-    if (style) return toProjectV2(recording, { createdAt, autoZoom });
+    if (style) return toProjectV2(recording, { createdAt });
     return null;
   }
 }

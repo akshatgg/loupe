@@ -447,10 +447,10 @@ async function run() {
     await shot(settingsWin, '12-settings-recording-capturing');
     await js(settingsWin, `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift', bubbles: true }))`);
     await waitFor('saved', () => readSettings().zoomTriggers[1] === 'shift');
-    // The picker has no fields of its own any more; its hint, open at the
-    // same time, names the new shortcut too.
-    assert.strictEqual(await js(picker, `return document.querySelectorAll('.capture, .clear').length`), 0);
+    // The picker, open at the same time, shows the new shortcut in its own
+    // fields and its line above them.
     await waitFor('the picker updated', () => js(picker, `return /^Hold ⌥ or ⇧ and scroll/.test(document.getElementById('zoomHelp').textContent)`));
+    assert.match(await js(picker, `return document.querySelector('.zoom .capture[data-slot="1"]').textContent`), /Shift/);
   });
 
   await check('Recording: devices, computer sound, keystrokes and presets', async () => {
@@ -536,7 +536,7 @@ async function run() {
   await check('the settings file stayed valid and complete', () => {
     const s = readSettings();
     for (const key of ['zoomTriggers', 'countdown', 'openAtLogin', 'microphone', 'camera', 'recordCamera', 'systemAudio',
-      'showKeystrokes', 'exportDefaults', 'checkForUpdates', 'saveCrashReports', 'presets', 'defaultPresetId']) {
+      'showKeystrokes', 'doubleClickZoom', 'exportDefaults', 'checkForUpdates', 'saveCrashReports', 'presets', 'defaultPresetId']) {
       assert.ok(key in s, key);
     }
     assert.ok(s.lastUpdateCheck > 0);
