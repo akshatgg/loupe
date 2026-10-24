@@ -96,4 +96,7 @@ itself) and the Developer ID / notarization secrets listed in
 
 ## License
 
-MIT
+[MIT](LICENSE) © Akshat Gupta
+
+You're free to use, modify, and redistribute Loupe, including commercially,
+as long as the copyright notice and license text are kept.
