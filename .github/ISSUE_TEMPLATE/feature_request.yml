@@ -1,0 +1,60 @@
+name: Feature request
+description: Suggest something Loupe should do
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Loupe is deliberately narrow: a screen recorder that zooms in while you
+        record, so demo and tutorial videos stay legible. Requests that widen
+        that scope get more scrutiny than ones that deepen it — that's not a no,
+        just a heads-up before you write a long proposal.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that Loupe doesn't let you do today?
+      placeholder: "When I record a long tutorial, the export takes too long to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like
+      description: Describe the behaviour you want, not the implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Workarounds or alternatives
+      description: How do you handle this now? What do other tools do?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Recording / capture
+        - Zoom and cursor tracking
+        - Camera or microphone
+        - Editor timeline
+        - Captions
+        - Text and visuals
+        - Audio editing
+        - Export
+        - Import
+        - App window / UI
+
+  - type: dropdown
+    id: contribute
+    attributes:
+      label: Would you be willing to implement this?
+      options:
+        - "Yes, happy to open a PR"
+        - "Maybe, with some guidance"
+        - "No, just suggesting"

@@ -1,0 +1,115 @@
+name: Bug report
+description: Something in Loupe broke or doesn't behave as documented
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The version and platform fields matter more than
+        they look — most Loupe bugs are one platform, one OS version, or one
+        capture backend at a time.
+
+        **Security issues:** please don't file them here. Email akshatg9636@gmail.com.
+
+  - type: input
+    id: version
+    attributes:
+      label: Loupe version
+      description: In the app menu, or the DMG / installer filename you used.
+      placeholder: "2.1.5"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - macOS — Apple Silicon
+        - macOS — Intel
+        - Windows 11 x64
+        - Windows 10 x64
+        - Other / not sure
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS version
+      placeholder: "macOS 14.5 / Windows 11 23H2"
+    validations:
+      required: true
+
+  - type: input
+    id: hardware
+    attributes:
+      label: Machine
+      description: Helps with capture and export issues in particular.
+      placeholder: "M2 MacBook Air, 16 GB"
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Loupe
+        2. Select a 1440p display
+        3. Record ~10s with the zoom gesture
+        4. Stop
+        5. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: If you can tell which part it's in.
+      multiple: true
+      options:
+        - Recording / capture
+        - Zoom and cursor tracking
+        - Camera or microphone
+        - Editor timeline
+        - Captions
+        - Text and visuals
+        - Audio editing
+        - Export
+        - Import
+        - App window / UI
+        - Install or update
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or error output
+      description: |
+        Console output is useful when you can get it. Start with
+        `npm run dev` from a source checkout to see logged errors, or paste any
+        dialog text verbatim.
+      render: shell
+
+  - type: textarea
+    id: media
+    attributes:
+      label: Screenshot or recording
+      description: Drag a file in here. A short clip usually explains the bug faster than words.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues and this isn't a duplicate
+          required: true
+        - label: This is not a security issue
+          required: true
