@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security issue
+    url: mailto:akshatg9636@gmail.com
+    about: Report vulnerabilities by email, not in a public issue.
+  - name: How to install Loupe
+    url: https://github.com/akshatgg/loupe#install
+    about: Permissions, Homebrew, and the unsigned-app warning are covered in the README.
+  - name: How to build and test
+    url: https://github.com/akshatgg/loupe/blob/master/CONTRIBUTING.md
+    about: Setup, native helpers, and the test suites.
